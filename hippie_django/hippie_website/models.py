@@ -37,7 +37,12 @@ class Isoform(models.Model):
 
     class Meta:
         db_table = "isoform"
-        unique_together = [("protein", "uniprot_id")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["protein", "uniprot_id"],
+                name="isoform_protein_uniprot_unique",
+            ),
+        ]
 
     def __str__(self):
         return self.uniprot_id
@@ -63,7 +68,12 @@ class ProteinUniProt(models.Model):
 
     class Meta:
         db_table = "protein2uniprot"
-        unique_together = [("protein", "uniprot_id")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["protein", "uniprot_id"],
+                name="protein_to_uniprot_unique",
+            ),
+        ]
 
     def __str__(self):
         return self.uniprot_id
@@ -84,7 +94,12 @@ class ProteinEntrez(models.Model):
 
     class Meta:
         db_table = "protein_entrez"
-        unique_together = [("protein", "gene_id")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["protein", "gene_id"],
+                name="protein_entrez_unique",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.gene_id})"
@@ -106,7 +121,12 @@ class UniProtAccession(models.Model):
 
     class Meta:
         db_table = "uniprot_accession2id"
-        unique_together = [("accession", "uniprot_id")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["accession", "uniprot_id"],
+                name="uniprot_accession_unique",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.accession} -> {self.uniprot_id}"
@@ -149,7 +169,12 @@ class ProteinTissue(models.Model):
 
     class Meta:
         db_table = "protein2tissue"
-        unique_together = [("protein", "tissue")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["protein", "tissue"],
+                name="protein_tissue_unique",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.protein.name} expressed in {self.tissue.name}"
@@ -250,7 +275,6 @@ class GOSlimTerm(models.Model):
     Primary key is the GO ID string (e.g. "GO:0008150").
     """
 
-    # TODO: Check
     class Namespace(models.TextChoices):
         BIOLOGICAL_PROCESS = "biological_process", "Biological Process"
         CELLULAR_COMPONENT = "cellular_component", "Cellular Component"
@@ -297,56 +321,6 @@ class MeSHTerm(models.Model):
     def __str__(self):
         return f"{self.number} {self.name[:60]}"
 
-
-# =============================================================================
-# Annotation junction tables
-# =============================================================================
-
-
-class InteractionGO(models.Model):
-    """
-    GO slim annotations on interactions (lowest common ancestor of
-    interacting proteins' GO terms).
-    """
-
-    interaction = models.ForeignKey(
-        "Interaction", on_delete=models.CASCADE, related_name="go_annotations"
-    )
-    term = models.ForeignKey(
-        GOSlimTerm,
-        on_delete=models.CASCADE,
-        related_name="annotated_interactions",
-    )
-
-    class Meta:
-        db_table = "interaction2GO"
-        unique_together = [("interaction", "term")]
-
-    def __str__(self):
-        return f"{self.interaction_id} is annotated as {self.term_id}"
-
-
-class InteractionMeSH(models.Model):
-    """
-    MeSH annotations on interactions.
-    """
-
-    interaction = models.ForeignKey(
-        "Interaction", on_delete=models.CASCADE, related_name="mesh_annotations"
-    )
-    term = models.ForeignKey(
-        MeSHTerm,
-        on_delete=models.CASCADE,
-        related_name="annotated_interactions",
-    )
-
-    class Meta:
-        db_table = "interaction2mesh"
-        unique_together = [("interaction", "term")]
-
-    def __str__(self):
-        return f"{self.interaction_id} is annotated as {self.term_id}"
-
 # =============================================================================
 # Core interaction
 # =============================================================================
@@ -365,6 +339,10 @@ class Interaction(models.Model):
     class EffectType(models.IntegerChoices):
         ACTIVATION = 1, "Activation"
         INHIBITION = -1, "Inhibition"
+
+    class EffectSource(models.IntegerChoices):
+        SURATANEE = 1, "Suratanee"
+        KEGG = 25, "KEGG"
 
     class DirectionType(models.IntegerChoices):
         FORWARD = 1, "protein_1 -> protein_2"
@@ -396,10 +374,8 @@ class Interaction(models.Model):
     effect_type = models.SmallIntegerField(
         choices=EffectType.choices, null=True, blank=True
     )
-    # TODO: Check
     effect_source = models.SmallIntegerField(
-        null=True,
-        blank=True,
+        choices=EffectSource.choices, null=True, blank=True,
         help_text="Source of effect prediction: 1=Suratanee, 25=KEGG",
     )
 
@@ -409,11 +385,17 @@ class Interaction(models.Model):
     experiments = models.ManyToManyField(
         ExperimentType, related_name="interactions", db_table="interaction2experiment"
     )
-    also_in_species = models.ManyToManyField(
-        Species, related_name="also_in_interactions", db_table="interaction2species"
+    conserved_species = models.ManyToManyField(
+        Species, related_name="conserved_interactions", db_table="interaction2species"
     )
     interaction_types = models.ManyToManyField(
         InteractionType, related_name="interactions", db_table="interaction2type"
+    )
+    go_terms = models.ManyToManyField(
+        GOSlimTerm, related_name="interactions", db_table="interaction2GO"
+    )
+    mesh_terms = models.ManyToManyField(
+        MeSHTerm, related_name="interactions", db_table="interaction2mesh"
     )
 
     class Meta:
@@ -459,7 +441,12 @@ class InteractionPublication(models.Model):
 
     class Meta:
         db_table = "interaction2pubmed"
-        unique_together = [("interaction", "pmid")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["interaction", "pmid"],
+                name="interaction_publication_unique",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.interaction_id} PMID:{self.pmid}"
@@ -469,13 +456,15 @@ class InteractionPublication(models.Model):
 # Cross-references
 # =============================================================================
 
+class HomoMINTLinkManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(source_id=6)
 
 class InteractionCrossReference(models.Model):
     """
     External database cross-references for interactions.
     Consolidates the old `interaction2link` and `interaction2homomint_link`
     tables (the latter was a byte-identical subset where source_id=6).
-    TODO: standardized view interaction2homomint_link
     """
 
     interaction = models.ForeignKey(
@@ -495,6 +484,10 @@ class InteractionCrossReference(models.Model):
         related_name="cross_references",
         null=True
     )
+
+
+    objects = models.Manager()          # default manager — all rows
+    homomint = HomoMINTLinkManager()    # filtered manager — source_id=6 only
 
     class Meta:
         db_table = "interaction2link"
@@ -545,13 +538,12 @@ class SignalingEndpoint(models.Model):
 
 class OrthologInteraction(models.Model):
     """
-    Cross-species ortholog interactions.  ~193,700 rows total,
-    consolidated from three identically-structured table pairs:
-      - homomint_interaction  (~18.4K, source='homomint')
-      - i2d_interaction       (~139.6K, source='i2d')
-      - ortho_interaction     (~35.7K, source='ortho')
+    Cross-species ortholog interactions.
+    Consolidated from three identically-structured table pairs:
+      - homomint_interaction
+      - i2d_interaction
+      - ortho_interaction
 
-    TODO: CHECK
     """
 
     class OrthologSource(models.TextChoices):
@@ -592,22 +584,25 @@ class OrthologInteraction(models.Model):
         return f"{self.protein_1.name}–{self.protein_2.name} ({self.source})"
 
 
-# Removed
-# aggregated_interactions: cashed join which can be easily recomputed
-# interaction_id_mapped : cached join
-# uniprot2interaction_amount: Cached count
-# bait_prey_assoc: Not used in application
-
 class BaitPreyAssociation(models.Model):
-    # TODO: direction with choices
+    class Directions(models.IntegerChoices):
+        PROTEIN_ONE_BAIT = 1, "Protein 1 Bait"
+        PROTEIN_TWO_BAIT = -1, "Protein 2 Bait"
+
     interaction = models.ForeignKey(
         Interaction, on_delete=models.CASCADE, related_name="bait_prey"
     )
     pmid = models.PositiveIntegerField(db_index=True)
     direction = models.SmallIntegerField(
+        choices=Directions.choices,
         help_text="1 = protein_1 is bait, -1 = protein_2 is bait"
     )
 
     class Meta:
         db_table = "bait_prey_assoc"
-        unique_together = [("interaction", "pmid", "direction")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["interaction", "pmid", "direction"],
+                name="bait_pray_unique",
+            ),
+        ]
