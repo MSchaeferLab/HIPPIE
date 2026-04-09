@@ -1,0 +1,123 @@
+{% extends "hippie_website/base.html" %}
+
+{% block title %}Protein — {{ symbol }}{% endblock %}
+
+{% block extra_styles %}
+  .protein-hero {
+    padding: 2rem 0 1.5rem;
+    border-bottom: 1px solid var(--hippie-border);
+    margin-bottom: 2rem;
+  }
+  .protein-hero h1 {
+    font-size: clamp(1.8rem, 4vw, 2.8rem);
+    margin-bottom: .4rem;
+  }
+  .id-grid {
+    display: flex;
+    gap: 2rem;
+    flex-wrap: wrap;
+    margin-top: .75rem;
+  }
+  .id-grid dt {
+    font-size: .7rem;
+    font-family: var(--font-mono);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--hippie-ink-muted);
+  }
+  .id-grid dd {
+    font-family: var(--font-mono);
+    font-size: .9rem;
+    margin: 0;
+  }
+  .stat-box {
+    background: var(--hippie-surface);
+    border: 1px solid var(--hippie-border);
+    border-radius: var(--radius-md);
+    padding: 1.25rem 1.5rem;
+    text-align: center;
+  }
+  .stat-box .stat-value {
+    font-family: var(--font-display);
+    font-size: 2.2rem;
+    line-height: 1;
+    color: var(--hippie-teal);
+  }
+  .stat-box .stat-label {
+    font-size: .78rem;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--hippie-ink-muted);
+    margin-top: .35rem;
+  }
+  .back-link { font-size: .85rem; margin-bottom: 1.25rem; display: inline-flex; align-items: center; gap: .35rem; }
+{% endblock %}
+
+{% block content %}
+<div>
+  <a href="javascript:history.back()" class="back-link text-muted-sm">
+    <i class="bi bi-arrow-left"></i> Back
+  </a>
+
+  {# ── Hero ── #}
+  <div class="protein-hero">
+    <p class="section-label" style="font-family: var(--font-mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--hippie-ink-muted);">
+      Protein Summary
+    </p>
+    <h1>{{ symbol }}</h1>
+    <div class="id-grid">
+      <dl>
+        <dt>UniProt ID</dt>
+        <dd>
+          {% if uniprot_id %}
+            <a href="https://www.uniprot.org/uniprot/{{ uniprot_id }}" target="_blank" rel="noopener">
+              {{ uniprot_id }}
+            </a>
+          {% else %}
+            —
+          {% endif %}
+        </dd>
+      </dl>
+      <dl>
+        <dt>Entrez Gene</dt>
+        <dd>
+          {% if gene_id %}
+            <a href="https://www.ncbi.nlm.nih.gov/gene/{{ gene_id }}" target="_blank" rel="noopener">
+              {{ gene_id }}
+            </a>
+          {% else %}
+            —
+          {% endif %}
+        </dd>
+      </dl>
+      <dl>
+        <dt>Internal ID</dt>
+        <dd>{{ protein.pk }}</dd>
+      </dl>
+    </div>
+  </div>
+
+  {# ── Stats ── #}
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="stat-box">
+        <div class="stat-value">{{ interaction_count }}</div>
+        <div class="stat-label">Known Interactions</div>
+      </div>
+    </div>
+  </div>
+
+  {# ── CTA: query this protein ── #}
+  <div class="hippie-card">
+    <p class="mb-2">View all interactions involving <strong>{{ symbol }}</strong>:</p>
+    <a
+      href="{% url 'hippie_website:index' %}?q={{ symbol }}"
+      class="btn btn-sm"
+      style="background: var(--hippie-teal); color: #fff; border-radius: var(--radius-sm); padding: .4rem 1rem; font-size: .875rem; text-decoration: none;"
+    >
+      <i class="bi bi-search me-1"></i>Query {{ symbol }}
+    </a>
+  </div>
+</div>
+{% endblock %}

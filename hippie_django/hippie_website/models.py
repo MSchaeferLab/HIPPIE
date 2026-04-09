@@ -1,4 +1,5 @@
 from django.db import models
+from .managers import InteractionManager, ProteinManager
 
 
 # =============================================================================
@@ -13,6 +14,8 @@ class Protein(models.Model):
     """
 
     name = models.CharField(max_length=30, unique=True)
+
+    objects = ProteinManager()
 
     class Meta:
         db_table = "protein"
@@ -397,6 +400,8 @@ class Interaction(models.Model):
     mesh_terms = models.ManyToManyField(
         MeSHTerm, related_name="interactions", db_table="interaction2mesh"
     )
+
+    objects = InteractionManager()
 
     class Meta:
         db_table = "interaction"

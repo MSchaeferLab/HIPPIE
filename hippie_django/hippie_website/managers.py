@@ -177,7 +177,7 @@ class InteractionQuerySet(models.QuerySet):
             "sources",
             "publications",
             "experiments",
-            "also_in_species",
+            "conserved_species",
             "interaction_types",
             "cross_references",
             "cross_references__source",
@@ -187,8 +187,8 @@ class InteractionQuerySet(models.QuerySet):
     def with_annotations(self) -> "InteractionQuerySet":
         """Prefetch GO and MeSH annotations (needed for functional filtering)."""
         return self.prefetch_related(
-            "go_annotations__term",
-            "mesh_annotations__term",
+            "go_terms",
+            "mesh_terms",
         )
 
     def with_full_detail(self) -> "InteractionQuerySet":

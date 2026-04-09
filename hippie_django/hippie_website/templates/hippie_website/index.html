@@ -1,0 +1,616 @@
+{% extends "hippie_website/base.html" %}
+
+{% block title %}Protein Query{% endblock %}
+{% block nav_query %}active{% endblock %}
+
+{% block extra_styles %}
+  /* =========================================================
+     Index-specific styles
+     ========================================================= */
+
+  /* Hero */
+  .hippie-hero {
+    padding: 3rem 0 2rem;
+    border-bottom: 1px solid var(--hippie-border);
+    margin-bottom: 2.5rem;
+  }
+  .hippie-hero h1 {
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    line-height: 1.1;
+    margin-bottom: .75rem;
+  }
+  .hippie-hero p {
+    font-size: 1rem;
+    color: var(--hippie-ink-muted);
+    max-width: 60ch;
+    margin-bottom: 0;
+  }
+
+  /* Search form */
+  .hippie-search-form .form-control {
+    border: 1.5px solid var(--hippie-border);
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+    background: var(--hippie-surface);
+    font-family: var(--font-mono);
+    font-size: .95rem;
+    padding: .65rem 1rem;
+    color: var(--hippie-ink);
+    box-shadow: none;
+    transition: border-color .15s;
+  }
+  .hippie-search-form .form-control:focus {
+    border-color: var(--hippie-teal);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(26,107,107,.12);
+  }
+  .hippie-search-form .form-control::placeholder {
+    color: var(--hippie-ink-muted);
+    font-family: var(--font-mono);
+  }
+  .hippie-search-form .btn-search {
+    background: var(--hippie-teal);
+    color: #fff;
+    border: none;
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    padding: .65rem 1.4rem;
+    font-weight: 600;
+    font-size: .9rem;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+  }
+  .hippie-search-form .btn-search:hover { background: #145555; }
+  .hippie-search-form .btn-search:active { transform: scale(.98); }
+  .hippie-search-form .btn-search:disabled {
+    background: var(--hippie-ink-muted);
+    cursor: not-allowed;
+  }
+
+  /* Example chips */
+  .example-chips span { cursor: pointer; transition: background .15s, color .15s; }
+  .example-chips span:hover {
+    background: var(--hippie-teal-soft);
+    color: var(--hippie-teal);
+    border-color: var(--hippie-teal);
+  }
+
+  /* Results section */
+  .results-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-bottom: 1rem;
+  }
+  .results-title {
+    font-family: var(--font-display);
+    font-size: 1.4rem;
+    margin-bottom: 0;
+  }
+
+  /* Table */
+  .hippie-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: .875rem;
+  }
+  .hippie-table thead th {
+    background: var(--hippie-bg);
+    border-bottom: 2px solid var(--hippie-border);
+    border-top: 1px solid var(--hippie-border);
+    padding: .6rem .85rem;
+    font-size: .75rem;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--hippie-ink-muted);
+    white-space: nowrap;
+    user-select: none;
+    cursor: pointer;
+  }
+  .hippie-table thead th:hover { color: var(--hippie-ink); }
+  .hippie-table thead th.sorted-asc::after  { content: ' ↑'; color: var(--hippie-teal); }
+  .hippie-table thead th.sorted-desc::after { content: ' ↓'; color: var(--hippie-teal); }
+
+  .hippie-table tbody tr {
+    border-bottom: 1px solid var(--hippie-border);
+    transition: background .1s;
+  }
+  .hippie-table tbody tr:hover { background: var(--hippie-bg); }
+  .hippie-table tbody td {
+    padding: .6rem .85rem;
+    vertical-align: middle;
+  }
+  .hippie-table tbody tr:last-child td { border-bottom: none; }
+
+  /* Pagination */
+  .hippie-pagination {
+    display: flex;
+    align-items: center;
+    gap: .25rem;
+    flex-wrap: wrap;
+  }
+  .hippie-pagination button {
+    border: 1px solid var(--hippie-border);
+    background: var(--hippie-surface);
+    color: var(--hippie-ink);
+    border-radius: var(--radius-sm);
+    padding: .25rem .6rem;
+    font-size: .8rem;
+    cursor: pointer;
+    transition: background .1s;
+    font-family: var(--font-mono);
+  }
+  .hippie-pagination button:hover:not(:disabled) { background: var(--hippie-bg); }
+  .hippie-pagination button.active {
+    background: var(--hippie-teal);
+    color: #fff;
+    border-color: var(--hippie-teal);
+  }
+  .hippie-pagination button:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Loading / Empty states */
+  .state-box {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--hippie-ink-muted);
+  }
+  .state-box .state-icon {
+    font-size: 2.5rem;
+    display: block;
+    margin-bottom: .75rem;
+    opacity: .4;
+  }
+
+  /* Export bar */
+  .export-bar {
+    display: flex;
+    gap: .5rem;
+    flex-wrap: wrap;
+  }
+  .export-bar button {
+    background: var(--hippie-surface);
+    border: 1px solid var(--hippie-border);
+    border-radius: var(--radius-sm);
+    color: var(--hippie-ink-muted);
+    font-size: .78rem;
+    font-family: var(--font-mono);
+    padding: .25rem .7rem;
+    cursor: pointer;
+    transition: background .12s, color .12s;
+  }
+  .export-bar button:hover {
+    background: var(--hippie-bg);
+    color: var(--hippie-ink);
+  }
+
+  /* Spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 28px; height: 28px;
+    border: 3px solid var(--hippie-border);
+    border-top-color: var(--hippie-teal);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: inline-block;
+  }
+{% endblock %}
+
+{% block content %}
+{# Pass the API URL into the page for React to use #}
+<script>
+  window.HIPPIE_CONFIG = {
+    apiUrl: "{% url 'hippie_website:protein_query_api' %}"
+  };
+</script>
+
+{# React mount point #}
+<div id="hippie-app"></div>
+{% endblock %}
+
+{% block scripts %}
+{% verbatim %}
+<script type="text/babel">
+const { useState, useCallback, useRef } = React;
+
+/* =========================================================
+   Constants
+   ========================================================= */
+const PAGE_SIZE = 25;
+const EXAMPLES = ["HTT", "P42858", "3064", "BRCA1_HUMAN"];
+
+/* =========================================================
+   Helpers
+   ========================================================= */
+function scoreClass(score) {
+  if (score >= 0.72) return "score-badge score-high";
+  if (score >= 0.63) return "score-badge score-med";
+  return "score-badge score-low";
+}
+
+function uniprotUrl(uid) {
+  return uid ? `https://www.uniprot.org/uniprot/${uid}` : null;
+}
+function entrezUrl(gid) {
+  return gid
+    ? `https://www.ncbi.nlm.nih.gov/gene/${gid}`
+    : null;
+}
+
+/* =========================================================
+   Sub-components
+   ========================================================= */
+
+function ScoreBadge({ score }) {
+  return (
+    <span className={scoreClass(score)}>{score.toFixed(4)}</span>
+  );
+}
+
+function ExternalLink({ href, children }) {
+  if (!href) return <span>{children}</span>;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  );
+}
+
+/* ── Copy / Export bar ── */
+function ExportBar({ data, queryProtein }) {
+  const handleCopy = useCallback(() => {
+    if (!data.length) return;
+    const header = "Partner Gene\tPartner UniProt\tPartner Entrez\tScore\tSources\tExperiments";
+    const rows = data.map(r =>
+      [
+        r.partner.symbol,
+        r.partner.uniprot_id,
+        r.partner.gene_id ?? "",
+        r.score,
+        r.source_count,
+        r.experiment_count,
+      ].join("\t")
+    );
+    navigator.clipboard.writeText([header, ...rows].join("\n"));
+  }, [data]);
+
+  const handleTSV = useCallback(() => {
+    if (!data.length) return;
+    const header = "Partner Gene\tPartner UniProt\tPartner Entrez\tScore\tSources\tExperiments";
+    const rows = data.map(r =>
+      [
+        r.partner.symbol,
+        r.partner.uniprot_id,
+        r.partner.gene_id ?? "",
+        r.score,
+        r.source_count,
+        r.experiment_count,
+      ].join("\t")
+    );
+    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/tab-separated-values" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `partnersOf_${queryProtein?.symbol ?? "protein"}.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [data, queryProtein]);
+
+  return (
+    <div className="export-bar">
+      <button onClick={handleCopy} title="Copy table as TSV">
+        <i className="bi bi-clipboard me-1"></i>Copy
+      </button>
+      <button onClick={handleTSV} title="Download as TSV file">
+        <i className="bi bi-download me-1"></i>Export TSV
+      </button>
+    </div>
+  );
+}
+
+/* ── Pagination ── */
+function Pagination({ page, totalPages, onChange }) {
+  if (totalPages <= 1) return null;
+
+  const pages = [];
+  const delta = 2;
+  const left  = Math.max(1, page - delta);
+  const right = Math.min(totalPages, page + delta);
+
+  if (left > 1) { pages.push(1); if (left > 2) pages.push("…"); }
+  for (let i = left; i <= right; i++) pages.push(i);
+  if (right < totalPages) { if (right < totalPages - 1) pages.push("…"); pages.push(totalPages); }
+
+  return (
+    <div className="hippie-pagination">
+      <button disabled={page === 1} onClick={() => onChange(page - 1)}>‹</button>
+      {pages.map((p, i) =>
+        p === "…"
+          ? <span key={`ellipsis-${i}`} style={{ padding: "0 .25rem", color: "var(--hippie-ink-muted)", fontSize: ".8rem" }}>…</span>
+          : <button key={p} className={p === page ? "active" : ""} onClick={() => onChange(p)}>{p}</button>
+      )}
+      <button disabled={page === totalPages} onClick={() => onChange(page + 1)}>›</button>
+    </div>
+  );
+}
+
+/* ── Results table ── */
+function ResultsTable({ interactions, queryProtein }) {
+  const [sortKey,  setSortKey]  = useState("score");
+  const [sortDir,  setSortDir]  = useState("desc");
+  const [page,     setPage]     = useState(1);
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir(key === "score" ? "desc" : "asc");
+    }
+    setPage(1);
+  };
+
+  // Sort
+  const sorted = [...interactions].sort((a, b) => {
+    let va, vb;
+    if (sortKey === "score")           { va = a.score;          vb = b.score; }
+    else if (sortKey === "symbol")     { va = a.partner.symbol; vb = b.partner.symbol; }
+    else if (sortKey === "sources")    { va = a.source_count;   vb = b.source_count; }
+    else if (sortKey === "experiments"){ va = a.experiment_count; vb = b.experiment_count; }
+    else                               { va = a.partner[sortKey] ?? ""; vb = b.partner[sortKey] ?? ""; }
+
+    if (typeof va === "string") return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+    return sortDir === "asc" ? va - vb : vb - va;
+  });
+
+  // Paginate
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const paginated  = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const thClass = (key) =>
+    sortKey === key ? (sortDir === "asc" ? "sorted-asc" : "sorted-desc") : "";
+
+  return (
+    <div>
+      {/* Header row */}
+      <div className="results-header">
+        <div>
+          <h2 className="results-title">
+            Interactions for <em>{queryProtein.symbol}</em>
+          </h2>
+          <span className="text-muted-sm">
+            {interactions.length.toLocaleString()} interaction{interactions.length !== 1 ? "s" : ""} found
+          </span>
+        </div>
+        <ExportBar data={sorted} queryProtein={queryProtein} />
+      </div>
+
+      {/* Table */}
+      <div className="hippie-card p-0 overflow-hidden">
+        <div style={{ overflowX: "auto" }}>
+          <table className="hippie-table">
+            <thead>
+              <tr>
+                <th onClick={() => handleSort("symbol")}    className={thClass("symbol")}>Gene Symbol</th>
+                <th onClick={() => handleSort("uniprot_id")} className={thClass("uniprot_id")}>UniProt ID</th>
+                <th onClick={() => handleSort("gene_id")}   className={thClass("gene_id")}>Entrez ID</th>
+                <th onClick={() => handleSort("score")}     className={thClass("score")}>Score</th>
+                <th onClick={() => handleSort("sources")}   className={thClass("sources")}>Sources</th>
+                <th onClick={() => handleSort("experiments")} className={thClass("experiments")}>Experiments</th>
+                <th style={{ cursor: "default" }}>Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginated.map(row => (
+                <tr key={row.id}>
+                  <td>
+                    <ExternalLink href={entrezUrl(row.partner.gene_id)}>
+                      <strong>{row.partner.symbol}</strong>
+                    </ExternalLink>
+                  </td>
+                  <td>
+                    <ExternalLink href={uniprotUrl(row.partner.uniprot_id)}>
+                      <span className="mono">{row.partner.uniprot_id || "—"}</span>
+                    </ExternalLink>
+                  </td>
+                  <td>
+                    <ExternalLink href={entrezUrl(row.partner.gene_id)}>
+                      <span className="mono">{row.partner.gene_id ?? "—"}</span>
+                    </ExternalLink>
+                  </td>
+                  <td>
+                    <ScoreBadge score={row.score} />
+                  </td>
+                  <td>
+                    <span className="tag-chip">{row.source_count}</span>
+                  </td>
+                  <td>
+                    <span className="tag-chip">{row.experiment_count}</span>
+                  </td>
+                  <td>
+                    <a href={row.detail_url}>
+                      <i className="bi bi-journal-text me-1"></i>View
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span className="text-muted-sm">
+            Page {page} of {totalPages} — showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} of {sorted.length}
+          </span>
+          <Pagination page={page} totalPages={totalPages} onChange={p => { setPage(p); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   Main App
+   ========================================================= */
+function App() {
+  const [query,       setQuery]       = useState("");
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState(null);
+  const [result,      setResult]      = useState(null);  // { query_protein, interactions }
+  const inputRef = useRef(null);
+
+  const handleSearch = useCallback(async (overrideQ) => {
+    const q = (overrideQ !== undefined ? overrideQ : query).trim();
+    if (!q) return;
+
+    setLoading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const url = `${window.HIPPIE_CONFIG.apiUrl}?q=${encodeURIComponent(q)}`;
+      const res  = await fetch(url);
+      const data = await res.json();
+
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setResult(data);
+      }
+    } catch (err) {
+      setError("Network error — could not reach the server.");
+    } finally {
+      setLoading(false);
+    }
+  }, [query]);
+
+  const handleExampleClick = (ex) => {
+    setQuery(ex);
+    handleSearch(ex);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") handleSearch();
+  };
+
+  return (
+    <div>
+      {/* ── Hero ── */}
+      <div className="hippie-hero">
+        <h1>
+          Query Protein<br />
+          <em style={{ color: "var(--hippie-teal)", fontStyle: "italic" }}>Interactions</em>
+        </h1>
+        <p>
+          Enter a UniProt ID, UniProt accession, Entrez gene ID, or gene symbol
+          to retrieve all known human protein–protein interactions and their
+          confidence scores.
+        </p>
+      </div>
+
+      {/* ── Search ── */}
+      <div className="hippie-card mb-4">
+        <div className="hippie-search-form d-flex mb-3">
+          <input
+            ref={inputRef}
+            type="text"
+            className="form-control"
+            placeholder="e.g. HTT, P42858, 3064, BRCA1_HUMAN …"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            autoFocus
+          />
+          <button
+            className="btn-search"
+            onClick={() => handleSearch()}
+            disabled={loading || !query.trim()}
+          >
+            {loading
+              ? <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2, verticalAlign: "middle" }}></span>
+              : <><i className="bi bi-search me-1"></i>Search</>
+            }
+          </button>
+        </div>
+
+        <div className="example-chips d-flex align-items-center gap-2 flex-wrap">
+          <span className="text-muted-sm" style={{ fontFamily: "var(--font-mono)" }}>Try:</span>
+          {EXAMPLES.map(ex => (
+            <span
+              key={ex}
+              className="tag-chip"
+              onClick={() => handleExampleClick(ex)}
+            >
+              {ex}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* ── States ── */}
+      {loading && (
+        <div className="state-box">
+          <span className="spinner d-block mx-auto mb-3"></span>
+          Resolving identifier and loading interactions…
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="hippie-card text-center" style={{ borderColor: "var(--hippie-accent)", color: "var(--hippie-accent)" }}>
+          <i className="bi bi-exclamation-circle fs-3 d-block mb-2"></i>
+          <strong>{error}</strong>
+          <p className="text-muted-sm mt-2 mb-0">
+            Check the identifier and try again. Supported formats: gene symbol, UniProt ID, UniProt accession, Entrez gene ID.
+          </p>
+        </div>
+      )}
+
+      {!loading && result && result.interactions.length === 0 && (
+        <div className="state-box">
+          <i className="bi bi-inbox state-icon"></i>
+          No interactions found for <strong>{result.query_protein?.symbol}</strong>.
+        </div>
+      )}
+
+      {!loading && result && result.interactions.length > 0 && (
+        <ResultsTable
+          interactions={result.interactions}
+          queryProtein={result.query_protein}
+        />
+      )}
+
+      {/* ── About anchor ── */}
+      {!result && !loading && (
+        <div id="about" className="mt-5">
+          <div className="hippie-card">
+            <h3 className="mb-3">About HIPPIE</h3>
+            <p className="mb-2">
+              HIPPIE (<strong>H</strong>uman <strong>I</strong>ntegrated <strong>P</strong>rotein–<strong>P</strong>rotein <strong>I</strong>nteraction r<strong>E</strong>ference)
+              is a resource providing confidence-scored, functionally annotated human
+              protein–protein interactions aggregated from multiple experimental databases.
+            </p>
+            <p className="mb-0 text-muted-sm">
+              Confidence scores range from 0 to 1 and are computed as a weighted sum of
+              experimental technique quality, number of supporting studies, and cross-species
+              conservation. Scores ≥ 0.72 are considered <em>high confidence</em>; ≥ 0.63 <em>medium confidence</em>.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   Mount
+   ========================================================= */
+const root = ReactDOM.createRoot(document.getElementById("hippie-app"));
+root.render(<App />);
+</script>
+{% endverbatim %}
+{% endblock %}

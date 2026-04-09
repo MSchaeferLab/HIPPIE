@@ -1,0 +1,274 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}HIPPIE{% endblock %} — Human Integrated Protein–Protein Interaction rEference</title>
+
+  {# Bootstrap 5 CSS #}
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+    crossorigin="anonymous"
+  />
+
+  {# Bootstrap Icons #}
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+    rel="stylesheet"
+  />
+
+  {# Google Fonts — DM Serif Display + DM Mono #}
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..400&display=swap"
+    rel="stylesheet"
+  />
+
+  <style>
+    /* =========================================================
+       Design tokens
+       ========================================================= */
+    :root {
+      --hippie-bg:          #f7f5f0;
+      --hippie-surface:     #ffffff;
+      --hippie-border:      #e2ddd6;
+      --hippie-ink:         #1a1612;
+      --hippie-ink-muted:   #6b6560;
+      --hippie-accent:      #c0392b;   /* deep biological red */
+      --hippie-accent-soft: #f9e8e6;
+      --hippie-teal:        #1a6b6b;
+      --hippie-teal-soft:   #e3f0f0;
+      --hippie-score-high:  #1a6b6b;
+      --hippie-score-med:   #b87c1a;
+      --hippie-score-low:   #c0392b;
+
+      --font-display: 'DM Serif Display', Georgia, serif;
+      --font-body:    'DM Sans', system-ui, sans-serif;
+      --font-mono:    'DM Mono', 'Courier New', monospace;
+
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 16px;
+      --shadow-card: 0 1px 3px rgba(26,22,18,.08), 0 4px 16px rgba(26,22,18,.06);
+    }
+
+    /* =========================================================
+       Base
+       ========================================================= */
+    html, body {
+      background: var(--hippie-bg);
+      color: var(--hippie-ink);
+      font-family: var(--font-body);
+      font-size: 15px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+      font-family: var(--font-display);
+      letter-spacing: -0.02em;
+    }
+
+    code, kbd, pre, .mono {
+      font-family: var(--font-mono);
+      font-size: .875em;
+    }
+
+    a {
+      color: var(--hippie-teal);
+      text-decoration: none;
+    }
+    a:hover { color: var(--hippie-accent); text-decoration: underline; }
+
+    /* =========================================================
+       Navbar
+       ========================================================= */
+    .hippie-nav {
+      background: var(--hippie-surface);
+      border-bottom: 1px solid var(--hippie-border);
+      padding: 0;
+    }
+
+    .hippie-nav .navbar-brand {
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      color: var(--hippie-ink);
+      letter-spacing: -0.03em;
+      padding: 1rem 0;
+    }
+
+    .hippie-nav .brand-accent {
+      color: var(--hippie-accent);
+    }
+
+    .hippie-nav .nav-link {
+      font-size: .875rem;
+      font-weight: 500;
+      color: var(--hippie-ink-muted);
+      padding: 1.1rem 1rem;
+      border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+    }
+    .hippie-nav .nav-link:hover,
+    .hippie-nav .nav-link.active {
+      color: var(--hippie-ink);
+      border-bottom-color: var(--hippie-accent);
+    }
+
+    .hippie-nav .nav-subtitle {
+      font-size: .7rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--hippie-ink-muted);
+      margin-left: .35rem;
+      font-family: var(--font-mono);
+    }
+
+    /* =========================================================
+       Main content area
+       ========================================================= */
+    .hippie-main {
+      min-height: calc(100vh - 130px);
+      padding: 2.5rem 0 4rem;
+    }
+
+    /* =========================================================
+       Cards
+       ========================================================= */
+    .hippie-card {
+      background: var(--hippie-surface);
+      border: 1px solid var(--hippie-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      padding: 2rem;
+    }
+
+    /* =========================================================
+       Score badge
+       ========================================================= */
+    .score-badge {
+      font-family: var(--font-mono);
+      font-size: .8rem;
+      font-weight: 500;
+      padding: .15rem .5rem;
+      border-radius: 100px;
+      display: inline-block;
+    }
+    .score-high { background: var(--hippie-teal-soft);  color: var(--hippie-score-high); }
+    .score-med  { background: #fef3e2;                  color: var(--hippie-score-med);  }
+    .score-low  { background: var(--hippie-accent-soft); color: var(--hippie-score-low);  }
+
+    /* =========================================================
+       Footer
+       ========================================================= */
+    .hippie-footer {
+      background: var(--hippie-surface);
+      border-top: 1px solid var(--hippie-border);
+      padding: 1.25rem 0;
+      font-size: .8rem;
+      color: var(--hippie-ink-muted);
+    }
+
+    /* =========================================================
+       Utilities
+       ========================================================= */
+    .text-muted-sm {
+      font-size: .8rem;
+      color: var(--hippie-ink-muted);
+    }
+    .tag-chip {
+      display: inline-block;
+      background: var(--hippie-bg);
+      border: 1px solid var(--hippie-border);
+      border-radius: 100px;
+      padding: .1rem .6rem;
+      font-size: .75rem;
+      font-family: var(--font-mono);
+      color: var(--hippie-ink-muted);
+    }
+
+    {% block extra_styles %}{% endblock %}
+  </style>
+</head>
+
+<body>
+
+  {# ===== Navigation ===== #}
+  <nav class="navbar navbar-expand-md hippie-nav sticky-top">
+    <div class="container">
+      <a class="navbar-brand" href="{% url 'hippie_website:index' %}">
+        HIPP<span class="brand-accent">I</span>E
+        <span class="nav-subtitle">v2.4</span>
+      </a>
+
+      <button
+        class="navbar-toggler border-0"
+        type="button"
+        data-bs-toggle="collapse"
+        data-bs-target="#mainNav"
+        aria-label="Toggle navigation"
+      >
+        <i class="bi bi-list fs-4"></i>
+      </button>
+
+      <div class="collapse navbar-collapse" id="mainNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link {% block nav_query %}{% endblock %}"
+               href="{% url 'hippie_website:index' %}">
+              Protein Query
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{% url 'hippie_website:index' %}#about">
+              About
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  {# ===== Main ===== #}
+  <main class="hippie-main">
+    <div class="container">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  {# ===== Footer ===== #}
+  <footer class="hippie-footer">
+    <div class="container d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span>
+        <strong>HIPPIE</strong> — Human Integrated Protein–Protein Interaction rEference
+      </span>
+      <span>
+        Cite:
+        <a href="https://doi.org/10.1093/nar/gkw985" target="_blank" rel="noopener">
+          Alanis-Lobato <em>et al.</em> NAR 2017
+        </a>
+      </span>
+    </div>
+  </footer>
+
+  {# ===== Bootstrap JS ===== #}
+  <script
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+    integrity="sha384-YvpcrYf0tY3lHB60NNkmXc4s9bIOgUxi8T/jzmqFJUFjqP2jy8e2T6sF9k8IzWk"
+    crossorigin="anonymous"
+  ></script>
+
+  {# ===== React CDN ===== #}
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  {# ===== Babel standalone (JSX transform) ===== #}
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>
