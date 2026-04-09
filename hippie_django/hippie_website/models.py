@@ -292,7 +292,7 @@ class GOSlimTerm(models.Model):
         db_table = "GO_slim_term"
         constraints = [
             models.CheckConstraint(
-                check=models.Q(namespace__in=[
+                condition=models.Q(namespace__in=[
                     "biological_process",
                     "cellular_component",
                     "molecular_function",
@@ -406,11 +406,11 @@ class Interaction(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(protein_1_id__lte=models.F("protein_2_id")),
+                condition=models.Q(protein_1_id__lte=models.F("protein_2_id")),
                 name="interaction_canonical_order",
             ),
             models.CheckConstraint(
-                check=models.Q(score__gte=0.0) & models.Q(score__lte=1.0),
+                condition=models.Q(score__gte=0.0) & models.Q(score__lte=1.0),
                 name="interaction_score_range",
             ),
             models.UniqueConstraint(
@@ -571,7 +571,7 @@ class OrthologInteraction(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(protein_1_id__lte=models.F("protein_2_id")),
+                condition=models.Q(protein_1_id__lte=models.F("protein_2_id")),
                 name="ortholog_interaction_canonical_order",
             ),
             models.UniqueConstraint(
