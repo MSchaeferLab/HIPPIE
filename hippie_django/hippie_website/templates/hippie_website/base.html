@@ -200,6 +200,17 @@
       font-family: var(--font-mono);
       color: var(--hippie-ink-muted);
     }
+    .example-chip {
+      cursor: pointer;
+      transition: background .15s,
+      color .15s,
+      border-color .15s;
+    }
+    .example-chip:hover {
+      background: var(--hippie-teal-soft);
+      color: var(--hippie-teal);
+      border-color: var(--hippie-teal);
+    }
 
     {% block extra_styles %}{% endblock %}
   </style>
@@ -245,6 +256,11 @@
          href="{% url 'hippie_website:index' %}">
         <i class="bi bi-search me-1"></i>Protein Query
       </a>
+      <a class="nav-link {% block nav_interaction_query %}{% endblock %}"
+         href="{% url 'hippie_website:interaction_query' %}">
+        <i class="bi bi-intersect me-1"></i>Interaction Query
+      </a>
+
       <a class="nav-link {% block nav_network_query %}{% endblock %}"
          href="{% url 'hippie_website:network_query' %}">
         <i class="bi bi-diagram-3 me-1"></i>Network Query
@@ -252,10 +268,6 @@
       <a class="nav-link {% block nav_browse %}{% endblock %}"
          href="{% url 'hippie_website:browse' %}">
         <i class="bi bi-table me-1"></i>Browse
-      </a>
-      <a class="nav-link {% block nav_screen_annotation %}{% endblock %}"
-         href="{% url 'hippie_website:screen_annotation' %}">
-        <i class="bi bi-layers me-1"></i>Screen Annotation
       </a>
     </nav>
   </div>
