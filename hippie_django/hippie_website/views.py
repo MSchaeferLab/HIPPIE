@@ -14,13 +14,17 @@ All database access goes through the custom managers defined in managers.py:
   - Interaction.objects.with_full_detail()    → full prefetch for detail page
 """
 
+import json
+
 from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET
+from django.views.generic.edit import FormView
 
-from .models import Interaction, Protein
+from .forms import NetworkQueryForm
+from .models import Interaction, Protein, Tissue
 
 
 # ---------------------------------------------------------------------------
@@ -175,28 +179,68 @@ _EFFECT_CHOICES = [
 ]
 
 
-@require_GET
-def network_query_view(request):
+class NetworkQueryView(FormView):
     """
-    Network query page.
+    GET  → render the blank NetworkQueryForm.
+    POST → validate, run the query, re-render with results.
 
-    Renders the filter form.  If any GET parameters are present, also calls
-    the network_query_api logic and passes results into the template context.
+    _run_network_query() is also called by the JSON API endpoint so the
+    query logic lives in one place.
     """
-    context = {
-        "directionality_choices": _DIRECTIONALITY_CHOICES,
-        "effect_choices":         _EFFECT_CHOICES,
-        "tissue_list":            _get_tissue_list(),
-        "selected_effects":       request.GET.getlist("effect_type"),
-        "selected_tissues":       request.GET.getlist("tissues"),
-        "network_result":         None,
-    }
 
-    # If the user submitted the form, run the (stub) query and attach results
-    if request.GET.get("proteins"):
-        context["network_result"] = _run_network_query(request.GET)
+    template_name = "hippie_website/network_query.html"
+    form_class    = NetworkQueryForm
 
-    return render(request, "hippie_website/network_query.html", context)
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx.setdefault("network_result", None)
+        return ctx
+
+    def form_valid(self, form):
+        cd = form.cleaned_data
+
+        # Merge textarea + uploaded file into one newline-separated string
+        raw_proteins = cd.get("proteins", "") or ""
+        uploaded = cd.get("proteins_file")
+        if uploaded:
+            raw_proteins += "\n" + uploaded.read().decode("utf-8", errors="replace")
+
+        # layer_0-only → between_proteins (both partners must be seeds).
+        # layer_1 (or neither box checked) → for_proteins (all edges touching seeds).
+        layer_0 = cd.get("layer_0", False)
+        layer_1 = cd.get("layer_1", False)
+        expand = "none" if (layer_0 and not layer_1) else "first_shell"
+
+        params = {
+            "proteins":      raw_proteins,
+            "expand":        expand,
+            "score_min":     cd.get("score_min") or 0.0,
+            "directionality": {
+                "none":         "any",
+                "kegg":         "directed",
+                "unweighted_sp":"any",
+                "weighted_sp":  "any",
+            }.get(cd.get("direction", "none"), "any"),
+            "effect_type": {
+                "predicted": ["activation", "inhibition"],
+                "kegg":      ["activation", "inhibition"],
+            }.get(cd.get("effect", "none"), []),
+            "tissues":   [cd["tissue"].name] if cd.get("tissue") else [],
+            "go_terms":  cd.get("go_terms",  ""),
+            "mesh_terms":cd.get("mesh_terms", ""),
+        }
+        result = _run_network_query(params)
+        output_type = cd.get("output_type", "browser_vis")
+        return self.render_to_response(self.get_context_data(
+            form=form,
+            network_result=result,
+            output_type=output_type,
+            cy_edges_json=json.dumps(result["interactions"]) if output_type == "browser_vis" else "[]",
+            cy_seeds_json=json.dumps(result.get("seed_proteins", [])) if output_type == "browser_vis" else "[]",
+        ))
+
+
+network_query_view = NetworkQueryView.as_view()
 
 
 @require_GET
@@ -221,57 +265,165 @@ def network_query_api(request):
 
 
 def _get_tissue_list():
-    """Return a sorted list of tissue names for the filter form.
-
-    TODO: replace with a real DB query once the tissue model is wired up.
-    """
-    return [
-        "Brain", "Heart", "Kidney", "Liver", "Lung",
-        "Muscle", "Ovary", "Pancreas", "Prostate", "Skin",
-        "Testis", "Thyroid",
-    ]
+    """Return all Tissue names, sorted, for the filter form checkboxes."""
+    return list(Tissue.objects.values_list("name", flat=True).order_by("name"))
 
 
 def _run_network_query(params) -> dict:
     """
-    Stub that returns the correct response shape.
+    Execute the network query from GET parameters.
 
-    Replace the body of this function with real query logic once the
-    network query requirements are finalised.
-
-    Expected params (from GET or POST):
-        proteins        — newline-separated list of identifiers
+    params keys:
+        proteins        — newline-separated identifiers (gene symbols, UniProt, Entrez)
         expand          — "none" | "first_shell" | "second_shell"
         score_min       — float 0–1
         directionality  — "any" | "directed" | "undirected"
-        effect_type     — list of effect type strings
-        tissue_mode     — "any" | "both" | "one"
+        effect_type     — list of "activation" | "inhibition"
+        tissue_mode     — "any" | "both" | "one"  (unused: we always require both)
         tissues         — list of tissue names
-        go_terms        — comma-separated GO term IDs
-        mesh_terms      — comma-separated MeSH term names
+        go_terms        — comma-separated GO IDs
+        mesh_terms      — comma-separated MeSH numbers
     """
-    # Parse seed proteins
+    # -- 1. Resolve seed proteins -----------------------------------------
     raw = params.get("proteins", "")
-    seeds = [s.strip() for s in raw.splitlines() if s.strip()]
-
+    # Accept newline- or space-separated identifiers from both the textarea
+    # and the GET query string
+    seeds = raw.split() if raw else []
     if not seeds:
         return {
-            "node_count":   0,
-            "edge_count":   0,
-            "interactions": [],
-            "tsv_url":      "",
-            "sif_url":      "",
-            "error":        "No seed proteins provided.",
+            "node_count": 0, "edge_count": 0,
+            "interactions": [], "error": "No seed proteins provided.",
         }
 
-    # ── Stub response — replace with real logic ──────────────
+    protein_ids: list[int] = []
+    unresolved: list[str] = []
+    seen: set[int] = set()
+    for ident in seeds:
+        pk = (
+            Protein.objects.resolve(ident)
+            .values_list("pk", flat=True)
+            .first()
+        )
+        if pk is not None and pk not in seen:
+            protein_ids.append(pk)
+            seen.add(pk)
+        elif pk is None:
+            unresolved.append(ident)
+
+    if not protein_ids:
+        return {
+            "node_count": 0, "edge_count": 0,
+            "interactions": [],
+            "error": f"None of the identifiers could be resolved: {', '.join(unresolved)}",
+        }
+
+    # -- 2. Expansion (layer) ---------------------------------------------
+    expand = params.get("expand", "none")
+    layer = 0 if expand == "none" else 1   # second_shell treated as layer 1 for now
+
+    # -- 3. Score ---------------------------------------------------------
+    try:
+        score_min = float(params.get("score_min", 0))
+    except (TypeError, ValueError):
+        score_min = 0.0
+
+    # -- 4. Tissue filter -------------------------------------------------
+    # params may be a QueryDict (from the API) or a plain dict (from form_valid)
+    if hasattr(params, "getlist"):
+        tissue_names = params.getlist("tissues")
+    else:
+        tissue_names = params.get("tissues") or []
+    tissue_ids: list[int] | None = None
+    if tissue_names:
+        tissue_ids = list(
+            Tissue.objects.filter(name__in=tissue_names).values_list("pk", flat=True)
+        )
+
+    # -- 5. Core queryset -------------------------------------------------
+    qs = Interaction.objects.network_query(
+        protein_ids,
+        layer=layer,
+        score_threshold=score_min,
+        tissue_ids=tissue_ids,
+    ).prefetch_related(
+        "sources",
+        "experiments",
+        "protein_1__uniprot_ids",
+        "protein_1__entrez_ids",
+        "protein_2__uniprot_ids",
+        "protein_2__entrez_ids",
+    )
+
+    # -- 6. Directionality filter -----------------------------------------
+    directionality = params.get("directionality", "any")
+    if directionality == "directed":
+        qs = qs.exclude(kegg_direction__isnull=True)
+    elif directionality == "undirected":
+        qs = qs.filter(kegg_direction__isnull=True)
+
+    # -- 7. Effect type filter --------------------------------------------
+    if hasattr(params, "getlist"):
+        effect_types = params.getlist("effect_type")
+    else:
+        effect_types = params.get("effect_type") or []
+    if effect_types:
+        effect_q = Q()
+        if "activation" in effect_types:
+            effect_q |= Q(effect_type=Interaction.EffectType.ACTIVATION)
+        if "inhibition" in effect_types:
+            effect_q |= Q(effect_type=Interaction.EffectType.INHIBITION)
+        qs = qs.filter(effect_q)
+
+    # -- 8. GO / MeSH annotation filters ----------------------------------
+    go_raw = params.get("go_terms", "")
+    go_ids = [v.strip() for v in go_raw.split(",") if v.strip()]
+    if go_ids:
+        qs = qs.filter(go_terms__id__in=go_ids).distinct()
+
+    mesh_raw = params.get("mesh_terms", "")
+    mesh_ids = [v.strip() for v in mesh_raw.split(",") if v.strip()]
+    if mesh_ids:
+        qs = qs.filter(mesh_terms__number__in=mesh_ids).distinct()
+
+    # -- 9. Serialise -----------------------------------------------------
+    interactions = []
+    node_ids: set[int] = set()
+    for ix in qs:
+        node_ids.add(ix.protein_1_id)
+        node_ids.add(ix.protein_2_id)
+        p1_uniprot = ix.protein_1.uniprot_ids.all().first()
+        p1_entrez  = ix.protein_1.entrez_ids.all().first()
+        p2_uniprot = ix.protein_2.uniprot_ids.all().first()
+        p2_entrez  = ix.protein_2.entrez_ids.all().first()
+        interactions.append({
+            "interaction_id":   ix.pk,
+            "protein_a":        ix.protein_1.name,
+            "uniprot_a":        p1_uniprot.uniprot_id if p1_uniprot else "",
+            "entrez_a":         p1_entrez.gene_id     if p1_entrez  else "",
+            "gene_name_a":      p1_entrez.name        if p1_entrez  else ix.protein_1.name,
+            "protein_b":        ix.protein_2.name,
+            "uniprot_b":        p2_uniprot.uniprot_id if p2_uniprot else "",
+            "entrez_b":         p2_entrez.gene_id     if p2_entrez  else "",
+            "gene_name_b":      p2_entrez.name        if p2_entrez  else ix.protein_2.name,
+            "score":            round(ix.score, 4),
+            "source_count":     ix.sources.all().count(),
+            "experiment_count": ix.experiments.all().count(),
+            "uploaded_interaction": ix.protein_1_id in seen and ix.protein_2_id in seen,
+            "kegg_direction":   ix.kegg_direction,
+            "effect_type":      ix.effect_type,
+        })
+
+    seed_names = set(
+        Protein.objects.filter(pk__in=protein_ids).values_list("name", flat=True)
+    )
+
     return {
-        "node_count":   0,
-        "edge_count":   0,
-        "interactions": [],   # list of dicts: { interaction_id, protein_a, protein_b, score, source_count, experiment_count }
-        "tsv_url":      "",   # URL to a generated TSV download
-        "sif_url":      "",   # URL to a generated SIF download
-        "error":        None,
+        "node_count":    len(node_ids),
+        "edge_count":    len(interactions),
+        "interactions":  interactions,
+        "seed_proteins": list(seed_names),
+        "unresolved":    unresolved,
+        "error":         None,
     }
 
 
@@ -396,3 +548,5 @@ def protein_detail_view(request, pk: int):
         "interaction_count": interaction_count,
     }
     return render(request, "hippie_website/protein_detail.html", context)
+
+

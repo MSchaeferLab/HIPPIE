@@ -2,20 +2,17 @@
 {% block title %}Network Query{% endblock %}
 {% block nav_network_query %}active{% endblock %}
 
-{# No React needed on this page #}
-{% block react_cdn %}{% endblock %}
-
 {% block extra_styles %}
   /* ── Sidebar form layout ────────────────────────── */
   .nq-sidebar {
-    width: 280px;
+    width: 300px;
     flex-shrink: 0;
   }
   @media (max-width: 768px) {
     .nq-sidebar { width: 100%; }
   }
 
-  /* ── Form section headers ───────────────────────── */
+  /* ── Form section labels ────────────────────────── */
   .form-section-label {
     font-size: .68rem;
     font-weight: 700;
@@ -28,7 +25,7 @@
     font-family: var(--font-mono);
   }
 
-  /* ── Tighten up Bootstrap form controls in the sidebar ── */
+  /* ── Tighten Bootstrap controls in sidebar ──────── */
   .nq-sidebar .form-control,
   .nq-sidebar .form-select {
     font-size: .85rem;
@@ -37,11 +34,23 @@
   .nq-sidebar .form-label {
     font-size: .82rem;
     margin-bottom: .25rem;
-    color: var(--hippie-ink-muted);
+    color: var(--hippie-ink);
+    font-weight: 500;
   }
   .nq-sidebar .form-check-label { font-size: .82rem; }
-  .nq-sidebar .form-text { font-size: .75rem; }
-  .nq-sidebar textarea.form-control { font-family: var(--font-mono); font-size: .8rem; }
+  .nq-sidebar .form-text        { font-size: .75rem; }
+  .nq-sidebar textarea.form-control {
+    font-family: var(--font-mono);
+    font-size: .8rem;
+  }
+  .nq-sidebar .form-check { margin-bottom: .2rem; }
+
+  /* ── Score range ────────────────────────────────── */
+  .score-display {
+    font-family: var(--font-mono);
+    font-size: .8rem;
+    color: var(--hippie-ink-muted);
+  }
 
   /* ── Submit button ──────────────────────────────── */
   .btn-nq-submit {
@@ -66,140 +75,283 @@
     text-align: center;
     color: var(--hippie-ink-muted);
   }
-  .nq-results-placeholder i { font-size: 2.5rem; opacity: .3; display: block; margin-bottom: .75rem; }
+  .nq-results-placeholder i {
+    font-size: 2.5rem;
+    opacity: .3;
+    display: block;
+    margin-bottom: .75rem;
+  }
 {% endblock %}
 
 {% block content %}
 
-{# ── Page heading ───────────────────────────────────── #}
+{# ── Page heading ───────────────────────────────────────────────────── #}
 <div class="mb-4">
   <h2 style="font-family:var(--font-display);">Network Query</h2>
   <p class="text-muted-sm mb-0">
-    Define a set of seed proteins and filter parameters to extract a confidence-scored
-    interaction sub-network from HIPPIE.
+    Define a set of seed proteins and filter parameters to extract a
+    confidence-scored interaction sub-network from HIPPIE.
   </p>
 </div>
 
-{# ── Two-column layout: sidebar form + results area ── #}
+{# ── Two-column layout ──────────────────────────────────────────────── #}
 <div class="d-flex gap-4 align-items-start flex-wrap flex-md-nowrap">
 
-  {#   ════════════════════════════════════════════════ #}
-  {#   LEFT: filter sidebar                             #}
-  {#   ════════════════════════════════════════════════ #}
   <aside class="nq-sidebar">
-    <form method="GET" action="{% url 'hippie_website:network_query' %}">
+    <form method="post" enctype="multipart/form-data"
+          action="{% url 'hippie_website:network_query' %}">
+      {% csrf_token %}
+
+      {# Global form errors #}
+      {% if form.non_field_errors %}
+        <div class="alert alert-danger py-2 mb-3 rounded-3" style="font-size:.82rem;">
+          {% for e in form.non_field_errors %}{{ e }}{% endfor %}
+        </div>
+      {% endif %}
 
       {# ── 1. Seed proteins ── #}
       <div class="hippie-card p-3 mb-3">
         <div class="form-section-label">Seed Proteins</div>
 
-        <div class="mb-3">
-          <label class="form-label" for="id_proteins">Gene symbols / identifiers</label>
-          <textarea class="form-control" id="id_proteins" name="proteins" rows="5"
-                    placeholder="One per line, e.g.&#10;HTT&#10;BRCA1&#10;TP53">{{ request.GET.proteins }}</textarea>
+        <div class="mb-2">
+          <label class="form-label" for="{{ form.proteins.id_for_label }}">
+            Gene symbols / identifiers
+          </label>
+          <textarea
+            class="form-control{% if form.proteins.errors %} is-invalid{% endif %}"
+            id="{{ form.proteins.id_for_label }}"
+            name="{{ form.proteins.html_name }}"
+            rows="5"
+            placeholder="One per line, e.g.&#10;HTT&#10;BRCA1&#10;TP53"
+          >{{ form.proteins.value|default:'' }}</textarea>
+          {% if form.proteins.errors %}
+            <div class="invalid-feedback">{{ form.proteins.errors.0 }}</div>
+          {% endif %}
           <div class="form-text">UniProt IDs, accessions, Entrez IDs, or gene symbols.</div>
         </div>
 
         <div class="mb-0">
-          <label class="form-label" for="id_expand">Network expansion</label>
-          <select class="form-select" id="id_expand" name="expand">
-            <option value="none"        {% if request.GET.expand == "none"        %}selected{% endif %}>Seeds only</option>
-            <option value="first_shell" {% if request.GET.expand == "first_shell" %}selected{% endif %}>First-order neighbours</option>
-            <option value="second_shell"{% if request.GET.expand == "second_shell"%}selected{% endif %}>Second-order neighbours</option>
-          </select>
+          <label class="form-label" for="{{ form.proteins_file.id_for_label }}">
+            {{ form.proteins_file.label }}
+          </label>
+          <input type="file"
+                 class="form-control form-control-sm"
+                 id="{{ form.proteins_file.id_for_label }}"
+                 name="{{ form.proteins_file.html_name }}"
+                 accept=".txt,.tsv,.csv" />
         </div>
       </div>
 
-      {# ── 2. Score threshold ── #}
+      {# ── 2. Output & layers ── #}
+      <div class="hippie-card p-3 mb-3">
+        <div class="form-section-label">Output</div>
+
+        <div class="mb-3">
+          <label class="form-label" for="{{ form.output_type.id_for_label }}">
+            {{ form.output_type.label }}
+          </label>
+          <select class="form-select"
+                  id="{{ form.output_type.id_for_label }}"
+                  name="{{ form.output_type.html_name }}">
+            {% for val, label in form.output_type.field.choices %}
+              <option value="{{ val }}"
+                {% if form.output_type.value == val %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <p class="form-label mb-1">Network layers</p>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox"
+                   id="{{ form.layer_0.id_for_label }}"
+                   name="{{ form.layer_0.html_name }}"
+                   {% if form.layer_0.value %}checked{% endif %} />
+            <label class="form-check-label" for="{{ form.layer_0.id_for_label }}">
+              Layer 0 — within input set
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox"
+                   id="{{ form.layer_1.id_for_label }}"
+                   name="{{ form.layer_1.html_name }}"
+                   {% if form.layer_1.value %}checked{% endif %} />
+            <label class="form-check-label" for="{{ form.layer_1.id_for_label }}">
+              Layer 1 — set vs. HIPPIE
+            </label>
+          </div>
+        </div>
+
+        <div class="mb-0">
+          <label class="form-label" for="{{ form.min_ppi.id_for_label }}">
+            {{ form.min_ppi.label }}
+          </label>
+          <input type="number" class="form-control" min="1"
+                 id="{{ form.min_ppi.id_for_label }}"
+                 name="{{ form.min_ppi.html_name }}"
+                 value="{{ form.min_ppi.value|default:1 }}" />
+        </div>
+      </div>
+
+      {# ── 3. Confidence score ── #}
       <div class="hippie-card p-3 mb-3">
         <div class="form-section-label">Confidence Score</div>
 
         <div class="mb-2">
-          <label class="form-label" for="id_score_min">
+          <label class="form-label d-flex justify-content-between"
+                 for="{{ form.score_min.id_for_label }}">
             Minimum score
-            <span class="mono ms-1">≥ {{ request.GET.score_min|default:"0.00" }}</span>
+            <span class="score-display" id="score-display">
+              ≥ {{ form.score_min.value|default:'0.00'|floatformat:2 }}
+            </span>
           </label>
-          <input type="range" class="form-range" id="id_score_min" name="score_min"
+          <input type="range" class="form-range"
+                 id="{{ form.score_min.id_for_label }}"
+                 name="{{ form.score_min.html_name }}"
                  min="0" max="1" step="0.01"
-                 value="{{ request.GET.score_min|default:'0.00' }}"
-                 oninput="this.previousElementSibling.querySelector('.mono').textContent = '≥ ' + parseFloat(this.value).toFixed(2)" />
+                 value="{{ form.score_min.value|default:'0.00' }}"
+                 oninput="document.getElementById('score-display').textContent = '≥ ' + parseFloat(this.value).toFixed(2);
+                          document.getElementById('{{ form.score_preset.id_for_label }}').value = '';" />
+          {# Hidden preset field — JS preset buttons write here #}
+          <input type="hidden"
+                 id="{{ form.score_preset.id_for_label }}"
+                 name="{{ form.score_preset.html_name }}"
+                 value="{{ form.score_preset.value|default:'' }}" />
+        </div>
+        <div class="d-flex gap-1">
+          <button type="button" class="btn btn-sm btn-outline-secondary score-preset" data-score="0">
+            No filter
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-warning score-preset" data-score="0.63">
+            Medium
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-success score-preset" data-score="0.72">
+            High
+          </button>
         </div>
       </div>
 
-      {# ── 3. Directionality & effect ── #}
+      {# ── 4. Interaction types ── #}
       <div class="hippie-card p-3 mb-3">
-        <div class="form-section-label">Edge Properties</div>
-
-        <div class="mb-3">
-          <label class="form-label">Directionality</label>
-          {% for val, label in directionality_choices %}
+        <div class="form-section-label">Interaction Types</div>
+        {% for choice in form.interaction_types %}
           <div class="form-check">
-            <input class="form-check-input" type="radio" name="directionality"
-                   id="dir_{{ val }}" value="{{ val }}"
-                   {% if request.GET.directionality == val or not request.GET.directionality and val == "any" %}checked{% endif %} />
-            <label class="form-check-label" for="dir_{{ val }}">{{ label }}</label>
+            {{ choice.tag }}
+            <label class="form-check-label" for="{{ choice.id_for_label }}">
+              {{ choice.choice_label }}
+            </label>
           </div>
-          {% endfor %}
-        </div>
-
-        <div class="mb-0">
-          <label class="form-label">Effect type</label>
-          {% for val, label in effect_choices %}
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="effect_type"
-                   id="eff_{{ val }}" value="{{ val }}"
-                   {% if val in selected_effects %}checked{% endif %} />
-            <label class="form-check-label" for="eff_{{ val }}">{{ label }}</label>
-          </div>
-          {% endfor %}
-        </div>
+        {% empty %}
+          <span class="text-muted-sm">No types in database.</span>
+        {% endfor %}
+        <div class="form-text mt-1">{{ form.interaction_types.help_text }}</div>
       </div>
 
-      {# ── 4. Tissue filter ── #}
+      {# ── 5. Tissue filter ── #}
       <div class="hippie-card p-3 mb-3">
         <div class="form-section-label">Tissue Expression</div>
 
-        <div class="mb-2">
-          <label class="form-label" for="id_tissue_mode">Both partners expressed in</label>
-          <select class="form-select" id="id_tissue_mode" name="tissue_mode">
-            <option value="any"  {% if request.GET.tissue_mode == "any"  %}selected{% endif %}>Any tissue (no filter)</option>
-            <option value="both" {% if request.GET.tissue_mode == "both" %}selected{% endif %}>All selected tissues</option>
-            <option value="one"  {% if request.GET.tissue_mode == "one"  %}selected{% endif %}>At least one selected tissue</option>
+        <div class="mb-0">
+          <label class="form-label" for="{{ form.tissue.id_for_label }}">
+            {{ form.tissue.label }}
+          </label>
+          <select class="form-select"
+                  id="{{ form.tissue.id_for_label }}"
+                  name="{{ form.tissue.html_name }}">
+            <option value="">{{ form.tissue.field.empty_label }}</option>
+            {% for pk, name in form.tissue.field.choices %}
+              {% if pk %}
+                <option value="{{ pk }}"
+                  {% if form.tissue.value|stringformat:"s" == pk|stringformat:"s" %}selected{% endif %}>
+                  {{ name }}
+                </option>
+              {% endif %}
+            {% endfor %}
           </select>
-        </div>
-
-        <div style="max-height:160px; overflow-y:auto;" class="border rounded p-2"
-             style="border-color:var(--hippie-border)">
-          {% for tissue in tissue_list %}
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="tissues"
-                   id="tissue_{{ forloop.counter }}" value="{{ tissue }}"
-                   {% if tissue in selected_tissues %}checked{% endif %} />
-            <label class="form-check-label" for="tissue_{{ forloop.counter }}">{{ tissue }}</label>
-          </div>
-          {% empty %}
-          <span class="text-muted-sm">Tissue list will load here.</span>
-          {% endfor %}
         </div>
       </div>
 
-      {# ── 5. GO / MeSH ── #}
+      {# ── 6. Annotation filters ── #}
       <div class="hippie-card p-3 mb-3">
         <div class="form-section-label">Functional Annotation</div>
 
         <div class="mb-3">
-          <label class="form-label" for="id_go_terms">GO terms (comma-separated)</label>
-          <input type="text" class="form-control" id="id_go_terms" name="go_terms"
+          <label class="form-label" for="id_go_terms_input">GO terms</label>
+          <input type="text" class="form-control" id="id_go_terms_input"
                  placeholder="e.g. GO:0006915, GO:0097553"
-                 value="{{ request.GET.go_terms }}" />
+                 value="{{ form.go_terms.value|default:'' }}"
+                 oninput="document.getElementById('{{ form.go_terms.id_for_label }}').value = this.value" />
+          <input type="hidden"
+                 id="{{ form.go_terms.id_for_label }}"
+                 name="{{ form.go_terms.html_name }}"
+                 value="{{ form.go_terms.value|default:'' }}" />
         </div>
 
         <div class="mb-0">
-          <label class="form-label" for="id_mesh_terms">MeSH terms (comma-separated)</label>
-          <input type="text" class="form-control" id="id_mesh_terms" name="mesh_terms"
-                 placeholder="e.g. Apoptosis, Neoplasms"
-                 value="{{ request.GET.mesh_terms }}" />
+          <label class="form-label" for="id_mesh_terms_input">MeSH terms</label>
+          <input type="text" class="form-control" id="id_mesh_terms_input"
+                 placeholder="e.g. C01.252, C01.252.400"
+                 value="{{ form.mesh_terms.value|default:'' }}"
+                 oninput="document.getElementById('{{ form.mesh_terms.id_for_label }}').value = this.value" />
+          <input type="hidden"
+                 id="{{ form.mesh_terms.id_for_label }}"
+                 name="{{ form.mesh_terms.html_name }}"
+                 value="{{ form.mesh_terms.value|default:'' }}" />
         </div>
+      </div>
+
+      {# ── 7. Edge directionality ── #}
+      <div class="hippie-card p-3 mb-3">
+        <div class="form-section-label">Edge Directionality</div>
+
+        {% for choice in form.direction %}
+          <div class="form-check">
+            {{ choice.tag }}
+            <label class="form-check-label" for="{{ choice.id_for_label }}">
+              {{ choice.choice_label }}
+            </label>
+          </div>
+        {% endfor %}
+
+        <div class="mt-3 mb-2">
+          <label class="form-label" for="{{ form.sources.id_for_label }}">
+            {{ form.sources.label }}
+          </label>
+          <input type="text" class="form-control"
+                 id="{{ form.sources.id_for_label }}"
+                 name="{{ form.sources.html_name }}"
+                 value="{{ form.sources.value|default:'' }}"
+                 placeholder="e.g. EGFR FGFR1" />
+          <div class="form-text">{{ form.sources.help_text }}</div>
+        </div>
+
+        <div class="mb-0">
+          <label class="form-label" for="{{ form.sinks.id_for_label }}">
+            {{ form.sinks.label }}
+          </label>
+          <input type="text" class="form-control"
+                 id="{{ form.sinks.id_for_label }}"
+                 name="{{ form.sinks.html_name }}"
+                 value="{{ form.sinks.value|default:'' }}"
+                 placeholder="e.g. TP53 MYC" />
+          <div class="form-text">{{ form.sinks.help_text }}</div>
+        </div>
+      </div>
+
+      {# ── 8. Effect display ── #}
+      <div class="hippie-card p-3 mb-3">
+        <div class="form-section-label">Effect Display</div>
+
+        {% for choice in form.effect %}
+          <div class="form-check">
+            {{ choice.tag }}
+            <label class="form-check-label" for="{{ choice.id_for_label }}">
+              {{ choice.choice_label }}
+            </label>
+          </div>
+        {% endfor %}
       </div>
 
       {# ── Submit ── #}
@@ -210,86 +362,328 @@
     </form>
   </aside>
 
-  {#   ════════════════════════════════════════════════ #}
-  {#   RIGHT: results area                              #}
-  {#   ════════════════════════════════════════════════ #}
+  {# RIGHT: results area #}
   <div class="flex-grow-1 min-width-0">
 
     {% if network_result %}
-      {# ── Summary bar ── #}
+
+      {# Unresolved identifier warning #}
+      {% if network_result.unresolved %}
+        <div class="alert alert-warning rounded-3 mb-3 py-2" style="font-size:.82rem;">
+          <i class="bi bi-exclamation-triangle me-2"></i>
+          <strong>{{ network_result.unresolved|length }} identifier{{ network_result.unresolved|length|pluralize }} not found:</strong>
+          {% for u in network_result.unresolved %}
+            <span class="tag-chip ms-1">{{ u }}</span>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {# Error #}
+      {% if network_result.error %}
+        <div class="alert alert-danger rounded-3 mb-3 py-2" style="font-size:.82rem;">
+          <i class="bi bi-exclamation-circle me-2"></i>{{ network_result.error }}
+        </div>
+      {% endif %}
+
+      {# Summary bar #}
       <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2 mb-3">
-        <div>
-          <span style="font-family:var(--font-display); font-size:1.2rem;">
-            Network results
-          </span>
-          <span class="text-muted-sm ms-2">
-            {{ network_result.node_count }} node{{ network_result.node_count|pluralize }},
+        <span style="font-family:var(--font-display); font-size:1.2rem;">
+          Network results
+          <span class="text-muted-sm" style="font-family:var(--font-body); font-size:.875rem;">
+            — {{ network_result.node_count }} node{{ network_result.node_count|pluralize }},
             {{ network_result.edge_count }} edge{{ network_result.edge_count|pluralize }}
           </span>
-        </div>
-        <div class="d-flex gap-2">
-          <a href="{{ network_result.tsv_url }}" class="btn btn-sm btn-outline-secondary">
-            <i class="bi bi-download me-1"></i>TSV
-          </a>
-          <a href="{{ network_result.sif_url }}" class="btn btn-sm btn-outline-secondary">
-            <i class="bi bi-download me-1"></i>SIF
-          </a>
-        </div>
+        </span>
       </div>
 
-      {# React will render the network visualisation here in a future iteration #}
-      <div class="hippie-card p-0 overflow-hidden">
-        <div id="hippie-network-root"
-             style="min-height:500px; display:flex; align-items:center; justify-content:center;
-                    color:var(--hippie-ink-muted); font-size:.875rem;">
-          <span><i class="bi bi-diagram-3 me-2"></i>Network visualisation coming soon.</span>
+      {# ── Cytoscape network graph ── #}
+      {% if network_result.interactions and output_type == "browser_vis" %}
+        <div id="cy"
+             style="width:100%; height:520px; background:var(--hippie-bg);
+                    border:1px solid var(--hippie-border); border-radius:var(--radius-lg);">
         </div>
-      </div>
+
+        {# Edge legend #}
+        <div style="display:flex; flex-wrap:wrap; gap:.75rem 1.5rem; align-items:center;
+                    padding:.5rem .75rem; font-size:.75rem; color:var(--hippie-ink-muted);
+                    border:1px solid var(--hippie-border); border-radius:var(--radius-md);
+                    background:var(--hippie-surface); margin:.75rem 0 1rem;">
+          <strong style="font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--hippie-ink);">Edge legend</strong>
+          <span style="display:flex; align-items:center; gap:.4rem;">
+            <span style="display:inline-block; width:32px; height:3px; border-radius:2px; background:#b87c1a;"></span>
+            Seed interaction
+          </span>
+          <span style="display:flex; align-items:center; gap:.4rem;">
+            <span style="display:inline-block; width:32px; height:3px; border-radius:2px; background:#1a6b6b;"></span>
+            High confidence (≥0.72)
+          </span>
+          <span style="display:flex; align-items:center; gap:.4rem;">
+            <span style="display:inline-block; width:32px; height:2px; border-radius:2px; background:#6b9e9e;"></span>
+            Medium confidence (≥0.63)
+          </span>
+          <span style="display:flex; align-items:center; gap:.4rem;">
+            <span style="display:inline-block; width:32px; height:1.5px; border-radius:2px; background:#d4cfc9;"></span>
+            Low confidence (&lt;0.63)
+          </span>
+          <span style="display:flex; align-items:center; gap:.4rem; margin-left:auto;">
+            <em>Width ∝ score</em>
+          </span>
+        </div>
+      {% endif %}
 
       {# Interaction table #}
       {% if network_result.interactions %}
-      <div class="hippie-card p-0 overflow-hidden mt-3">
-        <div style="overflow-x:auto;">
-          <table class="table table-hover mb-0" style="font-size:.875rem;">
-            <thead class="table-light">
-              <tr>
-                <th>Protein A</th>
-                <th>Protein B</th>
-                <th>Score</th>
-                <th>Sources</th>
-                <th>Experiments</th>
-                <th>Detail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in network_result.interactions %}
-              <tr>
-                <td><strong>{{ row.protein_a }}</strong></td>
-                <td><strong>{{ row.protein_b }}</strong></td>
-                <td><span class="score-badge {% if row.score >= 0.72 %}score-high{% elif row.score >= 0.63 %}score-med{% else %}score-low{% endif %}">
-                  {{ row.score|floatformat:4 }}</span></td>
-                <td><span class="tag-chip">{{ row.source_count }}</span></td>
-                <td><span class="tag-chip">{{ row.experiment_count }}</span></td>
-                <td><a href="{% url 'hippie_website:interaction_detail' row.interaction_id %}">
-                  <i class="bi bi-journal-text me-1"></i>View</a></td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        <div class="d-flex justify-content-end mb-2">
+          <button id="btn-download-tsv" class="btn btn-sm" style="background:var(--hippie-teal);color:#fff;border:none;font-weight:600;">
+            <i class="bi bi-download me-1"></i>Download HIPPIE TAB
+          </button>
         </div>
-      </div>
+        <div class="hippie-card p-0 overflow-hidden">
+          <div style="overflow-x:auto;">
+            <table class="table table-hover mb-0" style="font-size:.8rem; white-space:nowrap;">
+              <thead class="table-light">
+                <tr>
+                  <th>Gene A</th>
+                  <th>UniProt A</th>
+                  <th>Entrez A</th>
+                  <th>Gene B</th>
+                  <th>UniProt B</th>
+                  <th>Entrez B</th>
+                  <th>Score</th>
+                  <th>Uploaded interaction</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in network_result.interactions %}
+                <tr>
+                  <td><strong>{{ row.gene_name_a }}</strong></td>
+                  <td class="mono" style="color:var(--hippie-ink-muted)">{{ row.uniprot_a|default:"—" }}</td>
+                  <td class="mono" style="color:var(--hippie-ink-muted)">{{ row.entrez_a|default:"—" }}</td>
+                  <td><strong>{{ row.gene_name_b }}</strong></td>
+                  <td class="mono" style="color:var(--hippie-ink-muted)">{{ row.uniprot_b|default:"—" }}</td>
+                  <td class="mono" style="color:var(--hippie-ink-muted)">{{ row.entrez_b|default:"—" }}</td>
+                  <td>
+                    <span class="score-badge
+                      {% if row.score >= 0.72 %}score-high
+                      {% elif row.score >= 0.63 %}score-med
+                      {% else %}score-low{% endif %}">
+                      {{ row.score|floatformat:4 }}
+                    </span>
+                  </td>
+                  <td>
+                    {% if row.uploaded_interaction %}
+                      <span style="color:var(--hippie-teal)" title="Both proteins in query set">
+                        <i class="bi bi-check-circle-fill"></i>
+                      </span>
+                    {% else %}
+                      <span style="color:var(--hippie-ink-muted)" title="Expanded interaction">
+                        <i class="bi bi-dash"></i>
+                      </span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <a href="{% url 'hippie_website:interaction_detail' row.interaction_id %}"
+                       class="btn btn-sm btn-outline-secondary" title="View evidence">
+                      <i class="bi bi-arrow-right"></i>
+                    </a>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      {% elif not network_result.error %}
+        <div class="nq-results-placeholder">
+          <i class="bi bi-search"></i>
+          <p class="mb-1 fw-semibold">No interactions matched</p>
+          <p class="text-muted-sm mb-0">Try relaxing the score threshold or removing filters.</p>
+        </div>
       {% endif %}
 
     {% else %}
-      {# ── Empty/initial state ── #}
+      {# Initial empty state #}
       <div class="nq-results-placeholder">
         <i class="bi bi-diagram-3"></i>
         <p class="mb-1 fw-semibold">No network built yet</p>
-        <p class="text-muted-sm mb-0">Enter seed proteins in the form and click <em>Build Network</em>.</p>
+        <p class="text-muted-sm mb-0">
+          Enter seed proteins in the form and click <em>Build Network</em>.
+        </p>
       </div>
     {% endif %}
 
-  </div>
-</div>
+  </div>{# /results #}
+</div>{# /flex layout #}
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+  /* ── Score preset buttons ── */
+  document.querySelectorAll('.score-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const val = btn.dataset.score;
+      const slider = document.getElementById('{{ form.score_min.id_for_label }}');
+      slider.value = val;
+      document.getElementById('score-display').textContent = '≥ ' + parseFloat(val).toFixed(2);
+      document.getElementById('{{ form.score_preset.id_for_label }}').value = val;
+    });
+  });
+</script>
+
+{% if network_result.interactions and output_type == "browser_vis" %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"
+        crossorigin="anonymous"></script>
+<script>
+(function () {
+  const seeds  = new Set({{ cy_seeds_json|safe }});
+  const edges  = {{ cy_edges_json|safe }};
+
+  /* Build deduplicated node + edge element lists */
+  const nodesSeen = new Set();
+  const elements  = [];
+
+  edges.forEach(row => {
+    [row.protein_a, row.protein_b].forEach(name => {
+      if (!nodesSeen.has(name)) {
+        nodesSeen.add(name);
+        elements.push({ data: {
+          id:     name,
+          label:  name,
+          isSeed: seeds.has(name),
+        }});
+      }
+    });
+    elements.push({ data: {
+      id:       'e' + row.interaction_id,
+      source:   row.protein_a,
+      target:   row.protein_b,
+      score:    row.score,
+      directed: row.kegg_direction !== null,
+      effect:   row.effect_type,   /* 1=activation, -1=inhibition, null */
+      isSeed:   row.uploaded_interaction,
+    }});
+  });
+
+  const cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements,
+    layout: {
+      name:             'cose',
+      animate:          false,
+      padding:          28,
+      nodeRepulsion:    6000,
+      idealEdgeLength:  80,
+    },
+    style: [
+      /* ── default node ── */
+      {
+        selector: 'node',
+        style: {
+          'label':              'data(label)',
+          'font-size':          10,
+          'font-family':        'DM Mono, monospace',
+          'text-valign':        'center',
+          'text-halign':        'center',
+          'background-color':   '#e3f0f0',
+          'border-color':       '#1a6b6b',
+          'border-width':       1,
+          'color':              '#1a1612',
+          'width':              60,
+          'height':             22,
+          'padding':            '6px',
+          'shape':              'round-rectangle',
+        }
+      },
+      /* ── seed node ── */
+      {
+        selector: 'node[?isSeed]',
+        style: {
+          'background-color': '#f9e8e6',
+          'border-color':     '#c0392b',
+          'border-width':     2,
+          'font-weight':      700,
+        }
+      },
+      /* ── default edge — score gradient low→high = grey→teal ── */
+      {
+        selector: 'edge',
+        style: {
+          'width':              'mapData(score, 0, 1, 0.8, 4)',
+          'line-color':         'mapData(score, 0, 1, #d4cfc9, #1a6b6b)',
+          'curve-style':        'bezier',
+          'target-arrow-shape': 'none',
+          'opacity':            0.75,
+        }
+      },
+      /* ── seed edge, overrides gradient ── */
+      {
+        selector: 'edge[?isSeed]',
+        style: {
+          'line-color': '#c0392b',
+          'opacity':    1,
+        }
+      },
+      /* ── hover ── */
+      {
+        selector: 'node:active, node.hover',
+        style: { 'overlay-opacity': 0.08 }
+      },
+    ],
+  });
+
+  /* Open interaction detail on edge click */
+  cy.on('tap', 'edge', function (evt) {
+    const id = evt.target.data('id').replace('e', '');
+    window.open(`{% url 'hippie_website:interaction_detail' 0 %}`.replace('/0/', '/' + id + '/'), '_blank');
+  });
+
+  /* Tooltip on node hover */
+  cy.on('mouseover', 'node', function (evt) {
+    evt.target.addClass('hover');
+  });
+  cy.on('mouseout', 'node', function (evt) {
+    evt.target.removeClass('hover');
+  });
+})();
+</script>
+{% endif %}
+
+{% if network_result.interactions %}
+<script>
+(function () {
+  const edges = {{ cy_edges_json|safe }};
+
+  document.getElementById('btn-download-tsv').addEventListener('click', function () {
+    const header = [
+      'gene_name_a', 'uniprot_a', 'entrez_a',
+      'gene_name_b', 'uniprot_b', 'entrez_b',
+      'score', 'uploaded_interaction',
+    ];
+    const rows = edges.map(function (r) {
+      return [
+        r.gene_name_a,
+        r.uniprot_a,
+        r.entrez_a,
+        r.gene_name_b,
+        r.uniprot_b,
+        r.entrez_b,
+        r.score,
+        r.uploaded_interaction ? '1' : '0',
+      ].join('\t');
+    });
+    const tsv  = header.join('\t') + '\n' + rows.join('\n');
+    const blob = new Blob([tsv], { type: 'text/tab-separated-values' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'hippie_network.tsv';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}
