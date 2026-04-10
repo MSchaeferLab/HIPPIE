@@ -535,7 +535,7 @@ def browse_api(request):
         # avg_score is the sum of the two side-averages from the annotation;
         # halve it to get an approximate overall average, guard for None.
         raw_avg = getattr(p, "avg_score", None)
-        avg = round(raw_avg / 2, 4) if raw_avg is not None else None
+        avg = round(raw_avg, 4) if raw_avg is not None else None
 
         proteins.append({
             "id":        p.pk,

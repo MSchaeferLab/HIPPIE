@@ -12,7 +12,9 @@ Usage in models.py:
 """
 
 from django.db import models
-from django.db.models import Avg, Count, F, Prefetch, Q, Subquery, OuterRef
+from django.db.models import Avg, Count, F, Prefetch, Q, Subquery, OuterRef, Sum, Value
+from django.db.models.expressions import RawSQL
+from django.db.models.functions import NullIf
 
 
 # ============================================================================
@@ -87,17 +89,12 @@ class ProteinQuerySet(models.QuerySet):
                 Prefetch("entrez_ids"),
             )
             .annotate(
-                degree=Count("interactions_as_1") + Count("interactions_as_2"),
-                avg_score=(
-                    # We need the average across both sides; a subquery is
-                    # cleaner than a UNION in the ORM.
-                    # For a read-heavy app this is fine — it's only called
-                    # once and the result is paginated / cached.
-                    Avg("interactions_as_1__score") + Avg("interactions_as_2__score")
-                )
-                # NOTE: avg_score is an approximation; for an exact average
-                # you would use a raw SQL UNION subquery.  The PHP app uses
-                # the same approximation pattern.
+                degree=Count("interactions_as_1", distinct=True) + Count("interactions_as_2", distinct=True),
+                avg_score=RawSQL(
+                    """(SELECT AVG(score) FROM interaction
+                       WHERE protein_1_id = protein.id OR protein_2_id = protein.id)""",
+                    []
+                ),
             )
         )
 
