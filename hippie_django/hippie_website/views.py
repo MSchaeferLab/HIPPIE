@@ -14,11 +14,13 @@ All database access goes through the custom managers defined in managers.py:
   - Interaction.objects.with_full_detail()    → full prefetch for detail page
 """
 
+import json as _json
 from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
-from django.views.decorators.http import require_GET
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET, require_POST
 
 from .models import Interaction, Protein
 
@@ -274,6 +276,163 @@ def _run_network_query(params) -> dict:
         "error":        None,
     }
 
+# ---------------------------------------------------------------------------
+# Interaction query
+# ---------------------------------------------------------------------------
+
+MAX_PAIRS   = 5_000   # hard limit enforced server-side as well as client-side
+BATCH_LIMIT = 200     # max pairs accepted per individual API call
+
+@require_GET
+def interaction_query_view(request):
+    """Render the interaction query page (React shell)."""
+    return render(request, "hippie_website/interaction_query.html")
+
+
+@csrf_exempt          # React sends JSON + CSRF cookie; keep csrf_exempt for now
+                      # and re-enable once you wire up a proper CSRF fetch helper.
+@require_POST
+def interaction_query_api(request):
+    """
+    POST /api/interaction/
+
+    Request body (JSON):
+    {
+        "pairs": [
+            { "a": "<id>", "b": "<id>", "input_order": <int> },
+            ...
+        ]
+    }
+
+    Response (JSON):
+    {
+        "results": [
+            {
+                "input_order":     <int>,
+                "input_a":         "<raw>",
+                "input_b":         "<raw>",
+                "symbol_a":        "<gene>",
+                "symbol_b":        "<gene>",
+                "uniprot_a":       "<id>" | "",
+                "uniprot_b":       "<id>" | "",
+                "score":           <float>,   # -1.0 if not found
+                "source_count":    <int>,     # 0 if not found
+                "experiment_count":<int>,     # 0 if not found
+                "interaction_id":  <int> | null,
+                "detail_url":      "<url>" | ""
+            },
+            ...
+        ]
+    }
+    """
+    try:
+        body = _json.loads(request.body)
+    except _json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+
+    raw_pairs = body.get("pairs", [])
+    if not isinstance(raw_pairs, list):
+        return JsonResponse({"error": "'pairs' must be a list."}, status=400)
+    if len(raw_pairs) > BATCH_LIMIT:
+        return JsonResponse(
+            {"error": f"Batch too large: {len(raw_pairs)} pairs (max {BATCH_LIMIT} per request)."},
+            status=400,
+        )
+
+    results = []
+    for item in raw_pairs:
+        input_a      = str(item.get("a", "")).strip()
+        input_b      = str(item.get("b", "")).strip()
+        input_order  = int(item.get("input_order", 0))
+
+        row = _resolve_interaction_pair(input_a, input_b, input_order)
+        results.append(row)
+
+    return JsonResponse({"results": results})
+
+
+def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> dict:
+    """
+    Resolve two identifiers to proteins, look up their interaction,
+    and return a result row.
+
+    A score of -1.0 signals "not found" (either protein unknown, or
+    no interaction recorded between them).
+    """
+    NOT_FOUND = {
+        "input_order":      input_order,
+        "input_a":          input_a,
+        "input_b":          input_b,
+        "symbol_a":         input_a,
+        "symbol_b":         input_b,
+        "uniprot_a":        "",
+        "uniprot_b":        "",
+        "score":            -1.0,
+        "source_count":     0,
+        "experiment_count": 0,
+        "interaction_id":   None,
+        "detail_url":       "",
+    }
+
+    # Resolve both identifiers
+    proteins_a = (
+        Protein.objects.resolve(input_a)
+        .prefetch_related("uniprot_ids", "entrez_ids")
+    )
+    proteins_b = (
+        Protein.objects.resolve(input_b)
+        .prefetch_related("uniprot_ids", "entrez_ids")
+    )
+
+    protein_a = proteins_a.first()
+    protein_b = proteins_b.first()
+
+    if protein_a is None or protein_b is None:
+        return NOT_FOUND
+
+    # Canonical ordering: protein_1_id <= protein_2_id
+    p1, p2 = (protein_a, protein_b) if protein_a.pk <= protein_b.pk else (protein_b, protein_a)
+
+    try:
+        interaction = (
+            Interaction.objects
+            .with_proteins()  # select_related + prefetch both sides
+            .prefetch_related(  # add counts columns
+                "sources",
+                "experiments",
+            )
+            .get(protein_1=p1, protein_2=p2)
+        )
+    except Interaction.DoesNotExist:
+        # Proteins resolved but no interaction on record
+        ua = _protein_display(protein_a)
+        ub = _protein_display(protein_b)
+        return {
+            **NOT_FOUND,
+            "symbol_a":  ua["symbol"],
+            "symbol_b":  ub["symbol"],
+            "uniprot_a": ua["uniprot_id"],
+            "uniprot_b": ub["uniprot_id"],
+        }
+
+    ua = _protein_display(protein_a)
+    ub = _protein_display(protein_b)
+
+    return {
+        "input_order":      input_order,
+        "input_a":          input_a,
+        "input_b":          input_b,
+        "symbol_a":         ua["symbol"],
+        "symbol_b":         ub["symbol"],
+        "uniprot_a":        ua["uniprot_id"],
+        "uniprot_b":        ub["uniprot_id"],
+        "score":            round(interaction.score, 4),
+        "source_count":     interaction.sources.all().count(),
+        "experiment_count": interaction.experiments.all().count(),
+        "interaction_id":   interaction.pk,
+        "detail_url":       reverse("hippie_website:interaction_detail", args=[interaction.pk]),
+    }
+
 
 # ---------------------------------------------------------------------------
 # Browse
@@ -284,15 +443,6 @@ def browse_view(request):
     """Browse all interactions — stub."""
     return render(request, "hippie_website/browse.html", {})
 
-
-# ---------------------------------------------------------------------------
-# Screen annotation
-# ---------------------------------------------------------------------------
-
-@require_GET
-def screen_annotation_view(request):
-    """Screen annotation tool — stub."""
-    return render(request, "hippie_website/screen_annotation.html", {})
 
 
 # ---------------------------------------------------------------------------
