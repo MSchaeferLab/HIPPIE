@@ -19,7 +19,6 @@ from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import Interaction, Protein
@@ -289,8 +288,6 @@ def interaction_query_view(request):
     return render(request, "hippie_website/interaction_query.html")
 
 
-@csrf_exempt          # React sends JSON + CSRF cookie; keep csrf_exempt for now
-                      # and re-enable once you wire up a proper CSRF fetch helper.
 @require_POST
 def interaction_query_api(request):
     """
@@ -440,9 +437,138 @@ def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> d
 
 @require_GET
 def browse_view(request):
-    """Browse all interactions — stub."""
+    """Render the browse page (React streaming shell)."""
     return render(request, "hippie_website/browse.html", {})
 
+
+@require_GET
+def browse_api(request):
+    """
+    GET /api/browse/?offset=<int>&limit=<int>
+                    &tissue=<id>&source=<id>
+                    &min_degree=<int>&min_score=<float>
+
+    Streams the protein list in chunks.  Each response includes:
+    {
+        "total":    <int>,          # total matching proteins (for progress bar)
+        "proteins": [
+            {
+                "id":        <int>,
+                "symbol":    "<gene>",
+                "uniprot_id":"<id>" | "",
+                "entrez_id": <int> | null,
+                "degree":    <int>,
+                "avg_score": <float> | null,
+            },
+            ...
+        ]
+    }
+
+    Server-side filters applied here: tissue, source, min_degree, min_score.
+    Free-text search, sort, and pagination are handled client-side.
+    """
+    from .models import Tissue, Source
+    from django.db.models import Count, Avg, Q as _Q
+
+    # ── Parse params ────────────────────────────────────────────────────
+    try:
+        offset    = max(0, int(request.GET.get("offset", 0)))
+        limit     = min(2000, max(1, int(request.GET.get("limit", 500))))
+    except (TypeError, ValueError):
+        offset, limit = 0, 500
+
+    tissue_id  = request.GET.get("tissue")
+    source_id  = request.GET.get("source")
+    min_degree = request.GET.get("min_degree")
+    min_score  = request.GET.get("min_score")
+
+    # ── Build queryset via manager ──────────────────────────────────────
+    qs = (
+        Protein.objects
+        .with_browse_annotations()   # annotates degree, avg_score; prefetches uniprot_ids, entrez_ids
+    )
+
+    # Filter: tissue expression
+    if tissue_id:
+        try:
+            qs = qs.expressed_in([int(tissue_id)])
+        except (TypeError, ValueError):
+            pass
+
+    # Filter: source database — proteins that have at least one interaction
+    # from this source (on either side)
+    if source_id:
+        try:
+            sid = int(source_id)
+            qs = qs.filter(
+                _Q(interactions_as_1__sources__id=sid) |
+                _Q(interactions_as_2__sources__id=sid)
+            ).distinct()
+        except (TypeError, ValueError):
+            pass
+
+    # Filter: minimum degree  (applied after annotation)
+    if min_degree:
+        try:
+            qs = qs.filter(degree__gte=int(min_degree))
+        except (TypeError, ValueError):
+            pass
+
+    # Filter: minimum avg score  (applied after annotation)
+    if min_score:
+        try:
+            qs = qs.filter(avg_score__gte=float(min_score))
+        except (TypeError, ValueError):
+            pass
+
+    # ── Count total (for progress bar) ──────────────────────────────────
+    total = qs.count()
+
+    # ── Fetch slice ──────────────────────────────────────────────────────
+    chunk = qs[offset : offset + limit]
+
+    proteins = []
+    for p in chunk:
+        uniprot = p.uniprot_ids.all().first()
+        entrez  = p.entrez_ids.all().first()
+
+        # avg_score is the sum of the two side-averages from the annotation;
+        # halve it to get an approximate overall average, guard for None.
+        raw_avg = getattr(p, "avg_score", None)
+        avg = round(raw_avg / 2, 4) if raw_avg is not None else None
+
+        proteins.append({
+            "id":        p.pk,
+            "symbol":    entrez.name if entrez else p.name,
+            "uniprot_id": uniprot.uniprot_id if uniprot else "",
+            "entrez_id": entrez.gene_id if entrez else None,
+            "degree":    getattr(p, "degree", 0) or 0,
+            "avg_score": avg,
+        })
+
+    return JsonResponse({"total": total, "proteins": proteins})
+
+
+@require_GET
+def browse_filter_meta(request):
+    """
+    GET /api/browse/filters/
+
+    Returns the data needed to populate the filter dropdowns:
+    {
+        "tissues": [{ "id": <int>, "name": "<str>" }, ...],
+        "sources": [{ "id": <int>, "name": "<str>" }, ...]
+    }
+    """
+    from .models import Tissue, Source
+
+    tissues = list(
+        Tissue.objects.order_by("name").values("id", "name")
+    )
+    sources = list(
+        Source.objects.order_by("name").values("id", "name")
+    )
+    return JsonResponse({"tissues": tissues, "sources": sources})
 
 
 # ---------------------------------------------------------------------------

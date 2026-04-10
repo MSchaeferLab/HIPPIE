@@ -8,6 +8,8 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 {% endblock %}
 
+{% csrf_token %}  {# renders a hidden input, which also sets the cookie #}
+
 {% block extra_styles %}
   /* ── Hero ─────────────────────────────────────── */
   .hippie-hero {
@@ -233,8 +235,8 @@ const { apiUrl, maxPairs, batchSize } = window.HIPPIE_IQ_CONFIG;
 const PAGE_SIZE = 25;
 
 // Each example illustrates a different separator / edge case:
-//   Example 1 — tab-separated, no header, all well-known real interactions
-//   Example 2 — comma-separated WITH a header row (auto-detected & skipped)
+//   Example 1 — tab-separated, all well-known real interactions
+//   Example 2 — comma-separated
 //   Example 3 — semicolon-separated, mixed: one unknown protein, one
 //               real protein pair that has no recorded interaction in HIPPIE
 const EXAMPLES = [
@@ -243,8 +245,8 @@ const EXAMPLES = [
     text:  "HTT\tTP53\nBRCA1\tTP53\nEGFR\tERBB2\nHTT\tHSP90AA1",
   },
   {
-    label: "Example 2 — CSV with header",
-    text:  "protein_a,protein_b\nP42858,P04637\nP38398,P04637\nO15350,P04637",
+    label: "Example 2 — CSV",
+    text:  "P42858,P04637\nP38398,P04637\nO15350,P04637",
   },
   {
     label: "Example 3 — edge cases",
@@ -268,25 +270,6 @@ function detectSep(line) {
   return /\s+/;
 }
 
-/**
- * Detect whether the first data line looks like a header
- * (i.e. neither token looks like a known identifier type).
- * We use a simple heuristic: real identifiers are either
- * purely numeric (Entrez), contain "_" (UniProt entry ID),
- * match a UniProt accession pattern, or look like a gene symbol
- * (short, letters+digits).  If BOTH tokens in the first line
- * are long prose words we assume it's a header.
- */
-function looksLikeHeader(tokens) {
-  const isIdentifier = (t) =>
-    /^\d+$/.test(t) ||                    // Entrez
-    t.includes("_") ||                    // UniProt entry ID
-    /^[A-Z][0-9][A-Z0-9]{3}[0-9]$/.test(t) || // UniProt accession (basic)
-    /^[A-Za-z][A-Za-z0-9\-]{0,19}$/.test(t);  // gene symbol-ish
-  return tokens.length >= 2 &&
-         !isIdentifier(tokens[0]) &&
-         !isIdentifier(tokens[1]);
-}
 
 /**
  * Parse raw text into an array of [a, b] string pairs.
@@ -300,7 +283,6 @@ function parseText(text) {
   const tokens0 = lines[0].split(sep).map(t => t.trim());
 
   let start = 0;
-  if (looksLikeHeader(tokens0)) start = 1;
 
   const pairs = [];
   const bad   = [];
@@ -632,7 +614,7 @@ function InputPanel({ onSubmit, disabled }) {
         <>
           <textarea
             className="pair-textarea mb-2"
-            placeholder={"One pair per line — any separator is auto-detected:\n\nHTT\tBRCA1\nTP53, MDM2\nEGFR ERBB2\n3064;2189"}
+            placeholder={"One pair per line — the separator is auto-detected from the first pair:\n\nHTT\tBRCA1\nTP53, MDM2\nEGFR ERBB2\n3064;2189"}
             value={text}
             onChange={e => setText(e.target.value)}
           />
@@ -672,14 +654,14 @@ function InputPanel({ onSubmit, disabled }) {
                   <span style={{ fontSize: ".875rem", color: "var(--hippie-ink-muted)" }}>
                     Drop a file here or click to browse
                   </span>
-                  <span className="text-muted-sm">TSV, CSV, TXT — header auto-detected, max {maxPairs.toLocaleString()} pairs</span>
+                  <span className="text-muted-sm">TSV, CSV, TXT — no header, max {maxPairs.toLocaleString()} pairs</span>
                 </>
             }
           </div>
           <input ref={fileRef} type="file" accept=".tsv,.csv,.txt,.tab" style={{ display: "none" }}
                  onChange={e => { if (e.target.files[0]) setFile(e.target.files[0]); }} />
           <p className="text-muted-sm mb-3">
-            Any delimiter (tab, comma, semicolon, space) and optional header row are auto-detected.
+            Any delimiter (tab, comma, semicolon, space) is auto-detected. Do not add a header row.
           </p>
         </>
       )}
