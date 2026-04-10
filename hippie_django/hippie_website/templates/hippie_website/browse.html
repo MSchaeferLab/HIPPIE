@@ -1,5 +1,645 @@
 {% extends "hippie_website/base.html" %}
-{% block title %}Browse{% endblock %}
+{% block title %}Browse Proteins{% endblock %}
 {% block nav_browse %}active{% endblock %}
-{% block react_cdn %}{% endblock %}
-{% block content %}<h2>Browse</h2><p>Coming soon.</p>{% endblock %}
+
+{% block react_cdn %}
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+{% endblock %}
+
+{% block extra_styles %}
+  /* ── Hero ─────────────────────────────────────── */
+  .hippie-hero {
+    padding: 3rem 0 2rem;
+    border-bottom: 1px solid var(--hippie-border);
+    margin-bottom: 2.5rem;
+  }
+  .hippie-hero h1 {
+    font-size: clamp(1.75rem, 4vw, 3rem);
+    line-height: 1.1;
+    margin-bottom: .75rem;
+  }
+  .hippie-hero p {
+    font-size: 1rem;
+    color: var(--hippie-ink-muted);
+    max-width: 60ch;
+    margin-bottom: 0;
+  }
+
+  /* ── Toolbar (search + filter toggle) ─────────── */
+  .browse-search .form-control {
+    border: 1.5px solid var(--hippie-border);
+    border-radius: var(--radius-md);
+    background: var(--hippie-surface);
+    font-family: var(--font-mono);
+    font-size: .9rem;
+    padding: .55rem 1rem;
+    color: var(--hippie-ink);
+    box-shadow: none;
+    transition: border-color .15s;
+  }
+  .browse-search .form-control:focus {
+    border-color: var(--hippie-teal);
+    box-shadow: 0 0 0 3px rgba(26,107,107,.12);
+  }
+  .btn-filter-toggle {
+    background: var(--hippie-surface);
+    border: 1.5px solid var(--hippie-border);
+    border-radius: var(--radius-md);
+    color: var(--hippie-ink-muted);
+    font-size: .85rem;
+    font-weight: 600;
+    font-family: var(--font-body);
+    padding: .55rem 1rem;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+  }
+  .btn-filter-toggle:hover { border-color: var(--hippie-teal); color: var(--hippie-teal); }
+  .btn-filter-toggle.active {
+    background: var(--hippie-teal-soft);
+    border-color: var(--hippie-teal);
+    color: var(--hippie-teal);
+  }
+
+  /* ── Filter panel ─────────────────────────────── */
+  .filter-panel {
+    border: 1.5px solid var(--hippie-teal);
+    border-radius: var(--radius-lg);
+    background: var(--hippie-surface);
+    box-shadow: var(--shadow-card);
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    animation: slideDown .15s ease;
+  }
+  @keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+  .filter-section-label {
+    font-size: .68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--hippie-ink-muted);
+    border-bottom: 1px solid var(--hippie-border);
+    padding-bottom: .3rem;
+    margin-bottom: .75rem;
+    font-family: var(--font-mono);
+  }
+  .filter-panel .form-label { font-size: .82rem; color: var(--hippie-ink-muted); margin-bottom: .25rem; }
+  .filter-panel .form-control,
+  .filter-panel .form-select { font-size: .85rem; padding: .35rem .65rem; }
+  .filter-panel .form-range { padding: 0; }
+
+  .active-filter-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    background: var(--hippie-teal-soft);
+    border: 1px solid var(--hippie-teal);
+    border-radius: 100px;
+    color: var(--hippie-teal);
+    font-size: .72rem;
+    font-weight: 600;
+    padding: .1rem .55rem;
+    font-family: var(--font-mono);
+  }
+  .active-filter-badge button {
+    background: none; border: none; padding: 0;
+    color: var(--hippie-teal); cursor: pointer; font-size: .8rem; line-height: 1;
+  }
+
+  /* ── Table ────────────────────────────────────── */
+  .hippie-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .875rem; }
+  .hippie-table thead th {
+    background: var(--hippie-bg);
+    border-bottom: 2px solid var(--hippie-border);
+    border-top: 1px solid var(--hippie-border);
+    padding: .6rem .85rem;
+    font-size: .75rem;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--hippie-ink-muted);
+    white-space: nowrap;
+    user-select: none;
+    cursor: pointer;
+  }
+  .hippie-table thead th:not(.no-sort):hover { color: var(--hippie-ink); }
+  .hippie-table thead th.sorted-asc::after  { content: ' ↑'; color: var(--hippie-teal); }
+  .hippie-table thead th.sorted-desc::after { content: ' ↓'; color: var(--hippie-teal); }
+
+  /* ROW CLICK: makes rows look clickable */
+  .hippie-table tbody tr {
+    border-bottom: 1px solid var(--hippie-border);
+    transition: background .1s;
+    cursor: pointer; /* NO CLICK: remove this line */
+  }
+  /* ROW CLICK: hover uses teal-soft to signal navigation */
+  .hippie-table tbody tr:hover {
+    background: var(--hippie-teal-soft); /* NO CLICK: background: var(--hippie-bg); */
+  }
+  .hippie-table tbody td { padding: .6rem .85rem; vertical-align: middle; }
+  .hippie-table tbody tr:last-child td { border-bottom: none; }
+
+  /* ── Pagination ───────────────────────────────── */
+  .hippie-pagination { display: flex; align-items: center; gap: .25rem; flex-wrap: wrap; }
+  .hippie-pagination button {
+    border: 1px solid var(--hippie-border);
+    background: var(--hippie-surface);
+    color: var(--hippie-ink);
+    border-radius: var(--radius-sm);
+    padding: .25rem .6rem;
+    font-size: .8rem;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    transition: background .1s;
+  }
+  .hippie-pagination button:hover:not(:disabled) { background: var(--hippie-bg); }
+  .hippie-pagination button.active { background: var(--hippie-teal); color: #fff; border-color: var(--hippie-teal); }
+  .hippie-pagination button:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* ── Misc ─────────────────────────────────────── */
+  .state-box { text-align: center; padding: 3rem 1rem; color: var(--hippie-ink-muted); }
+  .state-icon { font-size: 2.5rem; display: block; margin-bottom: .75rem; opacity: .4; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner-sm {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--hippie-border);
+    border-top-color: var(--hippie-teal);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    vertical-align: middle;
+  }
+
+  .batch-progress { height: 3px; background: var(--hippie-border); border-radius: 100px; overflow: hidden; }
+  .batch-progress-fill { height: 100%; background: var(--hippie-teal); border-radius: 100px; transition: width .3s ease; }
+{% endblock %}
+
+{% block content %}
+<script>
+  window.HIPPIE_BROWSE_CONFIG = {
+    proteinsApiUrl: "{% url 'hippie_website:browse_api' %}",
+    filterMetaUrl:  "{% url 'hippie_website:browse_filter_meta' %}",
+    proteinDetailUrl: "{% url 'hippie_website:protein_detail' pk=0 %}".replace("/0/", "/{id}/"),
+    proteinQueryUrl:  "{% url 'hippie_website:index' %}",
+  };
+</script>
+<div id="hippie-browse-app"></div>
+{% endblock %}
+
+{% block scripts %}
+{% verbatim %}
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+const {
+  proteinsApiUrl,
+  filterMetaUrl,
+  proteinDetailUrl,
+  proteinQueryUrl,
+} = window.HIPPIE_BROWSE_CONFIG;
+
+const PAGE_SIZE   = 50;
+const CHUNK_SIZE  = 500;  // proteins per API request while streaming
+
+// ─────────────────────────────────────────────────────────────
+// Pagination
+// ─────────────────────────────────────────────────────────────
+function Pagination({ page, totalPages, onChange }) {
+  if (totalPages <= 1) return null;
+  const pages = [];
+  const lo = Math.max(1, page - 2), hi = Math.min(totalPages, page + 2);
+  if (lo > 1) { pages.push(1); if (lo > 2) pages.push("…"); }
+  for (let i = lo; i <= hi; i++) pages.push(i);
+  if (hi < totalPages) { if (hi < totalPages - 1) pages.push("…"); pages.push(totalPages); }
+  return (
+    <div className="hippie-pagination">
+      <button disabled={page === 1} onClick={() => onChange(page - 1)}>‹</button>
+      {pages.map((p, i) => p === "…"
+        ? <span key={i} style={{padding:"0 .25rem", color:"var(--hippie-ink-muted)"}}>…</span>
+        : <button key={p} className={p === page ? "active" : ""} onClick={() => onChange(p)}>{p}</button>
+      )}
+      <button disabled={page === totalPages} onClick={() => onChange(page + 1)}>›</button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Filter panel
+// ─────────────────────────────────────────────────────────────
+function FilterPanel({ filters, onChange, meta }) {
+  const { tissues, sources } = meta;
+
+  return (
+    <div className="filter-panel mb-3">
+      <div className="row g-3">
+
+        {/* Tissue expression */}
+        <div className="col-md-4">
+          <div className="filter-section-label">Tissue Expression</div>
+          <label className="form-label">Expressed in tissue</label>
+          <select className="form-select" value={filters.tissue}
+                  onChange={e => onChange({ ...filters, tissue: e.target.value })}>
+            <option value="">Any tissue</option>
+            {tissues.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+
+        {/* Source database */}
+        <div className="col-md-4">
+          <div className="filter-section-label">Source Database</div>
+          <label className="form-label">Has interaction in source</label>
+          <select className="form-select" value={filters.source}
+                  onChange={e => onChange({ ...filters, source: e.target.value })}>
+            <option value="">Any source</option>
+            {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+
+        {/* Degree + score */}
+        <div className="col-md-4">
+          <div className="filter-section-label">Quantitative Filters</div>
+          <label className="form-label">
+            Min. degree ≥ <span className="mono">{filters.minDegree || 0}</span>
+          </label>
+          <input type="range" className="form-range mb-2" min="0" max="500" step="5"
+                 value={filters.minDegree || 0}
+                 onChange={e => onChange({ ...filters, minDegree: parseInt(e.target.value) })} />
+          <label className="form-label">
+            Min. avg score ≥ <span className="mono">{(filters.minScore || 0).toFixed(2)}</span>
+          </label>
+          <input type="range" className="form-range" min="0" max="1" step="0.01"
+                 value={filters.minScore || 0}
+                 onChange={e => onChange({ ...filters, minScore: parseFloat(e.target.value) })} />
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Active filter badges
+// ─────────────────────────────────────────────────────────────
+function ActiveFilterBadges({ filters, meta, onRemove }) {
+  const badges = [];
+  if (filters.tissue) {
+    const t = meta.tissues.find(x => String(x.id) === String(filters.tissue));
+    if (t) badges.push({ key: "tissue", label: `Tissue: ${t.name}` });
+  }
+  if (filters.source) {
+    const s = meta.sources.find(x => String(x.id) === String(filters.source));
+    if (s) badges.push({ key: "source", label: `Source: ${s.name}` });
+  }
+  if (filters.minDegree > 0) badges.push({ key: "minDegree", label: `Degree ≥ ${filters.minDegree}` });
+  if (filters.minScore > 0)  badges.push({ key: "minScore",  label: `Avg score ≥ ${filters.minScore.toFixed(2)}` });
+  if (badges.length === 0) return null;
+  return (
+    <div className="d-flex gap-2 flex-wrap align-items-center mb-2">
+      <span className="text-muted-sm">Active filters:</span>
+      {badges.map(b => (
+        <span key={b.key} className="active-filter-badge">
+          {b.label}
+          <button onClick={() => onRemove(b.key)} title="Remove filter">×</button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Main app
+// ─────────────────────────────────────────────────────────────
+function App() {
+  // ── data ──
+  const [allRows,    setAllRows]    = useState([]);   // all streamed rows
+  const [streaming,  setStreaming]  = useState(false);
+  const [progress,   setProgress]  = useState(0);    // 0–1
+  const [totalCount, setTotalCount] = useState(null); // from first response
+  const [loadError,  setLoadError]  = useState(null);
+
+  // ── filter meta (tissue list, source list) ──
+  const [meta, setMeta] = useState({ tissues: [], sources: [] });
+
+  // ── ui state ──
+  const [search,       setSearch]       = useState("");
+  const [filtersOpen,  setFiltersOpen]  = useState(false);
+  const [filters,      setFilters]      = useState({
+    tissue: "", source: "", minDegree: 0, minScore: 0,
+  });
+  const [sortKey,      setSortKey]      = useState("symbol");
+  const [sortDir,      setSortDir]      = useState("asc");
+  const [page,         setPage]         = useState(1);
+
+  const abortRef = useRef(null);
+
+  // ── Load filter meta once on mount ──
+  useEffect(() => {
+    fetch(filterMetaUrl)
+      .then(r => r.json())
+      .then(data => setMeta(data))
+      .catch(() => {});
+  }, []);
+
+  // ── Stream proteins whenever server-side filters change ──
+  // Server handles: tissue, source, minDegree, minScore
+  // Client handles: search (free-text) + sort + pagination
+  useEffect(() => {
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    setAllRows([]);
+    setTotalCount(null);
+    setLoadError(null);
+    setStreaming(true);
+    setProgress(0);
+    setPage(1);
+
+    const params = new URLSearchParams();
+    if (filters.tissue)             params.set("tissue",    filters.tissue);
+    if (filters.source)             params.set("source",    filters.source);
+    if (filters.minDegree > 0)      params.set("min_degree", filters.minDegree);
+    if (filters.minScore  > 0)      params.set("min_score",  filters.minScore);
+
+    let offset = 0;
+    let total  = null;
+    const accumulated = [];
+
+    async function fetchNextChunk() {
+      if (ctrl.signal.aborted) return;
+      const url = `${proteinsApiUrl}?${params}&offset=${offset}&limit=${CHUNK_SIZE}`;
+      try {
+        const res = await fetch(url, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(`Server error ${res.status}`);
+        const data = await res.json();
+
+        if (total === null) {
+          total = data.total;
+          setTotalCount(total);
+        }
+
+        accumulated.push(...data.proteins);
+        setAllRows([...accumulated]);
+        setProgress(accumulated.length / total);
+
+        if (accumulated.length < total && data.proteins.length > 0) {
+          offset += CHUNK_SIZE;
+          fetchNextChunk();
+        } else {
+          setStreaming(false);
+          setProgress(1);
+        }
+      } catch (err) {
+        if (err.name !== "AbortError") {
+          setLoadError(err.message);
+          setStreaming(false);
+        }
+      }
+    }
+
+    fetchNextChunk();
+    return () => ctrl.abort();
+  }, [filters.tissue, filters.source, filters.minDegree, filters.minScore]);
+
+  // ── Client-side: search + sort ──
+  const filtered = useMemo(() => {
+    let rows = allRows;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      rows = rows.filter(r =>
+        r.symbol.toLowerCase().includes(q) ||
+        r.uniprot_id.toLowerCase().includes(q) ||
+        String(r.entrez_id).includes(q)
+      );
+    }
+    return [...rows].sort((a, b) => {
+      const vals = {
+        symbol:    [a.symbol,    b.symbol],
+        uniprot_id:[a.uniprot_id,b.uniprot_id],
+        entrez_id: [a.entrez_id ?? 0, b.entrez_id ?? 0],
+        degree:    [a.degree,    b.degree],
+        avg_score: [a.avg_score ?? 0, b.avg_score ?? 0],
+      };
+      const [va, vb] = vals[sortKey] ?? [0, 0];
+      if (typeof va === "string") return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      return sortDir === "asc" ? va - vb : vb - va;
+    });
+  }, [allRows, search, sortKey, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageRows   = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir(key === "degree" || key === "avg_score" ? "desc" : "asc"); }
+    setPage(1);
+  };
+  const thCls = (k) => (sortKey === k ? `sorted-${sortDir}` : "");
+
+  const handleFilterChange = (newFilters) => { setFilters(newFilters); };
+  const removeFilter = (key) => {
+    const defaults = { tissue: "", source: "", minDegree: 0, minScore: 0 };
+    setFilters(f => ({ ...f, [key]: defaults[key] }));
+  };
+  const hasActiveFilters = filters.tissue || filters.source || filters.minDegree > 0 || filters.minScore > 0;
+
+  // ROW CLICK: navigate to protein detail page on row click
+  const handleRowClick = (protein) => {
+    window.location.href = proteinDetailUrl.replace("{id}", protein.id);
+  };
+  // NO CLICK: remove the handleRowClick function entirely, and remove onClick from <tr>
+
+  return (
+    <div>
+      {/* Hero */}
+      <div className="hippie-hero">
+        <h1>Browse<br /><em style={{color:"var(--hippie-teal)"}}>Proteins</em></h1>
+        <p>All human proteins in HIPPIE with their interaction degree, confidence scores,
+           and supporting databases. Click any row to view the protein detail page.</p>
+           {/* NO CLICK: Remove "Click any row to view the protein detail page." from the paragraph above */}
+      </div>
+
+      {/* Toolbar */}
+      <div className="hippie-card mb-3">
+        <div className="browse-search d-flex gap-2 align-items-center flex-wrap">
+          <input
+            type="text"
+            className="form-control flex-grow-1"
+            placeholder="Search by gene symbol, UniProt ID, or Entrez ID…"
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+          />
+          <button
+            className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
+            onClick={() => setFiltersOpen(o => !o)}
+          >
+            <i className={`bi bi-funnel${hasActiveFilters ? "-fill" : ""}`}></i>
+            Filters
+            {hasActiveFilters && (
+              <span style={{
+                background: "var(--hippie-teal)", color: "#fff",
+                borderRadius: "100px", fontSize: ".65rem",
+                padding: ".05rem .4rem", marginLeft: ".2rem",
+              }}>
+                {[filters.tissue, filters.source, filters.minDegree > 0, filters.minScore > 0].filter(Boolean).length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Active filter badges */}
+        {hasActiveFilters && !filtersOpen && (
+          <div className="mt-2">
+            <ActiveFilterBadges filters={filters} meta={meta} onRemove={removeFilter} />
+          </div>
+        )}
+      </div>
+
+      {/* Filter panel */}
+      {filtersOpen && (
+        <FilterPanel filters={filters} onChange={handleFilterChange} meta={meta} />
+      )}
+
+      {/* Loading progress */}
+      {streaming && (
+        <div className="mb-2">
+          <div className="d-flex justify-content-between align-items-center mb-1">
+            <span className="text-muted-sm">
+              <span className="spinner-sm me-1"></span>
+              Loading proteins… {allRows.length.toLocaleString()}
+              {totalCount !== null ? ` / ${totalCount.toLocaleString()}` : ""}
+            </span>
+            <span className="text-muted-sm">{Math.round(progress * 100)}%</span>
+          </div>
+          <div className="batch-progress">
+            <div className="batch-progress-fill" style={{width:`${Math.round(progress*100)}%`}} />
+          </div>
+        </div>
+      )}
+
+      {/* Error */}
+      {loadError && (
+        <div className="hippie-card mb-3 text-center"
+             style={{borderColor:"var(--hippie-accent)", color:"var(--hippie-accent)"}}>
+          <i className="bi bi-exclamation-circle fs-3 d-block mb-2"></i>
+          <strong>{loadError}</strong>
+        </div>
+      )}
+
+      {/* Results header */}
+      {!loadError && (allRows.length > 0 || !streaming) && (
+        <div className="d-flex justify-content-between align-items-baseline flex-wrap gap-2 mb-2">
+          <div>
+            <span style={{fontFamily:"var(--font-display)", fontSize:"1.1rem"}}>
+              Proteins in HIPPIE
+            </span>
+            <span className="text-muted-sm ms-2">
+              {filtered.length.toLocaleString()} shown
+              {totalCount !== null && filtered.length < totalCount
+                ? ` (of ${totalCount.toLocaleString()} loaded)` : ""}
+              {streaming && " — still loading…"}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Table */}
+      {(allRows.length > 0) && (
+        <>
+          <div className="hippie-card p-0 overflow-hidden mb-3">
+            <div style={{overflowX:"auto"}}>
+              <table className="hippie-table">
+                <thead>
+                  <tr>
+                    <th onClick={() => handleSort("uniprot_id")} className={thCls("uniprot_id")}>UniProt ID</th>
+                    <th onClick={() => handleSort("entrez_id")}  className={thCls("entrez_id")}>Entrez Gene ID</th>
+                    <th onClick={() => handleSort("symbol")}     className={thCls("symbol")}>Gene Symbol</th>
+                    <th onClick={() => handleSort("degree")}     className={thCls("degree")}>Degree</th>
+                    <th onClick={() => handleSort("avg_score")}  className={thCls("avg_score")}>Avg. Score</th>
+                    <th className="no-sort" style={{cursor:"default"}}>Interactions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map(row => (
+                    <tr
+                      key={row.id}
+                      onClick={() => handleRowClick(row)} // ROW CLICK: remove this prop entirely (NO CLICK: remove onClick)
+                      title={`View protein detail for ${row.symbol}`} // ROW CLICK: remove this prop (NO CLICK: remove title)
+                    >
+                      <td>
+                        {row.uniprot_id
+                          ? <a href={`https://www.uniprot.org/uniprot/${row.uniprot_id}`}
+                               target="_blank" rel="noopener noreferrer"
+                               onClick={e => e.stopPropagation()} // ROW CLICK: remove this (NO CLICK: remove onClick on this <a>)
+                            ><span className="mono">{row.uniprot_id}</span></a>
+                          : <span className="text-muted-sm">—</span>
+                        }
+                      </td>
+                      <td>
+                        {row.entrez_id
+                          ? <a href={`https://www.ncbi.nlm.nih.gov/gene/${row.entrez_id}`}
+                               target="_blank" rel="noopener noreferrer"
+                               onClick={e => e.stopPropagation()} // ROW CLICK: remove this (NO CLICK: remove onClick on this <a>)
+                            ><span className="mono">{row.entrez_id}</span></a>
+                          : <span className="text-muted-sm">—</span>
+                        }
+                      </td>
+                      <td><strong>{row.symbol}</strong></td>
+                      <td><span className="tag-chip">{row.degree}</span></td>
+                      <td>
+                        {row.avg_score != null
+                          ? <span className={`score-badge ${row.avg_score >= 0.72 ? "score-high" : row.avg_score >= 0.63 ? "score-med" : "score-low"}`}>
+                              {row.avg_score.toFixed(4)}
+                            </span>
+                          : <span className="text-muted-sm">—</span>
+                        }
+                      </td>
+                      <td>
+                        <a
+                          href={`${proteinQueryUrl}?q=${encodeURIComponent(row.symbol)}`}
+                          onClick={e => e.stopPropagation()} // ROW CLICK: remove this (NO CLICK: remove onClick on this <a>)
+                        >show</a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <span className="text-muted-sm">
+                Page {page} of {totalPages} — {(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE, filtered.length)} of {filtered.length}
+              </span>
+              <Pagination page={page} totalPages={totalPages}
+                onChange={p => { setPage(p); window.scrollTo({top:0,behavior:"smooth"}); }} />
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Empty state — only once streaming is done */}
+      {!streaming && !loadError && allRows.length === 0 && (
+        <div className="state-box">
+          <i className="bi bi-inbox state-icon"></i>
+          <p className="mb-0">No proteins match the current filters.</p>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("hippie-browse-app")).render(<App />);
+</script>
+{% endverbatim %}
+{% endblock %}

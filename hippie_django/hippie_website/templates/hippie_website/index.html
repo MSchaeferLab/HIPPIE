@@ -59,14 +59,6 @@
   .hippie-search-form .btn-search:hover:not(:disabled) { background: #145555; }
   .hippie-search-form .btn-search:disabled { background: var(--hippie-ink-muted); cursor: not-allowed; }
 
-  /* ── Example chips ────────────────────────────── */
-  .example-chip { cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
-  .example-chip:hover {
-    background: var(--hippie-teal-soft);
-    color: var(--hippie-teal);
-    border-color: var(--hippie-teal);
-  }
-
   /* ── Results table ────────────────────────────── */
   .results-title { font-family: var(--font-display); font-size: 1.4rem; margin-bottom: 0; }
 
@@ -154,7 +146,7 @@
 <script type="text/babel">
 const { useState, useCallback, useRef } = React;
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 const EXAMPLES  = ["HTT", "P42858", "3064", "BRCA1_HUMAN"];
 
 function scoreClass(s) {
