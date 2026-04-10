@@ -155,6 +155,160 @@ def protein_query_api(request):
         "error":         None,
     })
 
+# ---------------------------------------------------------------------------
+# Network query
+# ---------------------------------------------------------------------------
+
+# Choices passed to the template for the filter form
+_DIRECTIONALITY_CHOICES = [
+    ("any",      "Any"),
+    ("directed", "Directed only"),
+    ("undirected","Undirected only"),
+]
+
+_EFFECT_CHOICES = [
+    ("activation",  "Activation"),
+    ("inhibition",  "Inhibition"),
+    ("binding",     "Binding"),
+    ("reaction",    "Reaction"),
+    ("other",       "Other / unknown"),
+]
+
+
+@require_GET
+def network_query_view(request):
+    """
+    Network query page.
+
+    Renders the filter form.  If any GET parameters are present, also calls
+    the network_query_api logic and passes results into the template context.
+    """
+    context = {
+        "directionality_choices": _DIRECTIONALITY_CHOICES,
+        "effect_choices":         _EFFECT_CHOICES,
+        "tissue_list":            _get_tissue_list(),
+        "selected_effects":       request.GET.getlist("effect_type"),
+        "selected_tissues":       request.GET.getlist("tissues"),
+        "network_result":         None,
+    }
+
+    # If the user submitted the form, run the (stub) query and attach results
+    if request.GET.get("proteins"):
+        context["network_result"] = _run_network_query(request.GET)
+
+    return render(request, "hippie_website/network_query.html", context)
+
+
+@require_GET
+def network_query_api(request):
+    """
+    GET /api/network/?proteins=...&score_min=...&...
+
+    Returns the same shape as protein_query_api but for a set of proteins:
+    {
+        "node_count":   <int>,
+        "edge_count":   <int>,
+        "interactions": [
+            { id, protein_a, protein_b, score, source_count, experiment_count }
+        ],
+        "error": null | "<message>"
+    }
+    """
+    result = _run_network_query(request.GET)
+    if result.get("error"):
+        return JsonResponse(result, status=400)
+    return JsonResponse(result)
+
+
+def _get_tissue_list():
+    """Return a sorted list of tissue names for the filter form.
+
+    TODO: replace with a real DB query once the tissue model is wired up.
+    """
+    return [
+        "Brain", "Heart", "Kidney", "Liver", "Lung",
+        "Muscle", "Ovary", "Pancreas", "Prostate", "Skin",
+        "Testis", "Thyroid",
+    ]
+
+
+def _run_network_query(params) -> dict:
+    """
+    Stub that returns the correct response shape.
+
+    Replace the body of this function with real query logic once the
+    network query requirements are finalised.
+
+    Expected params (from GET or POST):
+        proteins        — newline-separated list of identifiers
+        expand          — "none" | "first_shell" | "second_shell"
+        score_min       — float 0–1
+        directionality  — "any" | "directed" | "undirected"
+        effect_type     — list of effect type strings
+        tissue_mode     — "any" | "both" | "one"
+        tissues         — list of tissue names
+        go_terms        — comma-separated GO term IDs
+        mesh_terms      — comma-separated MeSH term names
+    """
+    # Parse seed proteins
+    raw = params.get("proteins", "")
+    seeds = [s.strip() for s in raw.splitlines() if s.strip()]
+
+    if not seeds:
+        return {
+            "node_count":   0,
+            "edge_count":   0,
+            "interactions": [],
+            "tsv_url":      "",
+            "sif_url":      "",
+            "error":        "No seed proteins provided.",
+        }
+
+    # ── Stub response — replace with real logic ──────────────
+    return {
+        "node_count":   0,
+        "edge_count":   0,
+        "interactions": [],   # list of dicts: { interaction_id, protein_a, protein_b, score, source_count, experiment_count }
+        "tsv_url":      "",   # URL to a generated TSV download
+        "sif_url":      "",   # URL to a generated SIF download
+        "error":        None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Browse
+# ---------------------------------------------------------------------------
+
+@require_GET
+def browse_view(request):
+    """Browse all interactions — stub."""
+    return render(request, "hippie_website/browse.html", {})
+
+
+# ---------------------------------------------------------------------------
+# Screen annotation
+# ---------------------------------------------------------------------------
+
+@require_GET
+def screen_annotation_view(request):
+    """Screen annotation tool — stub."""
+    return render(request, "hippie_website/screen_annotation.html", {})
+
+
+# ---------------------------------------------------------------------------
+# Utility pages
+# ---------------------------------------------------------------------------
+
+@require_GET
+def download_view(request):
+    """Database download page — stub."""
+    return render(request, "hippie_website/download.html", {})
+
+
+@require_GET
+def information_view(request):
+    """Documentation / information page — stub."""
+    return render(request, "hippie_website/information.html", {})
 
 # ---------------------------------------------------------------------------
 # Interaction detail view
