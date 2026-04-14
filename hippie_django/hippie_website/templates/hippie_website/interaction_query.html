@@ -11,23 +11,6 @@
 {% csrf_token %}  {# renders a hidden input, which also sets the cookie #}
 
 {% block extra_styles %}
-  /* ── Hero ─────────────────────────────────────── */
-  .hippie-hero {
-    padding: 3rem 0 2rem;
-    border-bottom: 1px solid var(--hippie-border);
-    margin-bottom: 2.5rem;
-  }
-  .hippie-hero h1 {
-    font-size: clamp(1.75rem, 4vw, 3rem);
-    line-height: 1.1;
-    margin-bottom: .75rem;
-  }
-  .hippie-hero p {
-    font-size: 1rem;
-    color: var(--hippie-ink-muted);
-    max-width: 60ch;
-    margin-bottom: 0;
-  }
 
   /* ── Input mode toggle ────────────────────────── */
   .mode-toggle {
@@ -139,80 +122,9 @@
 
   /* ── Results table ────────────────────────────── */
   .results-title { font-family: var(--font-display); font-size: 1.4rem; margin-bottom: 0; }
-
-  .hippie-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .875rem; }
-  .hippie-table thead th {
-    background: var(--hippie-bg);
-    border-bottom: 2px solid var(--hippie-border);
-    border-top: 1px solid var(--hippie-border);
-    padding: .6rem .85rem;
-    font-size: .75rem;
-    font-family: var(--font-mono);
-    font-weight: 500;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-    color: var(--hippie-ink-muted);
-    white-space: nowrap;
-    user-select: none;
-    cursor: pointer;
-  }
-  .hippie-table thead th.no-sort { cursor: default; }
-  .hippie-table thead th:not(.no-sort):hover { color: var(--hippie-ink); }
-  .hippie-table thead th.sorted-asc::after  { content: ' ↑'; color: var(--hippie-teal); }
-  .hippie-table thead th.sorted-desc::after { content: ' ↓'; color: var(--hippie-teal); }
-  .hippie-table tbody tr { border-bottom: 1px solid var(--hippie-border); transition: background .1s; }
-  .hippie-table tbody tr:hover { background: var(--hippie-bg); }
   .hippie-table tbody tr.row-not-found { background: var(--hippie-accent-soft); }
   .hippie-table tbody tr.row-not-found:hover { background: #f5dedd; }
-  .hippie-table tbody td { padding: .6rem .85rem; vertical-align: middle; }
-  .hippie-table tbody tr:last-child td { border-bottom: none; }
 
-  /* ── Pagination ───────────────────────────────── */
-  .hippie-pagination { display: flex; align-items: center; gap: .25rem; flex-wrap: wrap; }
-  .hippie-pagination button {
-    border: 1px solid var(--hippie-border);
-    background: var(--hippie-surface);
-    color: var(--hippie-ink);
-    border-radius: var(--radius-sm);
-    padding: .25rem .6rem;
-    font-size: .8rem;
-    cursor: pointer;
-    font-family: var(--font-mono);
-    transition: background .1s;
-  }
-  .hippie-pagination button:hover:not(:disabled) { background: var(--hippie-bg); }
-  .hippie-pagination button.active { background: var(--hippie-teal); color: #fff; border-color: var(--hippie-teal); }
-  .hippie-pagination button:disabled { opacity: .4; cursor: not-allowed; }
-
-  /* ── Export bar ───────────────────────────────── */
-  .export-bar { display: flex; gap: .5rem; flex-wrap: wrap; }
-  .export-bar button {
-    background: var(--hippie-surface);
-    border: 1px solid var(--hippie-border);
-    border-radius: var(--radius-sm);
-    color: var(--hippie-ink-muted);
-    font-size: .78rem;
-    font-family: var(--font-mono);
-    padding: .25rem .7rem;
-    cursor: pointer;
-    transition: background .12s, color .12s;
-  }
-  .export-bar button:hover { background: var(--hippie-bg); color: var(--hippie-ink); }
-
-  /* ── Misc states ──────────────────────────────── */
-  .state-box { text-align: center; padding: 3rem 1rem; color: var(--hippie-ink-muted); }
-  .state-icon { font-size: 2.5rem; display: block; margin-bottom: .75rem; opacity: .4; }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .spinner {
-    width: 16px; height: 16px;
-    border: 2px solid var(--hippie-border);
-    border-top-color: var(--hippie-teal);
-    border-radius: 50%;
-    animation: spin .7s linear infinite;
-    display: inline-block;
-    vertical-align: middle;
-  }
 {% endblock %}
 
 {% block content %}
@@ -254,6 +166,12 @@ const EXAMPLES = [
     text:  "HTT;EGFR\nBRCA1;TP53\nFAKEPROT999;TP53\nHTT;BRCA1",
   },
 ];
+
+/* ── Shared components ── */
+{% endverbatim %}
+{% include "hippie_website/includes/_shared_react.html" %}
+{% verbatim %}
+
 
 // ─────────────────────────────────────────────────────────────
 // Parsing helpers
@@ -329,15 +247,6 @@ function getCookie(name) {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
-// ─────────────────────────────────────────────────────────────
-// Score badge
-// ─────────────────────────────────────────────────────────────
-
-function ScoreBadge({ score }) {
-  if (score < 0) return <span className="tag-chip" style={{color:"var(--hippie-accent)"}}>Not found</span>;
-  const cls = score >= 0.72 ? "score-high" : score >= 0.63 ? "score-med" : "score-low";
-  return <span className={`score-badge ${cls}`}>{score.toFixed(4)}</span>;
-}
 
 // ─────────────────────────────────────────────────────────────
 // Export bar
@@ -370,28 +279,6 @@ function ExportBar({ rows }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Pagination
-// ─────────────────────────────────────────────────────────────
-
-function Pagination({ page, totalPages, onChange }) {
-  if (totalPages <= 1) return null;
-  const pages = [];
-  const lo = Math.max(1, page - 2), hi = Math.min(totalPages, page + 2);
-  if (lo > 1) { pages.push(1); if (lo > 2) pages.push("…"); }
-  for (let i = lo; i <= hi; i++) pages.push(i);
-  if (hi < totalPages) { if (hi < totalPages - 1) pages.push("…"); pages.push(totalPages); }
-  return (
-    <div className="hippie-pagination">
-      <button disabled={page === 1} onClick={() => onChange(page - 1)}>‹</button>
-      {pages.map((p, i) => p === "…"
-        ? <span key={i} style={{ padding: "0 .25rem", color: "var(--hippie-ink-muted)" }}>…</span>
-        : <button key={p} className={p === page ? "active" : ""} onClick={() => onChange(p)}>{p}</button>
-      )}
-      <button disabled={page === totalPages} onClick={() => onChange(page + 1)}>›</button>
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────
 // Results table

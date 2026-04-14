@@ -15,7 +15,6 @@ All database access goes through the custom managers defined in managers.py:
 """
 
 import json
-import json as _json
 from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
@@ -52,6 +51,29 @@ def _protein_display(protein: Protein) -> dict:
         "gene_id":    entrez.gene_id     if entrez  else None,
         "symbol":     entrez.name        if entrez  else protein.name,
     }
+
+def _protein_ids_from_raw(raw: str) -> tuple[list[int], list[str]]:
+    """
+    Resolve a whitespace-separated string of identifiers to Protein PKs.
+    Returns (resolved_pks, unresolved_identifiers).
+    """
+    protein_ids: list[int] = []
+    unresolved:  list[str] = []
+    seen: set[int] = set()
+    for ident in raw.split():
+        pk = (
+            Protein.objects.resolve(ident)
+            .values_list("pk", flat=True)
+            .first()
+        )
+        if pk is not None and pk not in seen:
+            protein_ids.append(pk)
+            seen.add(pk)
+        elif pk is None:
+            unresolved.append(ident)
+    return protein_ids, unresolved
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -105,11 +127,7 @@ def protein_query_api(request):
     # ── Resolve identifier → Protein ──────────────────────────────────
     # resolve() returns a queryset; prefetch IDs so _protein_display()
     # can read them without extra queries.
-    proteins = (
-        Protein.objects
-        .resolve(q)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-    )
+    proteins = Protein.objects.resolve(q).prefetch_related("uniprot_ids", "entrez_ids")
 
     if not proteins.exists():
         return JsonResponse({
@@ -136,10 +154,8 @@ def protein_query_api(request):
     results = []
     for interaction in interactions_qs:
         # Determine which side is the queried protein and which is the partner.
-        if interaction.protein_1_id == protein.pk:
-            partner = interaction.protein_2
-        else:
-            partner = interaction.protein_1
+        partner = interaction.protein_2 if interaction.protein_1_id == protein.pk else interaction.protein_1
+
 
         results.append({
             "id":               interaction.pk,
@@ -148,9 +164,7 @@ def protein_query_api(request):
             # .all() on a prefetched M2M hits the cache — no extra queries.
             "source_count":     interaction.sources.all().count(),
             "experiment_count": interaction.experiments.all().count(),
-            "detail_url":       reverse(
-                "hippie_website:interaction_detail", args=[interaction.pk]
-            ),
+            "detail_url":       reverse("hippie_website:interaction_detail", args=[interaction.pk]),
         })
 
     return JsonResponse({
@@ -160,23 +174,167 @@ def protein_query_api(request):
     })
 
 # ---------------------------------------------------------------------------
+# Interaction query
+# ---------------------------------------------------------------------------
+
+MAX_PAIRS   = 5_000 # hard limit enforced server-side and client-site
+BATCH_LIMIT = 200 # max pairs accepted per individual API call
+
+
+@require_GET
+def interaction_query_view(request):
+    return render(request, "hippie_website/interaction_query.html")
+
+
+@require_POST
+def interaction_query_api(request):
+    """
+    POST /api/interaction/
+
+    Request body (JSON):
+    {
+        "pairs": [
+            { "a": "<id>", "b": "<id>", "input_order": <int> },
+            ...
+        ]
+    }
+
+    Response (JSON):
+    {
+        "results": [
+            {
+                "input_order":     <int>,
+                "input_a":         "<raw>",
+                "input_b":         "<raw>",
+                "symbol_a":        "<gene>",
+                "symbol_b":        "<gene>",
+                "uniprot_a":       "<id>" | "",
+                "uniprot_b":       "<id>" | "",
+                "score":           <float>,   # -1.0 if not found
+                "source_count":    <int>,     # 0 if not found
+                "experiment_count":<int>,     # 0 if not found
+                "interaction_id":  <int> | null,
+                "detail_url":      "<url>" | ""
+            },
+            ...
+        ]
+    }
+    """
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+
+    raw_pairs = body.get("pairs", [])
+    if not isinstance(raw_pairs, list):
+        return JsonResponse({"error": "'pairs' must be a list."}, status=400)
+    if len(raw_pairs) > BATCH_LIMIT:
+        return JsonResponse(
+            {"error": f"Batch too large: {len(raw_pairs)} pairs (max {BATCH_LIMIT} per request)."},
+            status=400,
+        )
+
+    results = []
+    for item in raw_pairs:
+        input_a = str(item.get("a", "")).strip()
+        input_b = str(item.get("b", "")).strip()
+        input_order = int(item.get("input_order", 0))
+
+        row = _resolve_interaction_pair(input_a, input_b, input_order)
+        results.append(row)
+    return JsonResponse({"results": results})
+
+
+def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> dict:
+    """
+    Resolve two identifiers to proteins, look up their interaction,
+    and return a result row.
+
+    A score of -1.0 signals "not found" (either protein unknown, or
+    no interaction recorded between them).
+    """
+    NOT_FOUND = {
+        "input_order":      input_order,
+        "input_a":          input_a,
+        "input_b":          input_b,
+        "symbol_a":         input_a,
+        "symbol_b":         input_b,
+        "uniprot_a":        "",
+        "uniprot_b":        "",
+        "score":            -1.0,
+        "source_count":     0,
+        "experiment_count": 0,
+        "interaction_id":   None,
+        "detail_url":       "",
+    }
+
+    protein_a = Protein.objects.resolve(input_a).prefetch_related("uniprot_ids", "entrez_ids").first()
+    protein_b = Protein.objects.resolve(input_b).prefetch_related("uniprot_ids", "entrez_ids").first()
+
+    if protein_a is None or protein_b is None:
+        return NOT_FOUND
+
+    p1, p2 = (protein_a, protein_b) if protein_a.pk <= protein_b.pk else (protein_b, protein_a)
+
+    try:
+        interaction = (
+            Interaction.objects
+            .with_proteins()
+            .prefetch_related("sources", "experiments")
+            .get(protein_1=p1, protein_2=p2)
+        )
+    except Interaction.DoesNotExist:
+        # Proteins resolved but no interaction on record
+        ua = _protein_display(protein_a)
+        ub = _protein_display(protein_b)
+        return {
+            **NOT_FOUND,
+            "symbol_a":  ua["symbol"],
+            "symbol_b":  ub["symbol"],
+            "uniprot_a": ua["uniprot_id"],
+            "uniprot_b": ub["uniprot_id"],
+        }
+
+    ua = _protein_display(protein_a)
+    ub = _protein_display(protein_b)
+
+    return {
+        "input_order": input_order,
+        "input_a": input_a,
+        "input_b": input_b,
+        "symbol_a": ua["symbol"],
+        "symbol_b": ub["symbol"],
+        "uniprot_a": ua["uniprot_id"],
+        "uniprot_b": ub["uniprot_id"],
+        "score":            round(interaction.score, 4),
+        "source_count":     interaction.sources.all().count(),
+        "experiment_count": interaction.experiments.all().count(),
+        "interaction_id":   interaction.pk,
+        "detail_url":       reverse("hippie_website:interaction_detail", args=[interaction.pk]),
+    }
+
+
+
+
+
+# ---------------------------------------------------------------------------
 # Network query
 # ---------------------------------------------------------------------------
 
 # Choices passed to the template for the filter form
-_DIRECTIONALITY_CHOICES = [
-    ("any",      "Any"),
-    ("directed", "Directed only"),
-    ("undirected","Undirected only"),
-]
+#_DIRECTIONALITY_CHOICES = [
+#    ("any",      "Any"),
+#    ("directed", "Directed only"),
+#    ("undirected","Undirected only"),
+#]
 
-_EFFECT_CHOICES = [
-    ("activation",  "Activation"),
-    ("inhibition",  "Inhibition"),
-    ("binding",     "Binding"),
-    ("reaction",    "Reaction"),
-    ("other",       "Other / unknown"),
-]
+#_EFFECT_CHOICES = [
+#    ("activation",  "Activation"),
+#    ("inhibition",  "Inhibition"),
+#    ("binding",     "Binding"),
+#    ("reaction",    "Reaction"),
+#    ("other",       "Other / unknown"),
+#]
 
 
 class NetworkQueryView(FormView):
@@ -264,9 +422,9 @@ def network_query_api(request):
     return JsonResponse(result)
 
 
-def _get_tissue_list():
-    """Return all Tissue names, sorted, for the filter form checkboxes."""
-    return list(Tissue.objects.values_list("name", flat=True).order_by("name"))
+#def _get_tissue_list():
+#    """Return all Tissue names, sorted, for the filter form checkboxes."""
+#    return list(Tissue.objects.values_list("name", flat=True).order_by("name"))
 
 
 def _run_network_query(params) -> dict:
@@ -286,29 +444,8 @@ def _run_network_query(params) -> dict:
     """
     # -- 1. Resolve seed proteins -----------------------------------------
     raw = params.get("proteins", "")
-    # Accept newline- or space-separated identifiers from both the textarea
-    # and the GET query string
-    seeds = raw.split() if raw else []
-    if not seeds:
-        return {
-            "node_count": 0, "edge_count": 0,
-            "interactions": [], "error": "No seed proteins provided.",
-        }
-
-    protein_ids: list[int] = []
-    unresolved: list[str] = []
-    seen: set[int] = set()
-    for ident in seeds:
-        pk = (
-            Protein.objects.resolve(ident)
-            .values_list("pk", flat=True)
-            .first()
-        )
-        if pk is not None and pk not in seen:
-            protein_ids.append(pk)
-            seen.add(pk)
-        elif pk is None:
-            unresolved.append(ident)
+    protein_ids, unresolved = _protein_ids_from_raw(raw)
+    seen = set(protein_ids)
 
     if not protein_ids:
         return {
@@ -427,318 +564,6 @@ def _run_network_query(params) -> dict:
     }
 
 # ---------------------------------------------------------------------------
-# Interaction query
-# ---------------------------------------------------------------------------
-
-MAX_PAIRS   = 5_000   # hard limit enforced server-side as well as client-side
-BATCH_LIMIT = 200     # max pairs accepted per individual API call
-
-@require_GET
-def interaction_query_view(request):
-    """Render the interaction query page (React shell)."""
-    return render(request, "hippie_website/interaction_query.html")
-
-
-@require_POST
-def interaction_query_api(request):
-    """
-    POST /api/interaction/
-
-    Request body (JSON):
-    {
-        "pairs": [
-            { "a": "<id>", "b": "<id>", "input_order": <int> },
-            ...
-        ]
-    }
-
-    Response (JSON):
-    {
-        "results": [
-            {
-                "input_order":     <int>,
-                "input_a":         "<raw>",
-                "input_b":         "<raw>",
-                "symbol_a":        "<gene>",
-                "symbol_b":        "<gene>",
-                "uniprot_a":       "<id>" | "",
-                "uniprot_b":       "<id>" | "",
-                "score":           <float>,   # -1.0 if not found
-                "source_count":    <int>,     # 0 if not found
-                "experiment_count":<int>,     # 0 if not found
-                "interaction_id":  <int> | null,
-                "detail_url":      "<url>" | ""
-            },
-            ...
-        ]
-    }
-    """
-    try:
-        body = _json.loads(request.body)
-    except _json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON body."}, status=400)
-
-    raw_pairs = body.get("pairs", [])
-    if not isinstance(raw_pairs, list):
-        return JsonResponse({"error": "'pairs' must be a list."}, status=400)
-    if len(raw_pairs) > BATCH_LIMIT:
-        return JsonResponse(
-            {"error": f"Batch too large: {len(raw_pairs)} pairs (max {BATCH_LIMIT} per request)."},
-            status=400,
-        )
-
-    results = []
-    for item in raw_pairs:
-        input_a      = str(item.get("a", "")).strip()
-        input_b      = str(item.get("b", "")).strip()
-        input_order  = int(item.get("input_order", 0))
-
-        row = _resolve_interaction_pair(input_a, input_b, input_order)
-        results.append(row)
-
-    return JsonResponse({"results": results})
-
-
-def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> dict:
-    """
-    Resolve two identifiers to proteins, look up their interaction,
-    and return a result row.
-
-    A score of -1.0 signals "not found" (either protein unknown, or
-    no interaction recorded between them).
-    """
-    NOT_FOUND = {
-        "input_order":      input_order,
-        "input_a":          input_a,
-        "input_b":          input_b,
-        "symbol_a":         input_a,
-        "symbol_b":         input_b,
-        "uniprot_a":        "",
-        "uniprot_b":        "",
-        "score":            -1.0,
-        "source_count":     0,
-        "experiment_count": 0,
-        "interaction_id":   None,
-        "detail_url":       "",
-    }
-
-    # Resolve both identifiers
-    proteins_a = (
-        Protein.objects.resolve(input_a)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-    )
-    proteins_b = (
-        Protein.objects.resolve(input_b)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-    )
-
-    protein_a = proteins_a.first()
-    protein_b = proteins_b.first()
-
-    if protein_a is None or protein_b is None:
-        return NOT_FOUND
-
-    # Canonical ordering: protein_1_id <= protein_2_id
-    p1, p2 = (protein_a, protein_b) if protein_a.pk <= protein_b.pk else (protein_b, protein_a)
-
-    try:
-        interaction = (
-            Interaction.objects
-            .with_proteins()  # select_related + prefetch both sides
-            .prefetch_related(  # add counts columns
-                "sources",
-                "experiments",
-            )
-            .get(protein_1=p1, protein_2=p2)
-        )
-    except Interaction.DoesNotExist:
-        # Proteins resolved but no interaction on record
-        ua = _protein_display(protein_a)
-        ub = _protein_display(protein_b)
-        return {
-            **NOT_FOUND,
-            "symbol_a":  ua["symbol"],
-            "symbol_b":  ub["symbol"],
-            "uniprot_a": ua["uniprot_id"],
-            "uniprot_b": ub["uniprot_id"],
-        }
-
-    ua = _protein_display(protein_a)
-    ub = _protein_display(protein_b)
-
-    return {
-        "input_order":      input_order,
-        "input_a":          input_a,
-        "input_b":          input_b,
-        "symbol_a":         ua["symbol"],
-        "symbol_b":         ub["symbol"],
-        "uniprot_a":        ua["uniprot_id"],
-        "uniprot_b":        ub["uniprot_id"],
-        "score":            round(interaction.score, 4),
-        "source_count":     interaction.sources.all().count(),
-        "experiment_count": interaction.experiments.all().count(),
-        "interaction_id":   interaction.pk,
-        "detail_url":       reverse("hippie_website:interaction_detail", args=[interaction.pk]),
-    }
-
-# ---------------------------------------------------------------------------
-# Interaction query
-# ---------------------------------------------------------------------------
-
-MAX_PAIRS   = 5_000   # hard limit enforced server-side as well as client-side
-BATCH_LIMIT = 200     # max pairs accepted per individual API call
-
-@require_GET
-def interaction_query_view(request):
-    """Render the interaction query page (React shell)."""
-    return render(request, "hippie_website/interaction_query.html")
-
-
-@require_POST
-def interaction_query_api(request):
-    """
-    POST /api/interaction/
-
-    Request body (JSON):
-    {
-        "pairs": [
-            { "a": "<id>", "b": "<id>", "input_order": <int> },
-            ...
-        ]
-    }
-
-    Response (JSON):
-    {
-        "results": [
-            {
-                "input_order":     <int>,
-                "input_a":         "<raw>",
-                "input_b":         "<raw>",
-                "symbol_a":        "<gene>",
-                "symbol_b":        "<gene>",
-                "uniprot_a":       "<id>" | "",
-                "uniprot_b":       "<id>" | "",
-                "score":           <float>,   # -1.0 if not found
-                "source_count":    <int>,     # 0 if not found
-                "experiment_count":<int>,     # 0 if not found
-                "interaction_id":  <int> | null,
-                "detail_url":      "<url>" | ""
-            },
-            ...
-        ]
-    }
-    """
-    try:
-        body = _json.loads(request.body)
-    except _json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON body."}, status=400)
-
-    raw_pairs = body.get("pairs", [])
-    if not isinstance(raw_pairs, list):
-        return JsonResponse({"error": "'pairs' must be a list."}, status=400)
-    if len(raw_pairs) > BATCH_LIMIT:
-        return JsonResponse(
-            {"error": f"Batch too large: {len(raw_pairs)} pairs (max {BATCH_LIMIT} per request)."},
-            status=400,
-        )
-
-    results = []
-    for item in raw_pairs:
-        input_a      = str(item.get("a", "")).strip()
-        input_b      = str(item.get("b", "")).strip()
-        input_order  = int(item.get("input_order", 0))
-
-        row = _resolve_interaction_pair(input_a, input_b, input_order)
-        results.append(row)
-
-    return JsonResponse({"results": results})
-
-
-def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> dict:
-    """
-    Resolve two identifiers to proteins, look up their interaction,
-    and return a result row.
-
-    A score of -1.0 signals "not found" (either protein unknown, or
-    no interaction recorded between them).
-    """
-    NOT_FOUND = {
-        "input_order":      input_order,
-        "input_a":          input_a,
-        "input_b":          input_b,
-        "symbol_a":         input_a,
-        "symbol_b":         input_b,
-        "uniprot_a":        "",
-        "uniprot_b":        "",
-        "score":            -1.0,
-        "source_count":     0,
-        "experiment_count": 0,
-        "interaction_id":   None,
-        "detail_url":       "",
-    }
-
-    # Resolve both identifiers
-    proteins_a = (
-        Protein.objects.resolve(input_a)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-    )
-    proteins_b = (
-        Protein.objects.resolve(input_b)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-    )
-
-    protein_a = proteins_a.first()
-    protein_b = proteins_b.first()
-
-    if protein_a is None or protein_b is None:
-        return NOT_FOUND
-
-    # Canonical ordering: protein_1_id <= protein_2_id
-    p1, p2 = (protein_a, protein_b) if protein_a.pk <= protein_b.pk else (protein_b, protein_a)
-
-    try:
-        interaction = (
-            Interaction.objects
-            .with_proteins()  # select_related + prefetch both sides
-            .prefetch_related(  # add counts columns
-                "sources",
-                "experiments",
-            )
-            .get(protein_1=p1, protein_2=p2)
-        )
-    except Interaction.DoesNotExist:
-        # Proteins resolved but no interaction on record
-        ua = _protein_display(protein_a)
-        ub = _protein_display(protein_b)
-        return {
-            **NOT_FOUND,
-            "symbol_a":  ua["symbol"],
-            "symbol_b":  ub["symbol"],
-            "uniprot_a": ua["uniprot_id"],
-            "uniprot_b": ub["uniprot_id"],
-        }
-
-    ua = _protein_display(protein_a)
-    ub = _protein_display(protein_b)
-
-    return {
-        "input_order":      input_order,
-        "input_a":          input_a,
-        "input_b":          input_b,
-        "symbol_a":         ua["symbol"],
-        "symbol_b":         ub["symbol"],
-        "uniprot_a":        ua["uniprot_id"],
-        "uniprot_b":        ub["uniprot_id"],
-        "score":            round(interaction.score, 4),
-        "source_count":     interaction.sources.all().count(),
-        "experiment_count": interaction.experiments.all().count(),
-        "interaction_id":   interaction.pk,
-        "detail_url":       reverse("hippie_website:interaction_detail", args=[interaction.pk]),
-
-    }
-
-
-# ---------------------------------------------------------------------------
 # Browse
 # ---------------------------------------------------------------------------
 
@@ -779,8 +604,8 @@ def browse_api(request):
 
     # ── Parse params ────────────────────────────────────────────────────
     try:
-        offset    = max(0, int(request.GET.get("offset", 0)))
-        limit     = min(2000, max(1, int(request.GET.get("limit", 500))))
+        offset = max(0, int(request.GET.get("offset", 0)))
+        limit  = min(2000, max(1, int(request.GET.get("limit", 500))))
     except (TypeError, ValueError):
         offset, limit = 0, 500
 
@@ -790,10 +615,7 @@ def browse_api(request):
     min_score  = request.GET.get("min_score")
 
     # ── Build queryset via manager ──────────────────────────────────────
-    qs = (
-        Protein.objects
-        .with_browse_annotations()   # annotates degree, avg_score; prefetches uniprot_ids, entrez_ids
-    )
+    qs = Protein.objects.with_browse_annotations()   # annotates degree, avg_score; prefetches uniprot_ids, entrez_ids
 
     # Filter: tissue expression
     if tissue_id:
@@ -877,21 +699,6 @@ def browse_filter_meta(request):
     )
     return JsonResponse({"tissues": tissues, "sources": sources})
 
-
-# ---------------------------------------------------------------------------
-# Utility pages
-# ---------------------------------------------------------------------------
-
-@require_GET
-def download_view(request):
-    """Database download page — stub."""
-    return render(request, "hippie_website/download.html", {})
-
-
-@require_GET
-def information_view(request):
-    """Documentation / information page — stub."""
-    return render(request, "hippie_website/information.html", {})
 
 # ---------------------------------------------------------------------------
 # Interaction detail view
@@ -981,3 +788,16 @@ def protein_detail_view(request, pk: int):
     return render(request, "hippie_website/protein_detail.html", context)
 
 
+
+# ---------------------------------------------------------------------------
+# Static pages
+# ---------------------------------------------------------------------------
+
+@require_GET
+def download_view(request):
+    return render(request, "hippie_website/download.html", {})
+
+
+@require_GET
+def information_view(request):
+    return render(request, "hippie_website/information.html", {})
