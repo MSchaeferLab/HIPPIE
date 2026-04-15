@@ -212,12 +212,12 @@ class OrthologInteractionAdmin(admin.ModelAdmin):
 
 @admin.register(BaitPreyAssociation)
 class BaitPreyAssociationAdmin(admin.ModelAdmin):
-    list_display = ("id", "interaction", "pmid", "direction")
+    list_display = ("id", "interaction", "direction")
     search_fields = (
-        "=pmid",
         "=interaction__id",
         "interaction__protein_1__name",
         "interaction__protein_2__name",
+        "=tests_performed__pmid",
     )
     list_filter = ("direction",)
     list_select_related = (

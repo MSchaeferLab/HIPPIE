@@ -499,19 +499,6 @@ class Command(BaseCommand):
             if created:
                 oi.ortholog_species.set(random.sample(non_human, k=random.randint(1, 3)))
 
-        # ---------------------------------------------------------------
-        # 12. Bait-prey associations  (for future use)
-        # ---------------------------------------------------------------
-
-        self.stdout.write("Creating bait-prey associations…")
-
-        for inter in interaction_objs[:15]:
-            pmids = inter.publications.values_list("pmid", flat=True)[:2]
-            for pmid in pmids:
-                direction = random.choice([1, -1])
-                BaitPreyAssociation.objects.get_or_create(
-                    interaction=inter, pmid=pmid, direction=direction,
-                )
 
         # ---------------------------------------------------------------
         # Summary

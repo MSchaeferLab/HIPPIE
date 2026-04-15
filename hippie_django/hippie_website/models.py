@@ -14,7 +14,6 @@ class Protein(models.Model):
     """
 
     name = models.CharField(max_length=30, unique=True)
-
     objects = ProteinManager()
 
     class Meta:
@@ -579,7 +578,20 @@ class OrthologInteraction(models.Model):
     def __str__(self):
         return f"{self.protein_1.name}–{self.protein_2.name} ({self.source})"
 
-
+class BaitPreyTest(models.Model):
+    detection = models.BooleanField(help_text="True if bait-prey association is detected, False if tested but not detected")
+    pmid = models.PositiveIntegerField() # NOTE:  We should have a PMID table
+    method = models.ForeignKey(ExperimentType, on_delete=models.CASCADE)
+    class Meta:
+        db_table = "bait_prey_test"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["pmid", "method"],
+                name="bait_prey_test_unique",
+            ),
+        ]
+        
+        
 class BaitPreyAssociation(models.Model):
     class Directions(models.IntegerChoices):
         PROTEIN_ONE_BAIT = 1, "Protein 1 Bait"
@@ -588,17 +600,21 @@ class BaitPreyAssociation(models.Model):
     interaction = models.ForeignKey(
         Interaction, on_delete=models.CASCADE, related_name="bait_prey"
     )
-    pmid = models.PositiveIntegerField(db_index=True)
     direction = models.SmallIntegerField(
         choices=Directions.choices,
         help_text="1 = protein_1 is bait, -1 = protein_2 is bait"
     )
 
+    tests_performed = models.ManyToManyField(
+        BaitPreyTest, related_name="bait_prey_associations", db_table="bait_prey_assoc2test"
+    )
+    
     class Meta:
         db_table = "bait_prey_assoc"
         constraints = [
             models.UniqueConstraint(
-                fields=["interaction", "pmid", "direction"],
+                fields=["interaction", "direction"],
                 name="bait_pray_unique",
             ),
         ]
+        
