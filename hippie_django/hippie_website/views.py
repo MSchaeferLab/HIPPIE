@@ -259,6 +259,7 @@ def network_query_api(request):
     }
     """
     result = _run_network_query(request.GET)
+    print(result)
     if result.get("error"):
         return JsonResponse(result, status=400)
     return JsonResponse(result)

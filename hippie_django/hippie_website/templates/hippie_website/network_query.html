@@ -354,6 +354,20 @@
         {% endfor %}
       </div>
 
+      {# ── 9. Negatome edges ── #}
+      <div class="hippie-card p-3 mb-3">
+        <div class="form-section-label">{{ form.negatome_edges.label }}</div>
+
+        {% for choice in form.negatome_edges %}
+          <div class="form-check">
+            {{ choice.tag }}
+            <label class="form-check-label" for="{{ choice.id_for_label }}">
+              {{ choice.choice_label }}
+            </label>
+          </div>
+        {% endfor %}
+      </div>
+
       {# ── Submit ── #}
       <button type="submit" class="btn-nq-submit">
         <i class="bi bi-diagram-3 me-1"></i>Build Network
