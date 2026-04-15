@@ -61,11 +61,10 @@ def _protein_ids_from_raw(raw: str) -> tuple[list[int], list[str]]:
     unresolved:  list[str] = []
     seen: set[int] = set()
     for ident in raw.split():
-        pk = (
-            Protein.objects.resolve(ident)
-            .values_list("pk", flat=True)
-            .first()
-        )
+        pk = Protein.objects.resolve(ident)
+        if pk is not None:
+            pk = pk.values_list("pk", flat=True).first()
+
         if pk is not None and pk not in seen:
             protein_ids.append(pk)
             seen.add(pk)
