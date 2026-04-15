@@ -24,32 +24,23 @@ class Protein(models.Model):
         return self.name
 
 
-class Isoform(models.Model):
+class Isoform(Protein):
     """
-    Protein isoform — for future isoform-level interaction data.
-    Each isoform belongs to exactly one protein.
+    Protein isoform — MTI subclass of Protein.
+    Every Isoform IS a Protein row (shares the same pk).
+    The isoform-specific UniProt ID (e.g. "P38398-2") is stored here.
+    The canonical protein UniProt ID remains on the parent Protein row.
     """
-
-    protein = models.ForeignKey(
-        Protein, on_delete=models.CASCADE, related_name="isoforms"
+    isoform_uniprot_id = models.CharField(
+        max_length=20, unique=True,
+        help_text='Isoform-specific UniProt accession e.g. "P38398-2"'
     )
-    uniprot_id = models.CharField(
-        max_length=20, db_index=True, help_text='e.g. "P38398-2"'
-    )
-    name = models.CharField(max_length=100, blank=True, default="")
 
     class Meta:
         db_table = "isoform"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["protein", "uniprot_id"],
-                name="isoform_protein_uniprot_unique",
-            ),
-        ]
 
     def __str__(self):
-        return self.uniprot_id
-
+        return self.isoform_uniprot_id
 
 # =============================================================================
 # Identifier mappings

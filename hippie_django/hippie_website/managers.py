@@ -51,8 +51,30 @@ class ProteinQuerySet(models.QuerySet):
             if qs.exists():
                 return qs
 
-        # 3) UniProt accession  (e.g. "P38398")
+        # 3) Isoform-specific UniProt accession (e.g. "P38398-2")
+        #    Returns the parent Protein queryset so callers stay consistent
         from . import models as m  # late import to avoid circularity
+        isoform_pk = None
+        if "isoform" in identifier:
+            isoform_pk = (
+                m.Protein.objects
+                .filter(name=identifier)
+                .first()
+                .pk
+            )
+        elif "-" in identifier:
+            isoform_pk = (
+                m.Isoform.objects
+                .filter(isoform_uniprot_id=identifier)
+                .values_list("protein_ptr_id", flat=True)
+                .first()
+            )
+        if isoform_pk is not None:
+            qs = self.filter(pk=isoform_pk)
+            if qs.exists():
+                return qs
+
+        # 4) UniProt accession  (e.g. "P38398")
 
         uniprot_id = (
             m.UniProtAccession.objects.filter(accession=identifier)
@@ -64,7 +86,7 @@ class ProteinQuerySet(models.QuerySet):
             if qs.exists():
                 return qs
 
-        # 4) Gene symbol
+        # 5) Gene symbol
         qs = self.filter(entrez_ids__name__iexact=identifier)
         if qs.exists():
             return qs
