@@ -598,9 +598,30 @@ def browse_api(request):
 
     Server-side filters applied here: tissue, source, min_degree, min_score.
     Free-text search, sort, and pagination are handled client-side.
+
+    Performance notes
+    -----------------
+    The client streams all proteins in ~500-row chunks.  The old
+    implementation annotated every chunk with ``degree`` (two joins + GROUP BY)
+    and ``avg_score`` (a correlated RawSQL subquery that ran once per protein
+    row) and then called ``qs.count()`` on the annotated queryset, which
+    forces Django to wrap the whole annotated query in a subquery and count
+    it — catastrophically slow for tens of thousands of proteins across
+    millions of interactions.
+
+    Here we split the work:
+
+      1. Filtering + count run on a lean queryset without annotations.
+         ``min_degree`` / ``min_score`` still need them, but only if they are
+         actually applied.
+      2. Only the IDs for the current slice are read from the base queryset.
+      3. ``degree`` and ``avg_score`` are then computed for just those IDs
+         via targeted aggregates against ``Interaction`` that use the
+         ``(protein_1, score)`` / ``(protein_2, score)`` indexes.
     """
-    from .models import Tissue, Source
-    from django.db.models import Count, Avg, Q as _Q
+    from .models import ProteinUniProt
+    from django.db.models import Count, F, Prefetch, Sum, Q as _Q
+    from django.db.models.expressions import RawSQL
 
     # ── Parse params ────────────────────────────────────────────────────
     try:
@@ -613,70 +634,173 @@ def browse_api(request):
     source_id  = request.GET.get("source")
     min_degree = request.GET.get("min_degree")
     min_score  = request.GET.get("min_score")
-    print("1")
-    # ── Build queryset via manager ──────────────────────────────────────
-    qs = Protein.objects.with_browse_annotations()   # annotates degree, avg_score; prefetches uniprot_ids, entrez_ids
-    print("2")
-    # Filter: tissue expression
+
+    # ── Build a lean queryset (no expensive annotations) ───────────────
+    base_qs = Protein.objects.all()
+
     if tissue_id:
         try:
-            qs = qs.expressed_in([int(tissue_id)])
+            base_qs = base_qs.expressed_in([int(tissue_id)])
         except (TypeError, ValueError):
             pass
 
-    # Filter: source database — proteins that have at least one interaction
-    # from this source (on either side)
+    # Proteins that have at least one interaction from this source
+    # (on either side).
     if source_id:
         try:
             sid = int(source_id)
-            qs = qs.filter(
+            base_qs = base_qs.filter(
                 _Q(interactions_as_1__sources__id=sid) |
                 _Q(interactions_as_2__sources__id=sid)
             ).distinct()
         except (TypeError, ValueError):
             pass
 
-    # Filter: minimum degree  (applied after annotation)
-    if min_degree:
-        try:
-            qs = qs.filter(degree__gte=int(min_degree))
-        except (TypeError, ValueError):
-            pass
+    # Only add the heavy annotations when they're genuinely needed to
+    # filter — otherwise both the count and the slice query would be
+    # forced to compute them for every protein in the database.
+    # ``min_degree=0`` / ``min_score=0`` are no-ops, so treat them as absent.
+    min_degree_val = _safe_int(min_degree)
+    min_score_val  = _safe_float(min_score)
+    if min_degree_val is not None and min_degree_val <= 0:
+        min_degree_val = None
+    if min_score_val is not None and min_score_val <= 0:
+        min_score_val = None
 
-    # Filter: minimum avg score  (applied after annotation)
-    if min_score:
-        try:
-            qs = qs.filter(avg_score__gte=float(min_score))
-        except (TypeError, ValueError):
-            pass
-    print("3")
-    # ── Count total (for progress bar) ──────────────────────────────────
-    total = qs.count()
-    print("4")
-    # ── Fetch slice ──────────────────────────────────────────────────────
-    chunk = qs[offset : offset + limit]
-    print("5")
+    if min_degree_val is not None or min_score_val is not None:
+        base_qs = base_qs.annotate(
+            degree=(
+                Count("interactions_as_1", distinct=True)
+                + Count("interactions_as_2", distinct=True)
+            ),
+            avg_score=RawSQL(
+                "(SELECT AVG(score) FROM interaction "
+                "WHERE protein_1_id = protein.id OR protein_2_id = protein.id)",
+                [],
+            ),
+        )
+        if min_degree_val is not None:
+            base_qs = base_qs.filter(degree__gte=min_degree_val)
+        if min_score_val is not None:
+            base_qs = base_qs.filter(avg_score__gte=min_score_val)
+
+    # Deterministic order so ``offset``/``limit`` is stable across chunks.
+    base_qs = base_qs.order_by("pk")
+
+    # ── Count total (cheap on the lean queryset) ───────────────────────
+    total = base_qs.count()
+
+    # ── Fetch the slice as IDs only ─────────────────────────────────────
+    pids = list(base_qs.values_list("pk", flat=True)[offset : offset + limit])
+    if not pids:
+        return JsonResponse({"total": total, "proteins": []})
+
+    # ── Fetch proteins w/ prefetched identifier mappings ────────────────
+    proteins_by_pk = {
+        p.pk: p
+        for p in Protein.objects.filter(pk__in=pids).prefetch_related(
+            Prefetch(
+                "uniprot_ids",
+                queryset=ProteinUniProt.objects.order_by("-version"),
+            ),
+            Prefetch("entrez_ids"),
+        )
+    }
+
+    # ── Compute degree + avg_score for just these IDs ───────────────────
+    # We mirror the semantics of the old annotation exactly:
+    #
+    #   degree    = |{i : i.p1 = pid}| + |{i : i.p2 = pid}|
+    #               (self-loops count twice — same as the old annotation)
+    #   avg_score = AVG(score) over interactions where p1 = pid OR p2 = pid
+    #               (each interaction row contributes once, including
+    #               self-loops)
+    #
+    # Two aggregates grouped by the corresponding FK column use the
+    # existing ``(protein_1, score)`` / ``(protein_2, score)`` indexes and
+    # are cheap because they're restricted to the ~500 IDs in the slice.
+    side1 = {
+        row["protein_1_id"]: (row["cnt"], row["sm"] or 0.0)
+        for row in (
+            Interaction.objects
+            .filter(protein_1_id__in=pids)
+            .values("protein_1_id")
+            .annotate(cnt=Count("id"), sm=Sum("score"))
+        )
+    }
+    side2 = {
+        row["protein_2_id"]: (row["cnt"], row["sm"] or 0.0)
+        for row in (
+            Interaction.objects
+            .filter(protein_2_id__in=pids)
+            .values("protein_2_id")
+            .annotate(cnt=Count("id"), sm=Sum("score"))
+        )
+    }
+    # Self-loops (p1 == p2) appear in BOTH side1 and side2 — subtract one
+    # copy so they contribute once to avg_score (degree keeps them twice,
+    # matching the old Count+Count annotation).
+    self_loops = {
+        row["protein_1_id"]: (row["cnt"], row["sm"] or 0.0)
+        for row in (
+            Interaction.objects
+            .filter(protein_1_id__in=pids, protein_1_id=F("protein_2_id"))
+            .values("protein_1_id")
+            .annotate(cnt=Count("id"), sm=Sum("score"))
+        )
+    }
+
+    # ── Build response in the original slice order ──────────────────────
     proteins = []
-    for p in chunk:
-        print("chunk")
-        uniprot = p.uniprot_ids.all().first()
-        entrez  = p.entrez_ids.all().first()
+    for pid in pids:
+        p = proteins_by_pk.get(pid)
+        if p is None:
+            continue  # defensive; pk__in should cover every slice id
 
-        # avg_score is the sum of the two side-averages from the annotation;
-        # halve it to get an approximate overall average, guard for None.
-        raw_avg = getattr(p, "avg_score", None)
-        avg = round(raw_avg, 4) if raw_avg is not None else None
+        c1, s1 = side1.get(pid, (0, 0.0))
+        c2, s2 = side2.get(pid, (0, 0.0))
+        cl, sl = self_loops.get(pid, (0, 0.0))
+
+        degree       = c1 + c2
+        unique_count = c1 + c2 - cl
+        avg = (
+            round((s1 + s2 - sl) / unique_count, 4)
+            if unique_count > 0 else None
+        )
+
+        uniprot_list = list(p.uniprot_ids.all())
+        entrez_list  = list(p.entrez_ids.all())
+        uniprot = uniprot_list[0] if uniprot_list else None
+        entrez  = entrez_list[0]  if entrez_list  else None
 
         proteins.append({
-            "id":        p.pk,
-            "symbol":    entrez.name if entrez else p.name,
+            "id":         pid,
+            "symbol":     entrez.name if entrez else p.name,
             "uniprot_id": uniprot.uniprot_id if uniprot else "",
-            "entrez_id": entrez.gene_id if entrez else None,
-            "degree":    getattr(p, "degree", 0) or 0,
-            "avg_score": avg,
+            "entrez_id":  entrez.gene_id if entrez else None,
+            "degree":     degree,
+            "avg_score":  avg,
         })
 
     return JsonResponse({"total": total, "proteins": proteins})
+
+
+def _safe_int(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @require_GET
