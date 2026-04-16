@@ -166,10 +166,6 @@ class InteractionQuerySet(models.QuerySet):
     # Prefetch bundles  (avoids N+1 on the detail & results pages)
     # ------------------------------------------------------------------
 
-    def only_interactions(self) -> "InteractionQuerySet":
-        return self.filter(score__gt=0)
-
-
     def with_proteins(self) -> "InteractionQuerySet":
         """
         select_related both protein FKs + prefetch their identifier
@@ -346,9 +342,6 @@ class InteractionQuerySet(models.QuerySet):
 class InteractionManager(models.Manager):
     def get_queryset(self):
         return InteractionQuerySet(self.model, using=self._db)
-
-    def only_interactions(self):
-        return self.get_queryset().only_interactions()
 
     def with_proteins(self):
         return self.get_queryset().with_proteins()
