@@ -370,7 +370,10 @@ function ResultsTable({ rows, streaming, progress }) {
                         </a>
                       : <strong>{row.symbol_a}</strong>
                     }
-                    {row.input_a !== row.symbol_a && (
+                    {row.isoform_uniprot_a && (
+                      <span className="mono text-muted-sm ms-1">({row.isoform_uniprot_a})</span>
+                    )}
+                    {!row.isoform_uniprot_a && row.input_a !== row.symbol_a && (
                       <span className="text-muted-sm ms-1">({row.input_a})</span>
                     )}
                   </td>
@@ -381,7 +384,10 @@ function ResultsTable({ rows, streaming, progress }) {
                         </a>
                       : <strong>{row.symbol_b}</strong>
                     }
-                    {row.input_b !== row.symbol_b && (
+                    {row.isoform_uniprot_b && (
+                      <span className="mono text-muted-sm ms-1">({row.isoform_uniprot_b})</span>
+                    )}
+                    {!row.isoform_uniprot_b && row.input_b !== row.symbol_b && (
                       <span className="text-muted-sm ms-1">({row.input_b})</span>
                     )}
                   </td>
@@ -426,7 +432,7 @@ function ResultsTable({ rows, streaming, progress }) {
 // Input panel
 // ─────────────────────────────────────────────────────────────
 
-function InputPanel({ onSubmit, disabled }) {
+function InputPanel({ onSubmit, disabled, includeIsoforms, onIsoformChange }) {
   const [mode,       setMode]       = useState("text");   // "text" | "file"
   const [text,       setText]       = useState("");
   const [file,       setFile]       = useState(null);
@@ -562,8 +568,17 @@ function InputPanel({ onSubmit, disabled }) {
         </div>
       )}
 
-      {/* Submit */}
-      <div className="d-flex justify-content-end">
+      {/* Include isoforms + Submit */}
+      <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <label style={{display:"inline-flex", alignItems:"center", gap:".4rem", cursor:"pointer", userSelect:"none"}}>
+          <input
+            type="checkbox"
+            checked={includeIsoforms}
+            onChange={e => onIsoformChange(e.target.checked)}
+            style={{cursor:"pointer"}}
+          />
+          <span className="text-muted-sm">Include isoforms</span>
+        </label>
         <button className="btn-submit" onClick={handleSubmit} disabled={!canSubmit}>
           {disabled
             ? <><span className="spinner me-2"></span>Querying…</>
@@ -581,10 +596,11 @@ function InputPanel({ onSubmit, disabled }) {
 // ─────────────────────────────────────────────────────────────
 
 function App() {
-  const [rows,       setRows]       = useState([]);
-  const [streaming,  setStreaming]  = useState(false);
-  const [progress,   setProgress]   = useState(0);
-  const [globalErr,  setGlobalErr]  = useState(null);
+  const [rows,            setRows]            = useState([]);
+  const [streaming,       setStreaming]        = useState(false);
+  const [progress,        setProgress]         = useState(0);
+  const [globalErr,       setGlobalErr]        = useState(null);
+  const [includeIsoforms, setIncludeIsoforms]  = useState(false);
   const abortRef = useRef(null);
 
   const runQuery = useCallback(async (pairs) => {
@@ -614,7 +630,7 @@ function App() {
             "Content-Type": "application/json",
             "X-CSRFToken":  getCookie("csrftoken"),
           },
-          body:    JSON.stringify({ pairs: slice }),
+          body:    JSON.stringify({ pairs: slice, include_isoforms: includeIsoforms }),
           signal:  controller.signal,
         });
 
@@ -637,7 +653,7 @@ function App() {
     } finally {
       setStreaming(false);
     }
-  }, []);
+  }, [includeIsoforms]);
 
   return (
     <div>
@@ -652,7 +668,12 @@ function App() {
       </div>
 
       {/* Input */}
-      <InputPanel onSubmit={runQuery} disabled={streaming} />
+      <InputPanel
+        onSubmit={runQuery}
+        disabled={streaming}
+        includeIsoforms={includeIsoforms}
+        onIsoformChange={setIncludeIsoforms}
+      />
 
       {/* Global error */}
       {globalErr && (
