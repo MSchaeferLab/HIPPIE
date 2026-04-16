@@ -74,6 +74,22 @@
   .id-row dt { font-size: .7rem; font-family: var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--hippie-ink-muted); }
   .id-row dd { font-family: var(--font-mono); font-size: .85rem; margin: 0; }
   .back-link { font-size: .85rem; margin-bottom: 1.25rem; display: inline-flex; align-items: center; gap: .35rem; }
+  .detection-stats { display: flex; gap: 2.5rem; flex-wrap: wrap; }
+  .detection-stat-value {
+    font-family: var(--font-mono);
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1;
+    margin-bottom: .25rem;
+  }
+  .detection-stat-label {
+    font-size: .7rem;
+    font-family: var(--font-mono);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--hippie-ink-muted);
+  }
+  .detection-stat-value.pending { color: var(--hippie-ink-muted); font-size: 1.1rem; }
 {% endblock %}
 
 {% block content %}
@@ -257,6 +273,29 @@
     </div>
 
   </div>{# /row #}
+
+  {# ── Detection ── #}
+  <div class="row g-3 mb-4">
+    <div class="col-md-6 col-lg-4">
+      <div class="evidence-card">
+        <h4><i class="bi bi-search me-2 text-muted"></i>Detection</h4>
+        <div class="detection-stats">
+          <div>
+            <div class="detection-stat-value">{{ bait_prey_times_observed }}</div>
+            <div class="detection-stat-label">Times Observed</div>
+          </div>
+          <div>
+            <div class="detection-stat-value">{{ bait_prey_total_tested }}</div>
+            <div class="detection-stat-label">Times Tested</div>
+          </div>
+          <div>
+            <div class="detection-stat-value pending">—</div>
+            <div class="detection-stat-label">Detection Score</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   {# ── Effect / direction (if available) ── #}
   {% if interaction.kegg_direction or interaction.effect_type %}

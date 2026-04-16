@@ -888,6 +888,15 @@ def interaction_detail_view(request, pk: int):
     p1_entrez  = interaction.protein_1.entrez_ids.all().first()
     p2_entrez  = interaction.protein_2.entrez_ids.all().first()
 
+    # Compute bait-prey detection stats from prefetched data (no extra queries).
+    all_tests = [
+        test
+        for assoc in interaction.bait_prey.all()
+        for test in assoc.tests_performed.all()
+    ]
+    bait_prey_total_tested = len(all_tests)
+    bait_prey_times_observed = sum(1 for t in all_tests if t.detection)
+
     context = {
         "interaction": interaction,
         "p1": {
@@ -907,6 +916,9 @@ def interaction_detail_view(request, pk: int):
         "publications": interaction.publications.all(),
         "experiments":  interaction.experiments.all().order_by("-quality_score"),
         "species":      interaction.conserved_species.all(),
+        # Bait-prey detection stats.
+        "bait_prey_total_tested":    bait_prey_total_tested,
+        "bait_prey_times_observed":  bait_prey_times_observed,
     }
     return render(request, "hippie_website/interaction_detail.html", context)
 

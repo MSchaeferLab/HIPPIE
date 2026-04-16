@@ -194,7 +194,8 @@ class InteractionQuerySet(models.QuerySet):
     def with_evidence(self) -> "InteractionQuerySet":
         """
         Prefetch all evidence needed for the interaction detail page:
-        sources, publications, experiments, species, cross-references.
+        sources, publications, experiments, species, cross-references,
+        and bait-prey detection tests.
         """
         return self.prefetch_related(
             "sources",
@@ -205,6 +206,8 @@ class InteractionQuerySet(models.QuerySet):
             "cross_references",
             "cross_references__source",
             "cross_references__species",
+            "bait_prey",
+            "bait_prey__tests_performed",
         )
 
     def with_annotations(self) -> "InteractionQuerySet":
