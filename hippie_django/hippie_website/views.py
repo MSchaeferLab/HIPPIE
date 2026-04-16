@@ -613,10 +613,10 @@ def browse_api(request):
     source_id  = request.GET.get("source")
     min_degree = request.GET.get("min_degree")
     min_score  = request.GET.get("min_score")
-
+    print("1")
     # ── Build queryset via manager ──────────────────────────────────────
     qs = Protein.objects.with_browse_annotations()   # annotates degree, avg_score; prefetches uniprot_ids, entrez_ids
-
+    print("2")
     # Filter: tissue expression
     if tissue_id:
         try:
@@ -649,15 +649,16 @@ def browse_api(request):
             qs = qs.filter(avg_score__gte=float(min_score))
         except (TypeError, ValueError):
             pass
-
+    print("3")
     # ── Count total (for progress bar) ──────────────────────────────────
     total = qs.count()
-
+    print("4")
     # ── Fetch slice ──────────────────────────────────────────────────────
     chunk = qs[offset : offset + limit]
-
+    print("5")
     proteins = []
     for p in chunk:
+        print("chunk")
         uniprot = p.uniprot_ids.all().first()
         entrez  = p.entrez_ids.all().first()
 

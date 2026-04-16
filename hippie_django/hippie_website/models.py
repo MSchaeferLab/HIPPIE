@@ -582,6 +582,7 @@ class BaitPreyTest(models.Model):
     detection = models.BooleanField(help_text="True if bait-prey association is detected, False if tested but not detected")
     pmid = models.PositiveIntegerField() # NOTE:  We should have a PMID table
     method = models.ForeignKey(ExperimentType, on_delete=models.CASCADE)
+
     class Meta:
         db_table = "bait_prey_test"
         constraints = [
@@ -590,6 +591,9 @@ class BaitPreyTest(models.Model):
                 name="bait_prey_test_unique",
             ),
         ]
+
+    def __str__(self):
+        return f"PMID:{self.pmid} {self.method.name} detected={self.detection}"
         
         
 class BaitPreyAssociation(models.Model):
@@ -617,4 +621,6 @@ class BaitPreyAssociation(models.Model):
                 name="bait_pray_unique",
             ),
         ]
-        
+
+    def __str__(self):
+        return f"{self.interaction} direction={self.get_direction_display()} tests={self.tests_performed.count()}"
