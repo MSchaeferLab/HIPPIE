@@ -23,32 +23,23 @@ class Protein(models.Model):
         return self.name
 
 
-class Isoform(models.Model):
+class Isoform(Protein):
     """
-    Protein isoform — for future isoform-level interaction data.
-    Each isoform belongs to exactly one protein.
+    Protein isoform — MTI subclass of Protein.
+    Every Isoform IS a Protein row (shares the same pk).
+    The isoform-specific UniProt ID (e.g. "P38398-2") is stored here.
+    The canonical protein UniProt ID remains on the parent Protein row.
     """
-
-    protein = models.ForeignKey(
-        Protein, on_delete=models.CASCADE, related_name="isoforms"
+    isoform_uniprot_id = models.CharField(
+        max_length=20, unique=True,
+        help_text='Isoform-specific UniProt accession e.g. "P38398-2"'
     )
-    uniprot_id = models.CharField(
-        max_length=20, db_index=True, help_text='e.g. "P38398-2"'
-    )
-    name = models.CharField(max_length=100, blank=True, default="")
 
     class Meta:
         db_table = "isoform"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["protein", "uniprot_id"],
-                name="isoform_protein_uniprot_unique",
-            ),
-        ]
 
     def __str__(self):
-        return self.uniprot_id
-
+        return self.isoform_uniprot_id
 
 # =============================================================================
 # Identifier mappings
@@ -591,6 +582,7 @@ class BaitPreyTest(models.Model):
     detection = models.BooleanField(help_text="True if bait-prey association is detected, False if tested but not detected")
     pmid = models.PositiveIntegerField() # NOTE:  We should have a PMID table
     method = models.ForeignKey(ExperimentType, on_delete=models.CASCADE)
+
     class Meta:
         db_table = "bait_prey_test"
         constraints = [
@@ -599,6 +591,9 @@ class BaitPreyTest(models.Model):
                 name="bait_prey_test_unique",
             ),
         ]
+
+    def __str__(self):
+        return f"PMID:{self.pmid} {self.method.name} detected={self.detection}"
         
         
 class BaitPreyAssociation(models.Model):
@@ -626,4 +621,6 @@ class BaitPreyAssociation(models.Model):
                 name="bait_pray_unique",
             ),
         ]
-        
+
+    def __str__(self):
+        return f"{self.interaction} direction={self.get_direction_display()} tests={self.tests_performed.count()}"

@@ -173,6 +173,147 @@
     .score-low  { background: var(--hippie-accent-soft); color: var(--hippie-score-low);  }
 
     /* =========================================================
+       Shared: Hero  (used by index, browse, interaction_query)
+       ========================================================= */
+    .hippie-hero {
+      padding: 3rem 0 2rem;
+      border-bottom: 1px solid var(--hippie-border);
+      margin-bottom: 2.5rem;
+    }
+    .hippie-hero h1 {
+      font-size: clamp(1.75rem, 4vw, 3rem);
+      line-height: 1.1;
+      margin-bottom: .75rem;
+    }
+    .hippie-hero p {
+      font-size: 1rem;
+      color: var(--hippie-ink-muted);
+      max-width: 60ch;
+      margin-bottom: 0;
+    }
+
+    /* =========================================================
+       Shared: Table  (used by index, browse, interaction_query)
+       ========================================================= */
+    .hippie-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: .875rem;
+    }
+    .hippie-table thead th {
+      background: var(--hippie-bg);
+      border-bottom: 2px solid var(--hippie-border);
+      border-top: 1px solid var(--hippie-border);
+      padding: .6rem .85rem;
+      font-size: .75rem; font-family: var(--font-mono); font-weight: 500;
+      letter-spacing: .04em; text-transform: uppercase;
+      color: var(--hippie-ink-muted); white-space: nowrap; user-select: none; cursor: pointer;
+    }
+    .hippie-table thead th.no-sort      { cursor: default; }
+    .hippie-table thead th:not(.no-sort):hover { color: var(--hippie-ink); }
+    .hippie-table thead th.sorted-asc::after  { content: ' ↑'; color: var(--hippie-teal); }
+    .hippie-table thead th.sorted-desc::after { content: ' ↓'; color: var(--hippie-teal); }
+    .hippie-table tbody tr { border-bottom: 1px solid var(--hippie-border); transition: background .1s; }
+    .hippie-table tbody tr:hover { background: var(--hippie-bg); }
+    .hippie-table tbody td { padding: .6rem .85rem; vertical-align: middle; }
+    .hippie-table tbody tr:last-child td { border-bottom: none; }
+
+    /* =========================================================
+       Shared: Pagination  (used by index, browse, interaction_query)
+       ========================================================= */
+    .hippie-pagination {
+        display: flex;
+        align-items: center;
+        gap: .25rem;
+        flex-wrap: wrap;
+    }
+    .hippie-pagination button {
+      border: 1px solid var(--hippie-border); background: var(--hippie-surface);
+      color: var(--hippie-ink); border-radius: var(--radius-sm);
+      padding: .25rem .6rem; font-size: .8rem; cursor: pointer;
+      font-family: var(--font-mono); transition: background .1s;
+    }
+    .hippie-pagination button:hover:not(:disabled) { background: var(--hippie-bg); }
+    .hippie-pagination button.active { background: var(--hippie-teal); color: #fff; border-color: var(--hippie-teal); }
+    .hippie-pagination button:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* =========================================================
+       Shared: Spinner  (used by index, browse, interaction_query)
+       ========================================================= */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 28px; height: 28px;
+      border: 3px solid var(--hippie-border);
+      border-top-color: var(--hippie-teal);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    .spinner-sm {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid var(--hippie-border);
+      border-top-color: var(--hippie-teal);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+    }
+
+    /* =========================================================
+       Shared: Export bar  (used by index, interaction_query)
+       ========================================================= */
+    .export-bar {
+        display: flex;
+        gap: .5rem;
+        flex-wrap: wrap;
+    }
+    .export-bar button {
+      background: var(--hippie-surface);
+      border: 1px solid var(--hippie-border);
+      border-radius: var(--radius-sm);
+      color: var(--hippie-ink-muted);
+      font-size: .78rem; font-family: var(--font-mono);
+      padding: .25rem .7rem; cursor: pointer; transition: background .12s, color .12s;
+    }
+    .export-bar button:hover { background: var(--hippie-bg); color: var(--hippie-ink); }
+
+    /* =========================================================
+       Shared: Empty state box
+       ========================================================= */
+    .state-box {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: var(--hippie-ink-muted);
+    }
+    .state-icon {
+        font-size: 2.5rem;
+        display: block;
+        margin-bottom: .75rem;
+        opacity: .4;
+    }
+
+    /* =========================================================
+       Shared: Misc utilities
+       ========================================================= */
+    .text-muted-sm {
+        font-size: .8rem;
+        color: var(--hippie-ink-muted);
+    }
+    .tag-chip {
+      display: inline-block; background: var(--hippie-bg); border: 1px solid var(--hippie-border);
+      border-radius: 100px; padding: .1rem .6rem;
+      font-size: .75rem; font-family: var(--font-mono); color: var(--hippie-ink-muted);
+    }
+    .example-chip {
+      cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+    }
+    .example-chip:hover {
+      background: var(--hippie-teal-soft); color: var(--hippie-teal); border-color: var(--hippie-teal);
+    }
+
+
+    /* =========================================================
        Footer
        ========================================================= */
     .hippie-footer {
@@ -183,34 +324,6 @@
       color: var(--hippie-ink-muted);
     }
 
-    /* =========================================================
-       Utilities
-       ========================================================= */
-    .text-muted-sm {
-      font-size: .8rem;
-      color: var(--hippie-ink-muted);
-    }
-    .tag-chip {
-      display: inline-block;
-      background: var(--hippie-bg);
-      border: 1px solid var(--hippie-border);
-      border-radius: 100px;
-      padding: .1rem .6rem;
-      font-size: .75rem;
-      font-family: var(--font-mono);
-      color: var(--hippie-ink-muted);
-    }
-    .example-chip {
-      cursor: pointer;
-      transition: background .15s,
-      color .15s,
-      border-color .15s;
-    }
-    .example-chip:hover {
-      background: var(--hippie-teal-soft);
-      color: var(--hippie-teal);
-      border-color: var(--hippie-teal);
-    }
 
     {% block extra_styles %}{% endblock %}
   </style>

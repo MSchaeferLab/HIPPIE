@@ -10,23 +10,6 @@
 {% endblock %}
 
 {% block extra_styles %}
-  /* ── Hero ──────────────────────────────────────── */
-  .hippie-hero {
-    padding: 3rem 0 2rem;
-    border-bottom: 1px solid var(--hippie-border);
-    margin-bottom: 2.5rem;
-  }
-  .hippie-hero h1 {
-    font-size: clamp(2rem, 5vw, 3.25rem);
-    line-height: 1.1;
-    margin-bottom: .75rem;
-  }
-  .hippie-hero p {
-    font-size: 1rem;
-    color: var(--hippie-ink-muted);
-    max-width: 60ch;
-    margin-bottom: 0;
-  }
 
   /* ── Search form ──────────────────────────────── */
   .hippie-search-form .form-control {
@@ -61,77 +44,6 @@
 
   /* ── Results table ────────────────────────────── */
   .results-title { font-family: var(--font-display); font-size: 1.4rem; margin-bottom: 0; }
-
-  .hippie-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .875rem; }
-  .hippie-table thead th {
-    background: var(--hippie-bg);
-    border-bottom: 2px solid var(--hippie-border);
-    border-top: 1px solid var(--hippie-border);
-    padding: .6rem .85rem;
-    font-size: .75rem;
-    font-family: var(--font-mono);
-    font-weight: 500;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-    color: var(--hippie-ink-muted);
-    white-space: nowrap;
-    user-select: none;
-    cursor: pointer;
-  }
-  .hippie-table thead th:hover { color: var(--hippie-ink); }
-  .hippie-table thead th.sorted-asc::after  { content: ' ↑'; color: var(--hippie-teal); }
-  .hippie-table thead th.sorted-desc::after { content: ' ↓'; color: var(--hippie-teal); }
-  .hippie-table tbody tr { border-bottom: 1px solid var(--hippie-border); transition: background .1s; }
-  .hippie-table tbody tr:hover { background: var(--hippie-bg); }
-  .hippie-table tbody td { padding: .6rem .85rem; vertical-align: middle; }
-  .hippie-table tbody tr:last-child td { border-bottom: none; }
-
-  /* ── Pagination ───────────────────────────────── */
-  .hippie-pagination { display: flex; align-items: center; gap: .25rem; flex-wrap: wrap; }
-  .hippie-pagination button {
-    border: 1px solid var(--hippie-border);
-    background: var(--hippie-surface);
-    color: var(--hippie-ink);
-    border-radius: var(--radius-sm);
-    padding: .25rem .6rem;
-    font-size: .8rem;
-    cursor: pointer;
-    font-family: var(--font-mono);
-    transition: background .1s;
-  }
-  .hippie-pagination button:hover:not(:disabled) { background: var(--hippie-bg); }
-  .hippie-pagination button.active { background: var(--hippie-teal); color: #fff; border-color: var(--hippie-teal); }
-  .hippie-pagination button:disabled { opacity: .4; cursor: not-allowed; }
-
-  /* ── States ───────────────────────────────────── */
-  .state-box { text-align: center; padding: 3rem 1rem; color: var(--hippie-ink-muted); }
-  .state-icon { font-size: 2.5rem; display: block; margin-bottom: .75rem; opacity: .4; }
-
-  /* ── Export bar ───────────────────────────────── */
-  .export-bar { display: flex; gap: .5rem; flex-wrap: wrap; }
-  .export-bar button {
-    background: var(--hippie-surface);
-    border: 1px solid var(--hippie-border);
-    border-radius: var(--radius-sm);
-    color: var(--hippie-ink-muted);
-    font-size: .78rem;
-    font-family: var(--font-mono);
-    padding: .25rem .7rem;
-    cursor: pointer;
-    transition: background .12s, color .12s;
-  }
-  .export-bar button:hover { background: var(--hippie-bg); color: var(--hippie-ink); }
-
-  /* ── Spinner ──────────────────────────────────── */
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .spinner {
-    width: 28px; height: 28px;
-    border: 3px solid var(--hippie-border);
-    border-top-color: var(--hippie-teal);
-    border-radius: 50%;
-    animation: spin .7s linear infinite;
-    display: inline-block;
-  }
 {% endblock %}
 
 {% block content %}
@@ -144,24 +56,18 @@
 {% block scripts %}
 {% verbatim %}
 <script type="text/babel">
-const { useState, useCallback, useRef } = React;
+const { useState, useCallback, useEffect } = React;
 
 const PAGE_SIZE = 10;
 const EXAMPLES  = ["HTT", "P42858", "3064", "BRCA1_HUMAN"];
+const INITIAL_Q = new URLSearchParams(window.location.search).get("q") || "";
 
-function scoreClass(s) {
-  if (s >= 0.72) return "score-badge score-high";
-  if (s >= 0.63) return "score-badge score-med";
-  return "score-badge score-low";
-}
-const uniprotUrl = (id) => id ? `https://www.uniprot.org/uniprot/${id}` : null;
-const entrezUrl  = (id) => id ? `https://www.ncbi.nlm.nih.gov/gene/${id}` : null;
 
-function ExtLink({ href, children }) {
-  return href
-    ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
-    : <span>{children}</span>;
-}
+{% endverbatim %}
+{% include "hippie_website/includes/_shared_react.html" %}
+{% verbatim %}
+/* page-specific components below */
+
 
 function ExportBar({ data, symbol }) {
   const tsv = () => {
@@ -183,25 +89,6 @@ function ExportBar({ data, symbol }) {
     <div className="export-bar">
       <button onClick={copy}><i className="bi bi-clipboard me-1"></i>Copy</button>
       <button onClick={download}><i className="bi bi-download me-1"></i>TSV</button>
-    </div>
-  );
-}
-
-function Pagination({ page, totalPages, onChange }) {
-  if (totalPages <= 1) return null;
-  const pages = [];
-  const lo = Math.max(1, page - 2), hi = Math.min(totalPages, page + 2);
-  if (lo > 1) { pages.push(1); if (lo > 2) pages.push("…"); }
-  for (let i = lo; i <= hi; i++) pages.push(i);
-  if (hi < totalPages) { if (hi < totalPages - 1) pages.push("…"); pages.push(totalPages); }
-  return (
-    <div className="hippie-pagination">
-      <button disabled={page === 1} onClick={() => onChange(page - 1)}>‹</button>
-      {pages.map((p, i) => p === "…"
-        ? <span key={i} style={{padding:"0 .25rem", color:"var(--hippie-ink-muted)"}}>…</span>
-        : <button key={p} className={p === page ? "active" : ""} onClick={() => onChange(p)}>{p}</button>
-      )}
-      <button disabled={page === totalPages} onClick={() => onChange(page + 1)}>›</button>
     </div>
   );
 }
@@ -276,24 +163,26 @@ function ResultsTable({ interactions, queryProtein }) {
         </div>
       </div>
 
-      {totalPages > 1 && (
-        <div className="mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
-          <span className="text-muted-sm">
-            Page {page} of {totalPages} — {(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE, sorted.length)} of {sorted.length}
-          </span>
-          <Pagination page={page} totalPages={totalPages}
-            onChange={p => { setPage(p); window.scrollTo({top:0,behavior:"smooth"}); }} />
-        </div>
-      )}
+      <div className="mt-3">
+        <PaginationRow page={page} totalPages={totalPages} totalItems={interactions.length}
+          pageSize={PAGE_SIZE} onChange={p => { setPage(p); window.scrollTo({top:0,behavior:"smooth"}); }} />
+      </div>
+
     </div>
   );
 }
 
 function App() {
-  const [query,   setQuery]   = useState("");
+  const [query,   setQuery]   = useState(INITIAL_Q);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
   const [result,  setResult]  = useState(null);
+
+  useEffect(() => {
+    if (INITIAL_Q) handleSearch(INITIAL_Q);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+
 
   const handleSearch = useCallback(async (overrideQ) => {
     const q = (overrideQ !== undefined ? overrideQ : query).trim();
@@ -324,7 +213,7 @@ function App() {
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleSearch()}
             autoFocus />
-          <button className="btn-search" onClick={() => handleSearch()} disabled={loading || !query.trim()}>
+          <button className="btn-hippie btn-hippie--attached" onClick={() => handleSearch()} disabled={loading || !query.trim()}>
             {loading
               ? <span className="spinner" style={{width:16,height:16,borderWidth:2,verticalAlign:"middle"}}></span>
               : <><i className="bi bi-search me-1"></i>Search</>}

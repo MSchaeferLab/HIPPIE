@@ -32,12 +32,13 @@ class ProteinAdmin(admin.ModelAdmin):
 
 @admin.register(Isoform)
 class IsoformAdmin(admin.ModelAdmin):
-    list_display = ("id", "uniprot_id", "name", "protein")
-    search_fields = ("uniprot_id", "name", "protein__name")
-    list_filter = ("protein",)
-    list_select_related = ("protein",)
-    autocomplete_fields = ("protein",)
+    list_display = ("id", "isoform_uniprot_id", "name")
+    search_fields = ("isoform_uniprot_id", "name")
 
+    @admin.display(description="Parent protein")
+    def parent_symbol(self, obj):
+        # obj.protein_ptr is the parent Protein instance
+        return obj.protein_ptr.name
 
 @admin.register(ProteinUniProt)
 class ProteinUniProtAdmin(admin.ModelAdmin):

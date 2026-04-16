@@ -15,7 +15,7 @@ from hippie_website.models import (
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-DEFAULT_DATA_FILE = Path(__file__).resolve().parents[3] / "data" / "test_MI-0006.csv"
+DEFAULT_DATA_FILE = Path(__file__).resolve().parents[3] / "data" / "dummy-MI-0006.csv"
 
 NCBI_ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 NCBI_ESUMMARY = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"

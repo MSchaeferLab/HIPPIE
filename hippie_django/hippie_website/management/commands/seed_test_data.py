@@ -274,15 +274,19 @@ class Command(BaseCommand):
                 uniprot_id=UNIPROT_IDS[symbol],
             )
 
-        # Isoforms for a few proteins
+        # Isoforms for a few proteins (MTI — each Isoform IS a Protein row)
+        isoforms = {}
         for symbol in ["BRCA1", "TP53", "EGFR"]:
-            p = proteins[symbol]
             for iso_num in range(2, 4):
-                Isoform.objects.get_or_create(
-                    protein=p,
-                    uniprot_id=f"{ACCESSIONS[symbol]}-{iso_num}",
-                    defaults={"name": f"{symbol} isoform {iso_num}"},
+                iso_uniprot = f"{ACCESSIONS[symbol]}-{iso_num}"
+                isoform, _ = Isoform.objects.get_or_create(
+                    isoform_uniprot_id=iso_uniprot,
+                    defaults={
+                        "name": f"{symbol} isoform {iso_num}",  # Protein.name
+                    },
                 )
+                isoforms[iso_uniprot] = isoform
+
 
         # ---------------------------------------------------------------
         # 5. Tissue expression  (each protein in 3–8 random tissues)
@@ -390,6 +394,29 @@ class Command(BaseCommand):
             # 0–2 MeSH terms
             if random.random() < 0.5:
                 inter.mesh_terms.set(random.sample(mesh_list, k=random.randint(1, 2)))
+
+        # Isoform-Isoform interactions (reuses the same Interaction table)
+        # We pick pairs where both proteins have at least 2 isoforms
+        iso_pairs = [
+            (f"{ACCESSIONS['BRCA1']}-2", f"{ACCESSIONS['TP53']}-2"),
+            (f"{ACCESSIONS['BRCA1']}-3", f"{ACCESSIONS['TP53']}-3"),
+            (f"{ACCESSIONS['EGFR']}-2", f"{ACCESSIONS['BRCA1']}-2"),
+        ]
+        for iso_a_id, iso_b_id in iso_pairs:
+            iso_a = isoforms[iso_a_id]
+            iso_b = isoforms[iso_b_id]
+            # Canonical ordering is on Protein pk, which isoforms inherit
+            p1, p2 = (iso_a, iso_b) if iso_a.pk <= iso_b.pk else (iso_b, iso_a)
+            ix, created = Interaction.objects.get_or_create(
+                protein_1=p1,
+                protein_2=p2,
+                defaults={"score": round(random.uniform(0.5, 0.95), 4)},
+            )
+            if created:
+                ix.sources.set(random.sample(source_list, k=random.randint(1, 2)))
+                ix.experiments.set(random.sample(exp_list, k=random.randint(1, 2)))
+                ix.interaction_types.set(random.sample(int_type_list, k=1))
+                interaction_objs.append(ix)
 
         # ---------------------------------------------------------------
         # 8. Publications  (1–4 PMIDs per interaction)
