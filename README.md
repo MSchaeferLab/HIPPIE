@@ -21,6 +21,7 @@ First migrate, run create superuser and then run the server:
 cd hippie_django
 python manage.py migrate
 python manage.py seed_test_data
+python manage.py test_import_bait_prey
 python manage.py createsuperuser
 python manage.py runserver
 ```
