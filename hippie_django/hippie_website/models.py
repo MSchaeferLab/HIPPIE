@@ -639,7 +639,7 @@ class BaitPreyTest(models.Model):
         db_table = "bait_prey_test"
         constraints = [
             models.UniqueConstraint(
-                fields=["pmid", "method"],
+                fields=["detection", "pmid", "method"],
                 name="bait_prey_test_unique",
             ),
         ]
@@ -677,7 +677,7 @@ class BaitPreyAssociation(models.Model):
                 name="bait_pray_unique",
             ),
             models.CheckConstraint(
-                condition=models.Q(interaction__isnull=True) | models.Q(direction__isnull=True),
+                condition=models.Q(interaction__isnull=True) | models.Q(noninteraction__isnull=True),
                 name="max_one_link_to_interaction_or_noninteraction",
             )
         ]

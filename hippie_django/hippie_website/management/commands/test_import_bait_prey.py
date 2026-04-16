@@ -212,7 +212,7 @@ class Command(BaseCommand):
             interaction, _ = Interaction.objects.get_or_create(
                 protein_1=protein_1,
                 protein_2=protein_2,
-                defaults={"score": 0.0},
+                score=0.0,
             )
             bpa, _ = BaitPreyAssociation.objects.get_or_create(
                 interaction=interaction,
