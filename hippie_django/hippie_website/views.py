@@ -651,7 +651,7 @@ def browse_api(request):
             pass
     print("3")
     # ── Count total (for progress bar) ──────────────────────────────────
-    total = qs.count()
+    total = 8000#qs.count()
     print("4")
     # ── Fetch slice ──────────────────────────────────────────────────────
     chunk = qs[offset : offset + limit]
