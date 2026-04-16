@@ -678,7 +678,7 @@ class BaitPreyAssociation(models.Model):
             ),
             models.CheckConstraint(
                 condition=models.Q(interaction__isnull=True) | models.Q(direction__isnull=True),
-                name="one_link_to_interaction_or_noninteraction",
+                name="max_one_link_to_interaction_or_noninteraction",
             )
         ]
 
