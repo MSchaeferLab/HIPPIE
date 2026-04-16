@@ -146,7 +146,6 @@ class Command(BaseCommand):
                     "method_code": PSI_MI_CODE_MAP.get(fields[4], fields[4]),
                     "pmid":        int(fields[5]),
                 })
-                break
 
         self.stdout.write(f"Parsed {len(rows)} rows from {input_file}.")
 
