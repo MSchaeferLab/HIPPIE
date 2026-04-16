@@ -23,14 +23,14 @@ from django.views.decorators.http import require_GET, require_POST
 from django.views.generic.edit import FormView
 
 from .forms import NetworkQueryForm
-from .models import Interaction, Protein, Tissue
+from .models import Interaction, Isoform, Protein, ProteinUniProt, UniProtAccession, Tissue
 
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _protein_display(protein: Protein) -> dict:
+def _protein_display(protein: Protein, isoform_uid: str | None = None) -> dict:
     """
     Return a compact serialisable dict for a Protein instance.
 
@@ -38,6 +38,9 @@ def _protein_display(protein: Protein) -> dict:
     (either by the manager's with_proteins() or an explicit prefetch_related).
     Accessing .all() on a prefetched relation hits the prefetch cache —
     no extra queries.
+
+    isoform_uid: pass the isoform-specific accession (e.g. "P38398-2") explicitly
+    when the protein object was fetched as a Protein (not Isoform) queryset.
     """
     uniprot = (
         # prefetch cache is ordered by "-version" when loaded via with_proteins()
@@ -45,11 +48,14 @@ def _protein_display(protein: Protein) -> dict:
     )
     entrez = protein.entrez_ids.all().first()
     return {
-        "id":         protein.pk,
-        "name":       protein.name,
-        "uniprot_id": uniprot.uniprot_id if uniprot else "",
-        "gene_id":    entrez.gene_id     if entrez  else None,
-        "symbol":     entrez.name        if entrez  else protein.name,
+        "id":                 protein.pk,
+        "name":               protein.name,
+        "uniprot_id":         uniprot.uniprot_id if uniprot else "",
+        "gene_id":            entrez.gene_id     if entrez  else None,
+        "symbol":             entrez.name        if entrez  else protein.name,
+        # isoform_uid is set when this protein is an isoform; None for canonical.
+        "isoform_uniprot_id": isoform_uid if isoform_uid is not None
+                              else getattr(protein, "isoform_uniprot_id", None),
     }
 
 def _protein_ids_from_raw(raw: str) -> tuple[list[int], list[str]]:
@@ -73,6 +79,48 @@ def _protein_ids_from_raw(raw: str) -> tuple[list[int], list[str]]:
     return protein_ids, unresolved
 
 
+def _get_isoforms(protein_pk: int) -> list:
+    """
+    Given a canonical protein PK, return all its Isoform objects (with
+    uniprot_ids and entrez_ids prefetched for display).
+
+    Returns an empty list when the protein is already an isoform — the
+    spec says isoform inputs are never expanded further.
+
+    Resolution path:
+        protein_pk → ProteinUniProt (entry names)
+                   → UniProtAccession (accessions, e.g. "P38398")
+                   → Isoform.isoform_uniprot_id startswith accession + "-"
+    """
+    # If this protein IS itself an isoform, don't expand.
+    if Isoform.objects.filter(protein_ptr_id=protein_pk).exists():
+        return []
+
+    uniprot_entry_ids = list(
+        ProteinUniProt.objects
+        .filter(protein_id=protein_pk)
+        .values_list("uniprot_id", flat=True)
+    )
+    if not uniprot_entry_ids:
+        return []
+
+    accessions = list(
+        UniProtAccession.objects
+        .filter(uniprot_id__in=uniprot_entry_ids)
+        .values_list("accession", flat=True)
+    )
+    if not accessions:
+        return []
+
+    iso_q = Q()
+    for acc in accessions:
+        iso_q |= Q(isoform_uniprot_id__startswith=acc + "-")
+
+    return list(
+        Isoform.objects.filter(iso_q).prefetch_related("uniprot_ids", "entrez_ids")
+    )
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -92,19 +140,26 @@ def protein_query_view(request):
 @require_GET
 def protein_query_api(request):
     """
-    GET /api/query/?q=<identifier>
+    GET /api/query/?q=<identifier>[&include_isoforms=1]
 
     Resolves the identifier via Protein.objects.resolve(), then fetches
-    all interactions via Interaction.objects.for_protein().with_proteins()
+    all interactions via Interaction.objects.for_proteins().with_proteins()
     so that partner identifier mappings are available in a single round-trip.
+
+    When include_isoforms=1 and the resolved protein is a canonical (not
+    itself an isoform), the query is also run for every known isoform of
+    that protein, and all results are returned together.
 
     Response shape:
     {
-        "query_protein": { id, name, uniprot_id, gene_id, symbol },
+        "query_protein":     { id, name, uniprot_id, gene_id, symbol, isoform_uniprot_id },
+        "isoforms_included": <bool>,
+        "expanded_proteins": [ ...same shape... ],   // isoforms added to the query
         "interactions": [
             {
                 "id":               <int>,
-                "partner":          { id, name, uniprot_id, gene_id, symbol },
+                "query_side":       { ...protein dict... },  // which protein was on query side
+                "partner":          { ...protein dict... },
                 "score":            <float>,
                 "source_count":     <int>,
                 "experiment_count": <int>,
@@ -116,6 +171,8 @@ def protein_query_api(request):
     }
     """
     q = request.GET.get("q", "").strip()
+    include_isoforms = request.GET.get("include_isoforms", "") in ("1", "true", "yes")
+
     if not q:
         return JsonResponse({
             "error": "No query provided.",
@@ -124,8 +181,6 @@ def protein_query_api(request):
         })
 
     # ── Resolve identifier → Protein ──────────────────────────────────
-    # resolve() returns a queryset; prefetch IDs so _protein_display()
-    # can read them without extra queries.
     proteins = Protein.objects.resolve(q).prefetch_related("uniprot_ids", "entrez_ids")
 
     if not proteins.exists():
@@ -135,16 +190,24 @@ def protein_query_api(request):
             "query_protein": None,
         })
 
-    # If the identifier is ambiguous (rare) take the first match.
     protein = proteins.first()
 
+    # ── Optionally expand to isoforms ─────────────────────────────────
+    isoforms: list = []
+    protein_pks: list[int] = [protein.pk]
+    if include_isoforms:
+        isoforms = _get_isoforms(protein.pk)
+        protein_pks.extend(iso.pk for iso in isoforms)
+
+    # Map PK → isoform_uniprot_id for every expanded isoform (used in display).
+    isoform_uid_map: dict[int, str] = {iso.pk: iso.isoform_uniprot_id for iso in isoforms}
+    protein_pks_set = set(protein_pks)
+
     # ── Fetch interactions ─────────────────────────────────────────────
-    # for_protein()  → filters to interactions involving this protein
-    # with_proteins() → select_related + prefetch partner ID mappings
-    # prefetch_related("sources", "experiments") for the count columns
+    # for_proteins() handles a single-element list the same as for_protein().
     interactions_qs = (
         Interaction.objects
-        .for_protein(protein.pk)
+        .for_proteins(protein_pks)
         .with_proteins()
         .prefetch_related("sources", "experiments")
         .order_by("-score")
@@ -152,24 +215,28 @@ def protein_query_api(request):
 
     results = []
     for interaction in interactions_qs:
-        # Determine which side is the queried protein and which is the partner.
-        partner = interaction.protein_2 if interaction.protein_1_id == protein.pk else interaction.protein_1
-
+        # Determine which side is on the query side and which is the partner.
+        if interaction.protein_1_id in protein_pks_set:
+            query_side, partner = interaction.protein_1, interaction.protein_2
+        else:
+            query_side, partner = interaction.protein_2, interaction.protein_1
 
         results.append({
             "id":               interaction.pk,
+            "query_side":       _protein_display(query_side, isoform_uid_map.get(query_side.pk)),
             "partner":          _protein_display(partner),
             "score":            round(interaction.score, 4),
-            # .all() on a prefetched M2M hits the cache — no extra queries.
             "source_count":     interaction.sources.all().count(),
             "experiment_count": interaction.experiments.all().count(),
             "detail_url":       reverse("hippie_website:interaction_detail", args=[interaction.pk]),
         })
 
     return JsonResponse({
-        "query_protein": _protein_display(protein),
-        "interactions":  results,
-        "error":         None,
+        "query_protein":     _protein_display(protein),
+        "isoforms_included": include_isoforms,
+        "expanded_proteins": [_protein_display(iso) for iso in isoforms],
+        "interactions":      results,
+        "error":             None,
     })
 
 # ---------------------------------------------------------------------------
@@ -195,7 +262,8 @@ def interaction_query_api(request):
         "pairs": [
             { "a": "<id>", "b": "<id>", "input_order": <int> },
             ...
-        ]
+        ],
+        "include_isoforms": <bool>   // optional, default false
     }
 
     Response (JSON):
@@ -225,6 +293,8 @@ def interaction_query_api(request):
         return JsonResponse({"error": "Invalid JSON body."}, status=400)
 
     raw_pairs = body.get("pairs", [])
+    include_isoforms = bool(body.get("include_isoforms", False))
+
     if not isinstance(raw_pairs, list):
         return JsonResponse({"error": "'pairs' must be a list."}, status=400)
     if len(raw_pairs) > BATCH_LIMIT:
@@ -233,14 +303,22 @@ def interaction_query_api(request):
             status=400,
         )
 
+    # Per-request cache so repeated proteins in a batch share isoform lookups.
+    isoform_cache: dict[int, list] = {}
+
     results = []
     for item in raw_pairs:
         input_a = str(item.get("a", "")).strip()
         input_b = str(item.get("b", "")).strip()
         input_order = int(item.get("input_order", 0))
 
-        row = _resolve_interaction_pair(input_a, input_b, input_order)
-        results.append(row)
+        if include_isoforms:
+            rows = _resolve_interaction_pair_with_isoforms(
+                input_a, input_b, input_order, isoform_cache
+            )
+        else:
+            rows = [_resolve_interaction_pair(input_a, input_b, input_order)]
+        results.extend(rows)
     return JsonResponse({"results": results})
 
 
@@ -298,13 +376,15 @@ def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> d
     ub = _protein_display(protein_b)
 
     return {
-        "input_order": input_order,
-        "input_a": input_a,
-        "input_b": input_b,
-        "symbol_a": ua["symbol"],
-        "symbol_b": ub["symbol"],
-        "uniprot_a": ua["uniprot_id"],
-        "uniprot_b": ub["uniprot_id"],
+        "input_order":      input_order,
+        "input_a":          input_a,
+        "input_b":          input_b,
+        "symbol_a":         ua["symbol"],
+        "symbol_b":         ub["symbol"],
+        "uniprot_a":        ua["uniprot_id"],
+        "uniprot_b":        ub["uniprot_id"],
+        "isoform_uniprot_a": ua["isoform_uniprot_id"],
+        "isoform_uniprot_b": ub["isoform_uniprot_id"],
         "score":            round(interaction.score, 4),
         "source_count":     interaction.sources.all().count(),
         "experiment_count": interaction.experiments.all().count(),
@@ -312,6 +392,126 @@ def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> d
         "detail_url":       reverse("hippie_website:interaction_detail", args=[interaction.pk]),
     }
 
+
+def _resolve_interaction_pair_with_isoforms(
+    input_a: str,
+    input_b: str,
+    input_order: int,
+    isoform_cache: dict,
+) -> list[dict]:
+    """
+    Like _resolve_interaction_pair but expands each canonical protein side to
+    include all its known isoforms, then checks every resulting combination for
+    a recorded interaction.
+
+    Rules (matching the spec):
+      • If a resolved protein IS an isoform, that side is NOT expanded further.
+      • If a resolved protein is canonical, expand to canonical + all isoforms.
+      • Only interactions that actually exist in the database are returned.
+      • If no combination has a recorded interaction, fall back to returning the
+        original pair as "not found" (score = -1), preserving the existing UX.
+
+    isoform_cache: a per-request dict[protein_pk -> list[Isoform]] to avoid
+    repeated DB lookups when the same protein appears in multiple pairs.
+    """
+    protein_a = Protein.objects.resolve(input_a).prefetch_related("uniprot_ids", "entrez_ids").first()
+    protein_b = Protein.objects.resolve(input_b).prefetch_related("uniprot_ids", "entrez_ids").first()
+
+    if protein_a is None or protein_b is None:
+        return [_resolve_interaction_pair(input_a, input_b, input_order)]
+
+    # Cached isoform lookup ---------------------------------------------------
+    def cached_isoforms(pk: int) -> list:
+        if pk not in isoform_cache:
+            isoform_cache[pk] = _get_isoforms(pk)
+        return isoform_cache[pk]
+
+    isoforms_a = cached_isoforms(protein_a.pk)
+    isoforms_b = cached_isoforms(protein_b.pk)
+
+    a_pks: list[int] = [protein_a.pk] + [iso.pk for iso in isoforms_a]
+    b_pks: list[int] = [protein_b.pk] + [iso.pk for iso in isoforms_b]
+
+    # Load all relevant proteins in one query for display --------------------
+    all_pks = list(set(a_pks + b_pks))
+    proteins_map: dict[int, Protein] = {
+        p.pk: p
+        for p in Protein.objects.filter(pk__in=all_pks).prefetch_related("uniprot_ids", "entrez_ids")
+    }
+
+    # Build isoform UID map (pk → isoform-specific accession) ----------------
+    isoform_uid_map: dict[int, str] = {
+        iso.protein_ptr_id: iso.isoform_uniprot_id
+        for iso in Isoform.objects.filter(protein_ptr_id__in=all_pks)
+    }
+
+    # Build the set of canonical (p1_pk, p2_pk) pairs with their a/b origin --
+    # (p1_pk <= p2_pk as required by the Interaction model constraint)
+    canonical_pairs: dict[tuple[int, int], tuple[int, int]] = {}
+    for pa_pk in a_pks:
+        for pb_pk in b_pks:
+            if pa_pk == pb_pk:
+                continue
+            p1_pk, p2_pk = (min(pa_pk, pb_pk), max(pa_pk, pb_pk))
+            if (p1_pk, p2_pk) not in canonical_pairs:
+                # Store which pk was on the A side and which was on the B side
+                # (for correct display ordering in the response).
+                canonical_pairs[(p1_pk, p2_pk)] = (pa_pk, pb_pk)
+
+    if not canonical_pairs:
+        return [_resolve_interaction_pair(input_a, input_b, input_order)]
+
+    # Fetch all interactions in a single query --------------------------------
+    q = Q()
+    for p1_pk, p2_pk in canonical_pairs:
+        q |= Q(protein_1_id=p1_pk, protein_2_id=p2_pk)
+
+    found_interactions: dict[tuple[int, int], Interaction] = {
+        (i.protein_1_id, i.protein_2_id): i
+        for i in (
+            Interaction.objects
+            .with_proteins()
+            .prefetch_related("sources", "experiments")
+            .filter(q)
+        )
+    }
+
+    # Build result rows -------------------------------------------------------
+    found_results: list[dict] = []
+    for (p1_pk, p2_pk), (pa_pk, pb_pk) in canonical_pairs.items():
+        interaction = found_interactions.get((p1_pk, p2_pk))
+        if not interaction:
+            continue
+
+        pa = proteins_map.get(pa_pk)
+        pb = proteins_map.get(pb_pk)
+        if pa is None or pb is None:
+            continue
+
+        ua = _protein_display(pa, isoform_uid_map.get(pa_pk))
+        ub = _protein_display(pb, isoform_uid_map.get(pb_pk))
+        found_results.append({
+            "input_order":       input_order,
+            "input_a":           input_a,
+            "input_b":           input_b,
+            "symbol_a":          ua["symbol"],
+            "symbol_b":          ub["symbol"],
+            "uniprot_a":         ua["uniprot_id"],
+            "uniprot_b":         ub["uniprot_id"],
+            "isoform_uniprot_a": ua["isoform_uniprot_id"],
+            "isoform_uniprot_b": ub["isoform_uniprot_id"],
+            "score":             round(interaction.score, 4),
+            "source_count":      interaction.sources.all().count(),
+            "experiment_count":  interaction.experiments.all().count(),
+            "interaction_id":    interaction.pk,
+            "detail_url":        reverse("hippie_website:interaction_detail", args=[interaction.pk]),
+        })
+
+    # If no isoform combination found anything, show original pair as not-found.
+    if not found_results:
+        return [_resolve_interaction_pair(input_a, input_b, input_order)]
+
+    return found_results
 
 
 
@@ -888,6 +1088,15 @@ def interaction_detail_view(request, pk: int):
     p1_entrez  = interaction.protein_1.entrez_ids.all().first()
     p2_entrez  = interaction.protein_2.entrez_ids.all().first()
 
+    # Compute bait-prey detection stats from prefetched data (no extra queries).
+    all_tests = [
+        test
+        for assoc in interaction.bait_prey.all()
+        for test in assoc.tests_performed.all()
+    ]
+    bait_prey_total_tested = len(all_tests)
+    bait_prey_times_observed = sum(1 for t in all_tests if t.detection)
+
     context = {
         "interaction": interaction,
         "p1": {
@@ -907,6 +1116,9 @@ def interaction_detail_view(request, pk: int):
         "publications": interaction.publications.all(),
         "experiments":  interaction.experiments.all().order_by("-quality_score"),
         "species":      interaction.conserved_species.all(),
+        # Bait-prey detection stats.
+        "bait_prey_total_tested":    bait_prey_total_tested,
+        "bait_prey_times_observed":  bait_prey_times_observed,
     }
     return render(request, "hippie_website/interaction_detail.html", context)
 

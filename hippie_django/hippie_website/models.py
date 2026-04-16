@@ -1,3 +1,5 @@
+from code import interact
+
 from django.db import models
 from .managers import InteractionManager, ProteinManager
 
@@ -418,6 +420,56 @@ class Interaction(models.Model):
         return f"{self.protein_1.name}–{self.protein_2.name} ({self.score})"
 
 
+class NonInteraction(models.Model):
+    """
+    Central interaction table — the heart of HIPPIE.
+
+    Every row always has `protein_1` and `protein_2` set.
+
+    `kegg_direction` and `effect_type`/`effect_source` are inlined from
+    the old `interaction2keggDirection` and `interaction2effect` tables.
+    """
+
+    # -- Required: protein-level interactors
+    protein_1 = models.ForeignKey(
+        Protein,
+        on_delete=models.CASCADE,
+        related_name="noninteractions_as_1",
+    )
+    protein_2 = models.ForeignKey(
+        Protein,
+        on_delete=models.CASCADE,
+        related_name="noninteractions_as_2",
+    )
+
+    # -- Confidence score (0.0–1.0)
+    score = models.FloatField(db_index=True)
+
+    class Meta:
+        db_table = "noninteraction"
+        indexes = [
+            models.Index(fields=["protein_1", "score"]),
+            models.Index(fields=["protein_2", "score"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(protein_1_id__lte=models.F("protein_2_id")),
+                name="noninteraction_canonical_order",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(score__gte=0.0) & models.Q(score__lte=1.0),
+                name="noninteraction_score_range",
+            ),
+            models.UniqueConstraint(
+                fields=["protein_1", "protein_2"],
+                name="noninteraction_unique_pair",
+            ),
+        ]
+
+    def __str__(self):
+        return f"NonInteraction {self.protein_1.name}–{self.protein_2.name} ({self.score})"
+
+
 # =============================================================================
 # Evidence junction tables
 # =============================================================================
@@ -587,7 +639,7 @@ class BaitPreyTest(models.Model):
         db_table = "bait_prey_test"
         constraints = [
             models.UniqueConstraint(
-                fields=["pmid", "method"],
+                fields=["detection", "pmid", "method"],
                 name="bait_prey_test_unique",
             ),
         ]
@@ -602,7 +654,11 @@ class BaitPreyAssociation(models.Model):
         PROTEIN_TWO_BAIT = -1, "Protein 2 Bait"
 
     interaction = models.ForeignKey(
-        Interaction, on_delete=models.CASCADE, related_name="bait_prey"
+        Interaction, on_delete=models.CASCADE, related_name="bait_prey", null=True, blank=True
+    )
+
+    noninteraction = models.ForeignKey(
+        NonInteraction, on_delete=models.SET_NULL, related_name="bait_prey", null=True, blank=True
     )
     direction = models.SmallIntegerField(
         choices=Directions.choices,
@@ -620,6 +676,10 @@ class BaitPreyAssociation(models.Model):
                 fields=["interaction", "direction"],
                 name="bait_pray_unique",
             ),
+            models.CheckConstraint(
+                condition=models.Q(interaction__isnull=True) | models.Q(noninteraction__isnull=True),
+                name="max_one_link_to_interaction_or_noninteraction",
+            )
         ]
 
     def __str__(self):
