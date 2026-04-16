@@ -146,6 +146,7 @@ class Command(BaseCommand):
                     "method_code": PSI_MI_CODE_MAP.get(fields[4], fields[4]),
                     "pmid":        int(fields[5]),
                 })
+                break
 
         self.stdout.write(f"Parsed {len(rows)} rows from {input_file}.")
 
@@ -221,7 +222,7 @@ class Command(BaseCommand):
             bpt, _ = BaitPreyTest.objects.get_or_create(
                 pmid=row["pmid"],
                 method=method,
-                defaults={"detection": row["detection"]},
+                detection=row["detection"],
             )
             bpa.tests_performed.add(bpt)
             imported += 1

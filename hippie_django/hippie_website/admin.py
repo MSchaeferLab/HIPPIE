@@ -19,7 +19,7 @@ from .models import (
     Source,
     Species,
     Tissue,
-    UniProtAccession,
+    UniProtAccession, BaitPreyTest,
 )
 
 
@@ -226,3 +226,10 @@ class BaitPreyAssociationAdmin(admin.ModelAdmin):
         "interaction__protein_2",
     )
     autocomplete_fields = ("interaction",)
+
+@admin.register(BaitPreyTest)
+class BaitPreyTestAdmin(admin.ModelAdmin):
+    list_display = ("id", "detection", "pmid", "method")
+    search_fields = ("detection", "=pmid", "method")
+    list_filter = ("detection",)
+    ordering = ("-pmid",)
