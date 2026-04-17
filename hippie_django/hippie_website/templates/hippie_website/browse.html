@@ -189,6 +189,7 @@
     filterMetaUrl:  "{% url 'hippie_website:browse_filter_meta' %}",
     proteinDetailUrl: "{% url 'hippie_website:protein_detail' pk=0 %}".replace("/0/", "/{id}/"),
     proteinQueryUrl:  "{% url 'hippie_website:index' %}",
+    mlSplitsUrl:      "{% url 'hippie_website:ml_splits' %}",
   };
 </script>
 <div id="hippie-browse-app"></div>
@@ -204,6 +205,7 @@ const {
   filterMetaUrl,
   proteinDetailUrl,
   proteinQueryUrl,
+  mlSplitsUrl,
 } = window.HIPPIE_BROWSE_CONFIG;
 
 const PAGE_SIZE   = 50;
@@ -548,6 +550,26 @@ function App() {
               {streaming && " — still loading…"}
             </span>
           </div>
+          <a
+            href={(() => {
+              const p = new URLSearchParams();
+              if (filters.tissue)        p.set("tissue",    filters.tissue);
+              if (filters.source)        p.set("source",    filters.source);
+              if (filters.minScore > 0)  p.set("min_score", filters.minScore);
+              const qs = p.toString();
+              return mlSplitsUrl + (qs ? "?" + qs : "");
+            })()}
+            style={{
+              display:"inline-flex", alignItems:"center", gap:".35rem",
+              background:"var(--hippie-teal)", color:"#fff",
+              border:"none", borderRadius:"var(--radius-md)",
+              fontSize:".82rem", fontWeight:600,
+              padding:".4rem .9rem", textDecoration:"none",
+              fontFamily:"var(--font-body)",
+            }}
+          >
+            <i className="bi bi-table"></i> Generate ML Splits
+          </a>
         </div>
       )}
 

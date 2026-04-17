@@ -1,0 +1,305 @@
+{% extends "hippie_website/base.html" %}
+{% block title %}Generate ML Splits{% endblock %}
+{% block nav_browse %}active{% endblock %}
+
+{% block extra_styles %}
+  .splits-hero { padding: 3rem 0 2rem; border-bottom: 1px solid var(--hippie-border); margin-bottom: 2.5rem; }
+  .splits-hero h1 { font-size: clamp(1.75rem, 4vw, 3rem); line-height: 1.1; margin-bottom: .75rem; }
+  .splits-hero p  { font-size: 1rem; color: var(--hippie-ink-muted); max-width: 60ch; margin-bottom: 0; }
+
+  .param-card { background: var(--hippie-surface); border: 1.5px solid var(--hippie-border);
+                border-radius: var(--radius-lg); padding: 1.5rem; margin-bottom: 1.25rem;
+                box-shadow: var(--shadow-card); }
+  .param-card h6 { font-size: .68rem; font-weight: 700; text-transform: uppercase;
+                   letter-spacing: .1em; color: var(--hippie-ink-muted);
+                   border-bottom: 1px solid var(--hippie-border); padding-bottom: .3rem;
+                   margin-bottom: 1rem; font-family: var(--font-mono); }
+
+  .filter-chip { display:inline-flex; align-items:center; gap:.3rem;
+                 background:var(--hippie-teal-soft); border:1px solid var(--hippie-teal);
+                 border-radius:100px; color:var(--hippie-teal); font-size:.78rem;
+                 font-weight:600; padding:.15rem .65rem; font-family:var(--font-mono); }
+  .filter-chip.none { background:var(--hippie-bg); border-color:var(--hippie-border);
+                      color:var(--hippie-ink-muted); }
+
+  .progress-section { display:none; }
+  .progress-section.visible { display:block; }
+
+  .job-progress-bar { height:6px; background:var(--hippie-border); border-radius:100px; overflow:hidden; margin:.5rem 0 .25rem; }
+  .job-progress-fill { height:100%; background:var(--hippie-teal); border-radius:100px; transition:width .4s ease; }
+
+  .step-label { font-family:var(--font-mono); font-size:.82rem; color:var(--hippie-ink-muted); }
+
+  .download-section { display:none; }
+  .download-section.visible { display:block; }
+
+  .error-section { display:none; }
+  .error-section.visible { display:block; }
+
+  .split-stats-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin-top:1rem; }
+  .split-stat-card { background:var(--hippie-bg); border:1px solid var(--hippie-border);
+                     border-radius:var(--radius-md); padding:1rem; text-align:center; }
+  .split-stat-card .split-name { font-family:var(--font-mono); font-size:.75rem;
+                                  font-weight:700; text-transform:uppercase;
+                                  letter-spacing:.08em; color:var(--hippie-teal);
+                                  margin-bottom:.4rem; }
+  .split-stat-card .split-num  { font-size:1.5rem; font-family:var(--font-display);
+                                  line-height:1.1; }
+  .split-stat-card .split-sub  { font-size:.75rem; color:var(--hippie-ink-muted); }
+
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .spinner-sm { display:inline-block; width:14px; height:14px;
+                border:2px solid var(--hippie-border); border-top-color:var(--hippie-teal);
+                border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; }
+{% endblock %}
+
+{% block content %}
+<script>
+  window.SPLITS_CONFIG = {
+    createUrl:  "{% url 'hippie_website:browse_splits_create' %}",
+    statusBase: "{% url 'hippie_website:browse_splits_status' job_id='00000000-0000-0000-0000-000000000000' %}".replace("/00000000-0000-0000-0000-000000000000/", "/"),
+    browseUrl:  "{% url 'hippie_website:browse' %}",
+    tissue:     "{{ tissue|escapejs }}",
+    source:     "{{ source|escapejs }}",
+    minScore:   "{{ min_score|escapejs }}",
+  };
+</script>
+
+<div class="splits-hero">
+  <h1>Generate<br><em style="color:var(--hippie-teal)">ML Splits</em></h1>
+  <p>Configure the train / val / test partitioning of the HIPPIE interaction graph.
+     The graph will be filtered by the parameters you selected on the Browse page,
+     then split using Kernighan–Lin bisection with balanced negative sampling.</p>
+</div>
+
+{# ── Filter summary ───────────────────────────────────────────────────────── #}
+<div class="param-card">
+  <h6>Active Browse Filters</h6>
+  <div class="d-flex gap-2 flex-wrap align-items-center">
+    {% if tissue %}
+      <span class="filter-chip"><i class="bi bi-heart-pulse"></i> Tissue&nbsp;ID&nbsp;{{ tissue }}</span>
+    {% else %}
+      <span class="filter-chip none">Any tissue</span>
+    {% endif %}
+    {% if source %}
+      <span class="filter-chip"><i class="bi bi-database"></i> Source&nbsp;ID&nbsp;{{ source }}</span>
+    {% else %}
+      <span class="filter-chip none">Any source</span>
+    {% endif %}
+    {% if min_score and min_score != "0" %}
+      <span class="filter-chip"><i class="bi bi-bar-chart-line"></i> Min score ≥ {{ min_score }}</span>
+    {% else %}
+      <span class="filter-chip none">No score filter</span>
+    {% endif %}
+  </div>
+  <p class="mt-2 mb-0" style="font-size:.82rem; color:var(--hippie-ink-muted);">
+    <a href="{{ SPLITS_CONFIG.browseUrl }}" style="color:var(--hippie-teal);">← Back to Browse</a>
+    to change these filters.
+  </p>
+</div>
+
+{# ── Split parameters ─────────────────────────────────────────────────────── #}
+<form id="splits-form" onsubmit="return false;">
+  <div class="param-card">
+    <h6>Negative Sampling</h6>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label" for="neg-ratio">
+          Negative ratio
+          <span class="text-muted-sm" style="font-size:.75rem;">(neg edges per positive edge)</span>
+        </label>
+        <input id="neg-ratio" name="neg_ratio" type="number" class="form-control"
+               min="0.1" max="10" step="0.1" value="1.0" required />
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="seed">Random seed</label>
+        <input id="seed" name="seed" type="number" class="form-control"
+               value="78539105873" required />
+      </div>
+    </div>
+  </div>
+
+  {% if interaction_types %}
+  <div class="param-card">
+    <h6>Interaction Type Filter <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional — leave blank for all types)</span></h6>
+    <div class="row g-2">
+      {% for t in interaction_types %}
+      <div class="col-md-4 col-6">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="type_ids" value="{{ t.id }}" id="type-{{ t.id }}">
+          <label class="form-check-label" for="type-{{ t.id }}" style="font-size:.85rem;">{{ t.name }}</label>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <button type="submit" id="generate-btn" class="btn" style="
+      background:var(--hippie-teal); color:#fff; border:none;
+      border-radius:var(--radius-md); padding:.6rem 1.5rem;
+      font-weight:600; font-family:var(--font-body); font-size:.95rem;
+      cursor:pointer; transition:opacity .15s;">
+    <i class="bi bi-play-fill me-1"></i> Generate Splits
+  </button>
+</form>
+
+{# ── Progress ─────────────────────────────────────────────────────────────── #}
+<div id="progress-section" class="progress-section mt-4">
+  <div class="param-card">
+    <h6>Job Progress</h6>
+    <div class="d-flex justify-content-between align-items-center">
+      <span id="step-label" class="step-label"><span class="spinner-sm me-1"></span> Starting…</span>
+      <span id="pct-label" class="step-label">0%</span>
+    </div>
+    <div class="job-progress-bar">
+      <div id="progress-fill" class="job-progress-fill" style="width:0%"></div>
+    </div>
+    <p id="job-id-label" class="mb-0 mt-1" style="font-size:.75rem; color:var(--hippie-ink-muted); font-family:var(--font-mono);"></p>
+  </div>
+</div>
+
+{# ── Download ─────────────────────────────────────────────────────────────── #}
+<div id="download-section" class="download-section mt-4">
+  <div class="param-card" style="border-color:var(--hippie-teal);">
+    <h6>Done — Download Your Splits</h6>
+    <a id="download-link" href="#" class="btn" style="
+        background:var(--hippie-teal); color:#fff; border:none;
+        border-radius:var(--radius-md); padding:.6rem 1.5rem;
+        font-weight:600; font-family:var(--font-body); font-size:.95rem;
+        text-decoration:none;">
+      <i class="bi bi-download me-1"></i> Download ZIP
+    </a>
+    <div id="summary-stats" class="split-stats-grid mt-3"></div>
+  </div>
+</div>
+
+{# ── Error ────────────────────────────────────────────────────────────────── #}
+<div id="error-section" class="error-section mt-4">
+  <div class="param-card" style="border-color:var(--hippie-accent);">
+    <h6 style="color:var(--hippie-accent);">Job Failed</h6>
+    <pre id="error-text" style="font-size:.8rem; white-space:pre-wrap; margin:0;"></pre>
+  </div>
+</div>
+
+<script>
+(function () {
+  const cfg = window.SPLITS_CONFIG;
+  let pollTimer = null;
+
+  const form         = document.getElementById("splits-form");
+  const btn          = document.getElementById("generate-btn");
+  const progressSec  = document.getElementById("progress-section");
+  const downloadSec  = document.getElementById("download-section");
+  const errorSec     = document.getElementById("error-section");
+  const stepLabel    = document.getElementById("step-label");
+  const pctLabel     = document.getElementById("pct-label");
+  const progressFill = document.getElementById("progress-fill");
+  const jobIdLabel   = document.getElementById("job-id-label");
+  const downloadLink = document.getElementById("download-link");
+  const summaryStats = document.getElementById("summary-stats");
+  const errorText    = document.getElementById("error-text");
+
+  const STEP_LABELS = {
+    building_graph:    "Building interaction graph…",
+    partitioning:      "Partitioning graph into splits…",
+    sampling_negatives:"Sampling negative edges…",
+    pruning:           "Pruning isolated nodes…",
+    writing_files:     "Writing CSV files…",
+    done:              "Done",
+    starting:          "Starting…",
+  };
+
+  function setProgress(step, frac) {
+    const pct = Math.round(frac * 100);
+    stepLabel.innerHTML = `<span class="spinner-sm me-1"></span> ${STEP_LABELS[step] || step}`;
+    pctLabel.textContent = pct + "%";
+    progressFill.style.width = pct + "%";
+  }
+
+  function poll(jobId) {
+    fetch(cfg.statusBase + jobId + "/")
+      .then(r => r.json())
+      .then(data => {
+        setProgress(data.step || "starting", data.progress || 0);
+
+        if (data.status === "DONE") {
+          clearTimeout(pollTimer);
+          progressFill.style.width = "100%";
+          pctLabel.textContent = "100%";
+          stepLabel.textContent = "Done";
+
+          downloadLink.href = data.download_url;
+          if (data.summary && data.summary.splits) {
+            summaryStats.innerHTML = data.summary.splits.map(s => `
+              <div class="split-stat-card">
+                <div class="split-name">${s.name}</div>
+                <div class="split-num">${(s.n_pos + s.n_neg).toLocaleString()}</div>
+                <div class="split-sub">${s.n_pos.toLocaleString()} pos + ${s.n_neg.toLocaleString()} neg</div>
+              </div>
+            `).join("");
+          }
+          downloadSec.classList.add("visible");
+
+        } else if (data.status === "FAILED") {
+          clearTimeout(pollTimer);
+          errorText.textContent = data.error || "Unknown error";
+          errorSec.classList.add("visible");
+
+        } else {
+          pollTimer = setTimeout(() => poll(jobId), 1500);
+        }
+      })
+      .catch(() => {
+        pollTimer = setTimeout(() => poll(jobId), 3000);
+      });
+  }
+
+  form.addEventListener("submit", function () {
+    btn.disabled = true;
+    btn.style.opacity = ".6";
+    progressSec.classList.add("visible");
+    downloadSec.classList.remove("visible");
+    errorSec.classList.remove("visible");
+
+    const typeCheckboxes = form.querySelectorAll("input[name='type_ids']:checked");
+    const typeIds = Array.from(typeCheckboxes).map(c => parseInt(c.value));
+
+    const payload = {
+      min_score:  cfg.minScore ? parseFloat(cfg.minScore) : 0.0,
+      tissue_ids: cfg.tissue   ? [parseInt(cfg.tissue)]   : [],
+      source_ids: cfg.source   ? [parseInt(cfg.source)]   : [],
+      type_ids:   typeIds,
+      neg_ratio:  parseFloat(form.querySelector("#neg-ratio").value),
+      seed:       parseInt(form.querySelector("#seed").value),
+    };
+
+    fetch(cfg.createUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
+      body: JSON.stringify(payload),
+    })
+      .then(r => {
+        if (!r.ok) return r.json().then(e => Promise.reject(e));
+        return r.json();
+      })
+      .then(data => {
+        jobIdLabel.textContent = "Job ID: " + data.job_id;
+        poll(data.job_id);
+      })
+      .catch(err => {
+        btn.disabled = false;
+        btn.style.opacity = "1";
+        progressSec.classList.remove("visible");
+        errorText.textContent = err.detail || JSON.stringify(err);
+        errorSec.classList.add("visible");
+      });
+  });
+
+  function getCookie(name) {
+    const v = document.cookie.match("(^|;)\\s*" + name + "\\s*=\\s*([^;]+)");
+    return v ? v.pop() : "";
+  }
+})();
+</script>
+{% endblock %}
