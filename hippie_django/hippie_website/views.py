@@ -15,7 +15,7 @@ All database access goes through the custom managers defined in managers.py:
 """
 
 import json
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -30,6 +30,7 @@ from .models import (
     ProteinUniProt,
     UniProtAccession,
     Tissue,
+    NonInteraction,
 )
 
 
@@ -182,6 +183,9 @@ def protein_query_api(request):
     """
     q = request.GET.get("q", "").strip()
     include_isoforms = request.GET.get("include_isoforms", "") in ("1", "true", "yes")
+    show = request.GET.get(
+        "show", "interactions"
+    )  # "interactions" | "noninteractions" | "both"
 
     if not q:
         return JsonResponse(
@@ -219,38 +223,84 @@ def protein_query_api(request):
     }
     protein_pks_set = set(protein_pks)
 
-    # ── Fetch interactions ─────────────────────────────────────────────
+    # ── Fetch interactions and/or non-interactions -──────────────────
     # for_proteins() handles a single-element list the same as for_protein().
-    interactions_qs = (
-        Interaction.objects.for_proteins(protein_pks)
-        .with_proteins()
-        .prefetch_related("sources", "experiments")
-        .order_by("-score")
-    )
 
     results = []
-    for interaction in interactions_qs:
-        # Determine which side is on the query side and which is the partner.
-        if interaction.protein_1_id in protein_pks_set:
-            query_side, partner = interaction.protein_1, interaction.protein_2
-        else:
-            query_side, partner = interaction.protein_2, interaction.protein_1
-
-        results.append(
-            {
-                "id": interaction.pk,
-                "query_side": _protein_display(
-                    query_side, isoform_uid_map.get(query_side.pk)
-                ),
-                "partner": _protein_display(partner),
-                "score": round(interaction.score, 4),
-                "source_count": interaction.sources.all().count(),
-                "experiment_count": interaction.experiments.all().count(),
-                "detail_url": reverse(
-                    "hippie_website:interaction_detail", args=[interaction.pk]
-                ),
-            }
+    if show in ("interactions", "both"):
+        interactions_qs = (
+            Interaction.objects.for_proteins(protein_pks)
+            .with_proteins()
+            .prefetch_related("sources", "experiments")
+            .order_by("-score")
         )
+        for interaction in interactions_qs:
+            if interaction.protein_1_id in protein_pks_set:
+                query_side, partner = interaction.protein_1, interaction.protein_2
+            else:
+                query_side, partner = interaction.protein_2, interaction.protein_1
+            results.append(
+                {
+                    "id": interaction.pk,
+                    "query_side": _protein_display(
+                        query_side, isoform_uid_map.get(query_side.pk)
+                    ),
+                    "partner": _protein_display(partner),
+                    "score": round(interaction.score, 4),
+                    "source_count": interaction.sources.all().count(),
+                    "experiment_count": interaction.experiments.all().count(),
+                    "is_noninteraction": False,
+                    "detail_url": reverse(
+                        "hippie_website:interaction_detail", args=[interaction.pk]
+                    ),
+                }
+            )
+
+    if show in ("noninteractions", "both"):
+        noninteractions_qs = (
+            NonInteraction.objects.filter(
+                Q(protein_1_id__in=protein_pks) | Q(protein_2_id__in=protein_pks)
+            )
+            .select_related("protein_1", "protein_2")
+            .prefetch_related(
+                Prefetch(
+                    "protein_1__uniprot_ids",
+                    queryset=ProteinUniProt.objects.order_by("-version"),
+                ),
+                Prefetch("protein_1__entrez_ids"),
+                Prefetch(
+                    "protein_2__uniprot_ids",
+                    queryset=ProteinUniProt.objects.order_by("-version"),
+                ),
+                Prefetch("protein_2__entrez_ids"),
+            )
+            .order_by("-score")
+        )
+        for ni in noninteractions_qs:
+            if ni.protein_1_id in protein_pks_set:
+                query_side, partner = ni.protein_1, ni.protein_2
+            else:
+                query_side, partner = ni.protein_2, ni.protein_1
+            results.append(
+                {
+                    "id": ni.pk,
+                    "query_side": _protein_display(
+                        query_side, isoform_uid_map.get(query_side.pk)
+                    ),
+                    "partner": _protein_display(partner),
+                    "score": round(ni.score, 4),
+                    "source_count": None,
+                    "experiment_count": None,
+                    "is_noninteraction": True,
+                    "detail_url": reverse(
+                        "hippie_website:noninteraction_detail", args=[ni.pk]
+                    ),
+                }
+            )
+
+    # For "both" mode, re-sort by score descending (interactions first for ties)
+    if show == "both":
+        results.sort(key=lambda r: r["score"], reverse=True)
 
     return JsonResponse(
         {
@@ -318,6 +368,9 @@ def interaction_query_api(request):
 
     raw_pairs = body.get("pairs", [])
     include_isoforms = bool(body.get("include_isoforms", False))
+    show = body.get(
+        "show", "interactions"
+    )  # "interactions" | "noninteractions" | "both"
 
     if not isinstance(raw_pairs, list):
         return JsonResponse({"error": "'pairs' must be a list."}, status=400)
@@ -339,11 +392,35 @@ def interaction_query_api(request):
         input_order = int(item.get("input_order", 0))
 
         if include_isoforms:
-            rows = _resolve_interaction_pair_with_isoforms(
-                input_a, input_b, input_order, isoform_cache
-            )
+            # Isoform expansion only applies to the Interaction table.
+            int_rows: list[dict] = []
+            if show in ("interactions", "both"):
+                int_rows = _resolve_interaction_pair_with_isoforms(
+                    input_a, input_b, input_order, isoform_cache
+                )
+            nonint_rows: list[dict] = []
+            if show in ("noninteractions", "both"):
+                nr = _resolve_noninteraction_pair(input_a, input_b, input_order)
+                if nr["score"] >= 0:
+                    nonint_rows = [nr]
+            rows = int_rows + nonint_rows
+            if not rows:
+                # Nothing found in either table — return a single not-found row.
+                if show == "noninteractions":
+                    rows = [_resolve_noninteraction_pair(input_a, input_b, input_order)]
+                else:
+                    rows = [_resolve_interaction_pair(input_a, input_b, input_order)]
         else:
-            rows = [_resolve_interaction_pair(input_a, input_b, input_order)]
+            if show == "interactions":
+                rows = [_resolve_interaction_pair(input_a, input_b, input_order)]
+            elif show == "noninteractions":
+                rows = [_resolve_noninteraction_pair(input_a, input_b, input_order)]
+            else:  # both
+                int_row = _resolve_interaction_pair(input_a, input_b, input_order)
+                nonint_row = _resolve_noninteraction_pair(input_a, input_b, input_order)
+                found = [r for r in [int_row, nonint_row] if r["score"] >= 0]
+                rows = found if found else [int_row]
+
         results.extend(rows)
     return JsonResponse({"results": results})
 
@@ -429,6 +506,85 @@ def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> d
         "detail_url": reverse(
             "hippie_website:interaction_detail", args=[interaction.pk]
         ),
+    }
+
+
+def _resolve_noninteraction_pair(input_a: str, input_b: str, input_order: int) -> dict:
+    """
+    Resolve two identifiers to proteins, look up their non-interaction record
+    in the NonInteraction table, and return a result row.
+
+    A score of -1.0 signals "not found".  Non-interactions never have source or
+    experiment counts (those fields are None in the response).
+    """
+    NOT_FOUND = {
+        "input_order": input_order,
+        "input_a": input_a,
+        "input_b": input_b,
+        "symbol_a": input_a,
+        "symbol_b": input_b,
+        "uniprot_a": "",
+        "uniprot_b": "",
+        "score": -1.0,
+        "source_count": None,
+        "experiment_count": None,
+        "is_noninteraction": True,
+        "interaction_id": None,
+        "detail_url": "",
+    }
+
+    protein_a = (
+        Protein.objects.resolve(input_a)
+        .prefetch_related("uniprot_ids", "entrez_ids")
+        .first()
+    )
+    protein_b = (
+        Protein.objects.resolve(input_b)
+        .prefetch_related("uniprot_ids", "entrez_ids")
+        .first()
+    )
+
+    if protein_a is None or protein_b is None:
+        return NOT_FOUND
+
+    p1, p2 = (
+        (protein_a, protein_b)
+        if protein_a.pk <= protein_b.pk
+        else (protein_b, protein_a)
+    )
+
+    try:
+        ni = NonInteraction.objects.get(protein_1=p1, protein_2=p2)
+    except NonInteraction.DoesNotExist:
+        ua = _protein_display(protein_a)
+        ub = _protein_display(protein_b)
+        return {
+            **NOT_FOUND,
+            "symbol_a": ua["symbol"],
+            "symbol_b": ub["symbol"],
+            "uniprot_a": ua["uniprot_id"],
+            "uniprot_b": ub["uniprot_id"],
+        }
+
+    ua = _protein_display(protein_a)
+    ub = _protein_display(protein_b)
+
+    return {
+        "input_order": input_order,
+        "input_a": input_a,
+        "input_b": input_b,
+        "symbol_a": ua["symbol"],
+        "symbol_b": ub["symbol"],
+        "uniprot_a": ua["uniprot_id"],
+        "uniprot_b": ub["uniprot_id"],
+        "isoform_uniprot_a": ua["isoform_uniprot_id"],
+        "isoform_uniprot_b": ub["isoform_uniprot_id"],
+        "score": round(ni.score, 4),
+        "source_count": None,
+        "experiment_count": None,
+        "is_noninteraction": True,
+        "interaction_id": ni.pk,
+        "detail_url": reverse("hippie_website:noninteraction_detail", args=[ni.pk]),
     }
 
 
@@ -1172,8 +1328,79 @@ def interaction_detail_view(request, pk: int):
         # Bait-prey detection stats.
         "bait_prey_total_tested": bait_prey_total_tested,
         "bait_prey_times_observed": bait_prey_times_observed,
+        # Shared with protein_pair_base.html
+        "pair_score": interaction.score,
+        "pair_label": "Interaction Evidence",
+        "is_noninteraction": False,
     }
     return render(request, "hippie_website/interaction_detail.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Non-interaction detail view
+# ---------------------------------------------------------------------------
+
+
+@require_GET
+def noninteraction_detail_view(request, pk: int):
+    """
+    Show bait-prey detection evidence for a single non-interaction (Negatome).
+    """
+    noninteraction = get_object_or_404(
+        NonInteraction.objects.select_related(
+            "protein_1", "protein_2"
+        ).prefetch_related(
+            Prefetch(
+                "protein_1__uniprot_ids",
+                queryset=ProteinUniProt.objects.order_by("-version"),
+            ),
+            Prefetch("protein_1__entrez_ids"),
+            Prefetch(
+                "protein_2__uniprot_ids",
+                queryset=ProteinUniProt.objects.order_by("-version"),
+            ),
+            Prefetch("protein_2__entrez_ids"),
+            "bait_prey",
+            "bait_prey__tests_performed",
+        ),
+        pk=pk,
+    )
+
+    p1_uniprot = noninteraction.protein_1.uniprot_ids.all().first()
+    p2_uniprot = noninteraction.protein_2.uniprot_ids.all().first()
+    p1_entrez = noninteraction.protein_1.entrez_ids.all().first()
+    p2_entrez = noninteraction.protein_2.entrez_ids.all().first()
+
+    all_tests = [
+        test
+        for assoc in noninteraction.bait_prey.all()
+        for test in assoc.tests_performed.all()
+    ]
+    bait_prey_total_tested = len(all_tests)
+    bait_prey_times_observed = sum(1 for t in all_tests if t.detection)
+
+    context = {
+        "noninteraction": noninteraction,
+        "p1": {
+            "protein": noninteraction.protein_1,
+            "uniprot_id": p1_uniprot.uniprot_id if p1_uniprot else "",
+            "gene_id": p1_entrez.gene_id if p1_entrez else None,
+            "symbol": p1_entrez.name if p1_entrez else noninteraction.protein_1.name,
+        },
+        "p2": {
+            "protein": noninteraction.protein_2,
+            "uniprot_id": p2_uniprot.uniprot_id if p2_uniprot else "",
+            "gene_id": p2_entrez.gene_id if p2_entrez else None,
+            "symbol": p2_entrez.name if p2_entrez else noninteraction.protein_2.name,
+        },
+        "bait_prey_total_tested": bait_prey_total_tested,
+        "bait_prey_times_observed": bait_prey_times_observed,
+        # Shared with protein_pair_base.html
+        "pair_score": noninteraction.score,
+        "pair_label": "Non-Interaction Evidence",
+        "is_noninteraction": True,
+    }
+    return render(request, "hippie_website/noninteraction_detail.html", context)
 
 
 # ---------------------------------------------------------------------------

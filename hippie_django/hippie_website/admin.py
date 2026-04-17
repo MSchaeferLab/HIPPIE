@@ -10,6 +10,7 @@ from .models import (
     InteractionType,
     Isoform,
     MeSHTerm,
+    NonInteraction,
     OrthologInteraction,
     Protein,
     ProteinEntrez,
@@ -228,6 +229,15 @@ class BaitPreyAssociationAdmin(admin.ModelAdmin):
         "interaction__protein_2",
     )
     autocomplete_fields = ("interaction",)
+
+
+@admin.register(NonInteraction)
+class NonInteractionAdmin(admin.ModelAdmin):
+    list_display = ("id", "protein_1", "protein_2", "score")
+    search_fields = ("=id", "protein_1__name", "protein_2__name")
+    ordering = ("-score", "id")
+    list_select_related = ("protein_1", "protein_2")
+    autocomplete_fields = ("protein_1", "protein_2")
 
 
 @admin.register(BaitPreyTest)

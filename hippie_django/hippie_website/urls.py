@@ -17,6 +17,11 @@ urlpatterns = [
         views.interaction_detail_view,
         name="interaction_detail",
     ),
+    path(
+        "noninteraction/<int:pk>/",
+        views.noninteraction_detail_view,
+        name="noninteraction_detail",
+    ),
     path("protein/<int:pk>/", views.protein_detail_view, name="protein_detail"),
     # ── JSON API endpoints ──────────────────────────────────────
     path("api/query/", views.protein_query_api, name="protein_query_api"),
