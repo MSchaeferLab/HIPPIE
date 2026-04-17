@@ -76,9 +76,12 @@ WSGI_APPLICATION = 'hippie.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-        'OPTIONS': {'timeout': 20},  # wait up to 20s for the write lock (Django + Celery share SQLite)
+        'ENGINE':   'django.db.backends.postgresql',
+        'NAME':     os.environ.get('DB_NAME',     'hippie'),
+        'USER':     os.environ.get('DB_USER',     'hippie'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'hippie'),
+        'HOST':     os.environ.get('DB_HOST',     'localhost'),
+        'PORT':     os.environ.get('DB_PORT',     '5432'),
     }
 }
 
