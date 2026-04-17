@@ -4,18 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('hippie_website', '0001_initial'),
+        ("hippie_website", "0001_initial"),
     ]
 
     operations = [
         migrations.RemoveConstraint(
-            model_name='baitpreyassociation',
-            name='max_one_link_to_interaction_or_noninteraction',
+            model_name="baitpreyassociation",
+            name="max_one_link_to_interaction_or_noninteraction",
         ),
         migrations.AddConstraint(
-            model_name='baitpreyassociation',
-            constraint=models.CheckConstraint(condition=models.Q(('interaction__isnull', True), ('noninteraction__isnull', True), _connector='OR'), name='max_one_link_to_interaction_or_noninteraction'),
+            model_name="baitpreyassociation",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("interaction__isnull", True),
+                    ("noninteraction__isnull", True),
+                    _connector="OR",
+                ),
+                name="max_one_link_to_interaction_or_noninteraction",
+            ),
         ),
     ]

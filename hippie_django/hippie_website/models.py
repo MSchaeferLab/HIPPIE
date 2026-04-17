@@ -1,5 +1,3 @@
-from code import interact
-
 from django.db import models
 from .managers import InteractionManager, ProteinManager
 
@@ -32,9 +30,11 @@ class Isoform(Protein):
     The isoform-specific UniProt ID (e.g. "P38398-2") is stored here.
     The canonical protein UniProt ID remains on the parent Protein row.
     """
+
     isoform_uniprot_id = models.CharField(
-        max_length=20, unique=True,
-        help_text='Isoform-specific UniProt accession e.g. "P38398-2"'
+        max_length=20,
+        unique=True,
+        help_text='Isoform-specific UniProt accession e.g. "P38398-2"',
     )
 
     class Meta:
@@ -42,6 +42,7 @@ class Isoform(Protein):
 
     def __str__(self):
         return self.isoform_uniprot_id
+
 
 # =============================================================================
 # Identifier mappings
@@ -83,9 +84,7 @@ class ProteinEntrez(models.Model):
         Protein, on_delete=models.CASCADE, related_name="entrez_ids"
     )
     gene_id = models.PositiveIntegerField(db_index=True)
-    name = models.CharField(
-        max_length=40, blank=True, default="", db_index=True
-    )
+    name = models.CharField(max_length=40, blank=True, default="", db_index=True)
 
     class Meta:
         db_table = "protein_entrez"
@@ -179,6 +178,7 @@ class ProteinTissue(models.Model):
 # Reference / lookup tables
 # =============================================================================
 
+
 class Source(models.Model):
     """
     Source databases providing interaction evidence.
@@ -203,9 +203,7 @@ class ExperimentType(models.Model):
 
     name = models.CharField(max_length=100, unique=True)
     psi_mi_code = models.CharField(max_length=30, blank=True, default="")
-    quality_score = models.FloatField(
-        help_text="Weight in HIPPIE confidence scoring"
-    )
+    quality_score = models.FloatField(help_text="Weight in HIPPIE confidence scoring")
 
     class Meta:
         db_table = "experiment_type"
@@ -287,17 +285,20 @@ class GOSlimTerm(models.Model):
         db_table = "GO_slim_term"
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(namespace__in=[
-                    "biological_process",
-                    "cellular_component",
-                    "molecular_function",
-                ]),
+                condition=models.Q(
+                    namespace__in=[
+                        "biological_process",
+                        "cellular_component",
+                        "molecular_function",
+                    ]
+                ),
                 name="go_slim_term_namespace_valid",
             )
         ]
 
     def __str__(self):
         return f"{self.id} {self.name}"
+
 
 class MeSHTerm(models.Model):
     """
@@ -315,6 +316,7 @@ class MeSHTerm(models.Model):
 
     def __str__(self):
         return f"{self.number} {self.name[:60]}"
+
 
 # =============================================================================
 # Core interaction
@@ -358,7 +360,6 @@ class Interaction(models.Model):
     # -- Confidence score (0.0–1.0)
     score = models.FloatField(db_index=True)
 
-
     # -- Inlined from interaction2keggDirection
     #    1 = protein_1 → protein_2, -1 = protein_2 → protein_1
     kegg_direction = models.SmallIntegerField(
@@ -370,7 +371,9 @@ class Interaction(models.Model):
         choices=EffectType.choices, null=True, blank=True
     )
     effect_source = models.SmallIntegerField(
-        choices=EffectSource.choices, null=True, blank=True,
+        choices=EffectSource.choices,
+        null=True,
+        blank=True,
         help_text="Source of effect prediction: 1=Suratanee, 25=KEGG",
     )
 
@@ -422,12 +425,9 @@ class Interaction(models.Model):
 
 class NonInteraction(models.Model):
     """
-    Central interaction table — the heart of HIPPIE.
+    Central noninteraction table — the heart of HIPPIE.
 
     Every row always has `protein_1` and `protein_2` set.
-
-    `kegg_direction` and `effect_type`/`effect_source` are inlined from
-    the old `interaction2keggDirection` and `interaction2effect` tables.
     """
 
     # -- Required: protein-level interactors
@@ -467,13 +467,14 @@ class NonInteraction(models.Model):
         ]
 
     def __str__(self):
-        return f"NonInteraction {self.protein_1.name}–{self.protein_2.name} ({self.score})"
+        return (
+            f"NonInteraction {self.protein_1.name}–{self.protein_2.name} ({self.score})"
+        )
 
 
 # =============================================================================
 # Evidence junction tables
 # =============================================================================
-
 
 
 class InteractionPublication(models.Model):
@@ -503,9 +504,11 @@ class InteractionPublication(models.Model):
 # Cross-references
 # =============================================================================
 
+
 class HomoMINTLinkManager(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(source_id=6)
+
 
 class InteractionCrossReference(models.Model):
     """
@@ -519,22 +522,16 @@ class InteractionCrossReference(models.Model):
         on_delete=models.CASCADE,
         related_name="cross_references",
     )
-    link = models.CharField(
-        max_length=40, help_text='e.g. "MINT-10096"'
-    )
+    link = models.CharField(max_length=40, help_text='e.g. "MINT-10096"')
     source = models.ForeignKey(
         Source, on_delete=models.CASCADE, related_name="cross_references"
     )
     species = models.ForeignKey(
-        Species,
-        on_delete=models.CASCADE,
-        related_name="cross_references",
-        null=True
+        Species, on_delete=models.CASCADE, related_name="cross_references", null=True
     )
 
-
-    objects = models.Manager()          # default manager — all rows
-    homomint = HomoMINTLinkManager()    # filtered manager — source_id=6 only
+    objects = models.Manager()  # default manager — all rows
+    homomint = HomoMINTLinkManager()  # filtered manager — source_id=6 only
 
     class Meta:
         db_table = "interaction2link"
@@ -576,8 +573,6 @@ class SignalingEndpoint(models.Model):
         return f"{self.uniprot_id} ({self.get_type_display()})"
 
 
-
-
 # =============================================================================
 # Ortholog interactions
 # =============================================================================
@@ -608,7 +603,9 @@ class OrthologInteraction(models.Model):
         max_length=20, choices=OrthologSource.choices, db_index=True
     )
     ortholog_species = models.ManyToManyField(
-        Species, related_name="ortholog_interactions", db_table="ortholog_interaction_species"
+        Species,
+        related_name="ortholog_interactions",
+        db_table="ortholog_interaction_species",
     )
 
     class Meta:
@@ -630,9 +627,12 @@ class OrthologInteraction(models.Model):
     def __str__(self):
         return f"{self.protein_1.name}–{self.protein_2.name} ({self.source})"
 
+
 class BaitPreyTest(models.Model):
-    detection = models.BooleanField(help_text="True if bait-prey association is detected, False if tested but not detected")
-    pmid = models.PositiveIntegerField() # NOTE:  We should have a PMID table
+    detection = models.BooleanField(
+        help_text="True if bait-prey association is detected, False if tested but not detected"
+    )
+    pmid = models.PositiveIntegerField()  # NOTE:  We should have a PMID table
     method = models.ForeignKey(ExperimentType, on_delete=models.CASCADE)
 
     class Meta:
@@ -646,29 +646,39 @@ class BaitPreyTest(models.Model):
 
     def __str__(self):
         return f"PMID:{self.pmid} {self.method.name} detected={self.detection}"
-        
-        
+
+
 class BaitPreyAssociation(models.Model):
     class Directions(models.IntegerChoices):
         PROTEIN_ONE_BAIT = 1, "Protein 1 Bait"
         PROTEIN_TWO_BAIT = -1, "Protein 2 Bait"
 
     interaction = models.ForeignKey(
-        Interaction, on_delete=models.CASCADE, related_name="bait_prey", null=True, blank=True
+        Interaction,
+        on_delete=models.CASCADE,
+        related_name="bait_prey",
+        null=True,
+        blank=True,
     )
 
     noninteraction = models.ForeignKey(
-        NonInteraction, on_delete=models.SET_NULL, related_name="bait_prey", null=True, blank=True
+        NonInteraction,
+        on_delete=models.SET_NULL,
+        related_name="bait_prey",
+        null=True,
+        blank=True,
     )
     direction = models.SmallIntegerField(
         choices=Directions.choices,
-        help_text="1 = protein_1 is bait, -1 = protein_2 is bait"
+        help_text="1 = protein_1 is bait, -1 = protein_2 is bait",
     )
 
     tests_performed = models.ManyToManyField(
-        BaitPreyTest, related_name="bait_prey_associations", db_table="bait_prey_assoc2test"
+        BaitPreyTest,
+        related_name="bait_prey_associations",
+        db_table="bait_prey_assoc2test",
     )
-    
+
     class Meta:
         db_table = "bait_prey_assoc"
         constraints = [
@@ -677,9 +687,10 @@ class BaitPreyAssociation(models.Model):
                 name="bait_pray_unique",
             ),
             models.CheckConstraint(
-                condition=models.Q(interaction__isnull=True) | models.Q(noninteraction__isnull=True),
+                condition=models.Q(interaction__isnull=True)
+                | models.Q(noninteraction__isnull=True),
                 name="max_one_link_to_interaction_or_noninteraction",
-            )
+            ),
         ]
 
     def __str__(self):

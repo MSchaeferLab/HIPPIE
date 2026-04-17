@@ -12,9 +12,8 @@ Usage in models.py:
 """
 
 from django.db import models
-from django.db.models import Avg, Count, F, Prefetch, Q, Subquery, OuterRef, Sum, Value
+from django.db.models import Count, Prefetch, Q
 from django.db.models.expressions import RawSQL
-from django.db.models.functions import NullIf
 
 
 # ============================================================================
@@ -54,18 +53,13 @@ class ProteinQuerySet(models.QuerySet):
         # 3) Isoform-specific UniProt accession (e.g. "P38398-2")
         #    Returns the parent Protein queryset so callers stay consistent
         from . import models as m  # late import to avoid circularity
+
         isoform_pk = None
         if "isoform" in identifier:
-            isoform_pk = (
-                m.Protein.objects
-                .filter(name=identifier)
-                .first()
-                .pk
-            )
+            isoform_pk = m.Protein.objects.filter(name=identifier).first().pk
         elif "-" in identifier:
             isoform_pk = (
-                m.Isoform.objects
-                .filter(isoform_uniprot_id=identifier)
+                m.Isoform.objects.filter(isoform_uniprot_id=identifier)
                 .values_list("protein_ptr_id", flat=True)
                 .first()
             )
@@ -105,19 +99,17 @@ class ProteinQuerySet(models.QuerySet):
         Also select_related the first UniProt ID and Entrez mapping so
         the template can render them without extra queries.
         """
-        return (
-            self.prefetch_related(
-                Prefetch("uniprot_ids", queryset=self._uniprot_qs()),
-                Prefetch("entrez_ids"),
-            )
-            .annotate(
-                degree=Count("interactions_as_1", distinct=True) + Count("interactions_as_2", distinct=True),
-                avg_score=RawSQL(
-                    """(SELECT AVG(score) FROM interaction
+        return self.prefetch_related(
+            Prefetch("uniprot_ids", queryset=self._uniprot_qs()),
+            Prefetch("entrez_ids"),
+        ).annotate(
+            degree=Count("interactions_as_1", distinct=True)
+            + Count("interactions_as_2", distinct=True),
+            avg_score=RawSQL(
+                """(SELECT AVG(score) FROM interaction
                        WHERE protein_1_id = protein.id OR protein_2_id = protein.id)""",
-                    []
-                ),
-            )
+                [],
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -223,9 +215,7 @@ class InteractionQuerySet(models.QuerySet):
 
     def for_protein(self, protein_id: int) -> "InteractionQuerySet":
         """All interactions involving a protein (either side)."""
-        return self.filter(
-            Q(protein_1_id=protein_id) | Q(protein_2_id=protein_id)
-        )
+        return self.filter(Q(protein_1_id=protein_id) | Q(protein_2_id=protein_id))
 
     def for_proteins(self, protein_ids: list[int]) -> "InteractionQuerySet":
         """All interactions involving any of the given proteins."""

@@ -5,376 +5,875 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Protein',
+            name="Protein",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=30, unique=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=30, unique=True)),
             ],
             options={
-                'db_table': 'protein',
+                "db_table": "protein",
             },
         ),
         migrations.CreateModel(
-            name='MeSHTerm',
+            name="MeSHTerm",
             fields=[
-                ('number', models.CharField(max_length=255, primary_key=True, serialize=False)),
-                ('name', models.CharField(db_index=True, max_length=512)),
+                (
+                    "number",
+                    models.CharField(max_length=255, primary_key=True, serialize=False),
+                ),
+                ("name", models.CharField(db_index=True, max_length=512)),
             ],
             options={
-                'db_table': 'mesh_term',
+                "db_table": "mesh_term",
             },
         ),
         migrations.CreateModel(
-            name='SignalingEndpoint',
+            name="SignalingEndpoint",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('uniprot_id', models.CharField(max_length=16, unique=True)),
-                ('type', models.CharField(choices=[('rec', 'Receptor'), ('tf', 'Transcription factor'), ('b', 'Both')], max_length=3)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("uniprot_id", models.CharField(max_length=16, unique=True)),
+                (
+                    "type",
+                    models.CharField(
+                        choices=[
+                            ("rec", "Receptor"),
+                            ("tf", "Transcription factor"),
+                            ("b", "Both"),
+                        ],
+                        max_length=3,
+                    ),
+                ),
             ],
             options={
-                'db_table': 'sp_analysis_end_nodes',
+                "db_table": "sp_analysis_end_nodes",
             },
         ),
         migrations.CreateModel(
-            name='Source',
+            name="Source",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100, unique=True)),
-                ('url', models.URLField(blank=True, default='')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=100, unique=True)),
+                ("url", models.URLField(blank=True, default="")),
             ],
             options={
-                'db_table': 'source',
+                "db_table": "source",
             },
         ),
         migrations.CreateModel(
-            name='Species',
+            name="Species",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=300, unique=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=300, unique=True)),
             ],
             options={
-                'verbose_name_plural': 'species',
-                'db_table': 'species',
+                "verbose_name_plural": "species",
+                "db_table": "species",
             },
         ),
         migrations.CreateModel(
-            name='Tissue',
+            name="Tissue",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100, unique=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=100, unique=True)),
             ],
             options={
-                'db_table': 'tissue',
+                "db_table": "tissue",
             },
         ),
         migrations.CreateModel(
-            name='ExperimentType',
+            name="ExperimentType",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100, unique=True)),
-                ('psi_mi_code', models.CharField(blank=True, default='', max_length=30)),
-                ('quality_score', models.FloatField(help_text='Weight in HIPPIE confidence scoring')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=100, unique=True)),
+                (
+                    "psi_mi_code",
+                    models.CharField(blank=True, default="", max_length=30),
+                ),
+                (
+                    "quality_score",
+                    models.FloatField(help_text="Weight in HIPPIE confidence scoring"),
+                ),
             ],
             options={
-                'db_table': 'experiment_type',
-                'constraints': [models.UniqueConstraint(condition=models.Q(('psi_mi_code', ''), _negated=True), fields=('psi_mi_code',), name='experiment_type_psi_mi_unique')],
+                "db_table": "experiment_type",
+                "constraints": [
+                    models.UniqueConstraint(
+                        condition=models.Q(("psi_mi_code", ""), _negated=True),
+                        fields=("psi_mi_code",),
+                        name="experiment_type_psi_mi_unique",
+                    )
+                ],
             },
         ),
         migrations.CreateModel(
-            name='BaitPreyTest',
+            name="BaitPreyTest",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('detection', models.BooleanField(help_text='True if bait-prey association is detected, False if tested but not detected')),
-                ('pmid', models.PositiveIntegerField()),
-                ('method', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='hippie_website.experimenttype')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "detection",
+                    models.BooleanField(
+                        help_text="True if bait-prey association is detected, False if tested but not detected"
+                    ),
+                ),
+                ("pmid", models.PositiveIntegerField()),
+                (
+                    "method",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="hippie_website.experimenttype",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'bait_prey_test',
+                "db_table": "bait_prey_test",
             },
         ),
         migrations.CreateModel(
-            name='GOSlimTerm',
+            name="GOSlimTerm",
             fields=[
-                ('id', models.CharField(max_length=20, primary_key=True, serialize=False)),
-                ('name', models.CharField(max_length=255)),
-                ('namespace', models.CharField(choices=[('biological_process', 'Biological Process'), ('cellular_component', 'Cellular Component'), ('molecular_function', 'Molecular Function')], max_length=30)),
-                ('parents', models.ManyToManyField(db_table='GO_slim_term2term', related_name='children', to='hippie_website.goslimterm')),
+                (
+                    "id",
+                    models.CharField(max_length=20, primary_key=True, serialize=False),
+                ),
+                ("name", models.CharField(max_length=255)),
+                (
+                    "namespace",
+                    models.CharField(
+                        choices=[
+                            ("biological_process", "Biological Process"),
+                            ("cellular_component", "Cellular Component"),
+                            ("molecular_function", "Molecular Function"),
+                        ],
+                        max_length=30,
+                    ),
+                ),
+                (
+                    "parents",
+                    models.ManyToManyField(
+                        db_table="GO_slim_term2term",
+                        related_name="children",
+                        to="hippie_website.goslimterm",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'GO_slim_term',
+                "db_table": "GO_slim_term",
             },
         ),
         migrations.CreateModel(
-            name='Interaction',
+            name="Interaction",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('score', models.FloatField(db_index=True)),
-                ('kegg_direction', models.SmallIntegerField(blank=True, choices=[(1, 'protein_1 -> protein_2'), (-1, 'protein_2 -> protein_1')], null=True)),
-                ('effect_type', models.SmallIntegerField(blank=True, choices=[(1, 'Activation'), (-1, 'Inhibition')], null=True)),
-                ('effect_source', models.SmallIntegerField(blank=True, choices=[(1, 'Suratanee'), (25, 'KEGG')], help_text='Source of effect prediction: 1=Suratanee, 25=KEGG', null=True)),
-                ('experiments', models.ManyToManyField(db_table='interaction2experiment', related_name='interactions', to='hippie_website.experimenttype')),
-                ('go_terms', models.ManyToManyField(db_table='interaction2GO', related_name='interactions', to='hippie_website.goslimterm')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("score", models.FloatField(db_index=True)),
+                (
+                    "kegg_direction",
+                    models.SmallIntegerField(
+                        blank=True,
+                        choices=[
+                            (1, "protein_1 -> protein_2"),
+                            (-1, "protein_2 -> protein_1"),
+                        ],
+                        null=True,
+                    ),
+                ),
+                (
+                    "effect_type",
+                    models.SmallIntegerField(
+                        blank=True,
+                        choices=[(1, "Activation"), (-1, "Inhibition")],
+                        null=True,
+                    ),
+                ),
+                (
+                    "effect_source",
+                    models.SmallIntegerField(
+                        blank=True,
+                        choices=[(1, "Suratanee"), (25, "KEGG")],
+                        help_text="Source of effect prediction: 1=Suratanee, 25=KEGG",
+                        null=True,
+                    ),
+                ),
+                (
+                    "experiments",
+                    models.ManyToManyField(
+                        db_table="interaction2experiment",
+                        related_name="interactions",
+                        to="hippie_website.experimenttype",
+                    ),
+                ),
+                (
+                    "go_terms",
+                    models.ManyToManyField(
+                        db_table="interaction2GO",
+                        related_name="interactions",
+                        to="hippie_website.goslimterm",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'interaction',
+                "db_table": "interaction",
             },
         ),
         migrations.CreateModel(
-            name='InteractionPublication',
+            name="InteractionPublication",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('pmid', models.PositiveIntegerField(db_index=True)),
-                ('interaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='publications', to='hippie_website.interaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("pmid", models.PositiveIntegerField(db_index=True)),
+                (
+                    "interaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="publications",
+                        to="hippie_website.interaction",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'interaction2pubmed',
+                "db_table": "interaction2pubmed",
             },
         ),
         migrations.CreateModel(
-            name='InteractionType',
+            name="InteractionType",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100, unique=True)),
-                ('psi_mi_code', models.CharField(blank=True, default='', max_length=30)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=100, unique=True)),
+                (
+                    "psi_mi_code",
+                    models.CharField(blank=True, default="", max_length=30),
+                ),
             ],
             options={
-                'db_table': 'interaction_type',
-                'constraints': [models.UniqueConstraint(condition=models.Q(('psi_mi_code', ''), _negated=True), fields=('psi_mi_code',), name='interaction_type_psi_mi_unique')],
+                "db_table": "interaction_type",
+                "constraints": [
+                    models.UniqueConstraint(
+                        condition=models.Q(("psi_mi_code", ""), _negated=True),
+                        fields=("psi_mi_code",),
+                        name="interaction_type_psi_mi_unique",
+                    )
+                ],
             },
         ),
         migrations.AddField(
-            model_name='interaction',
-            name='interaction_types',
-            field=models.ManyToManyField(db_table='interaction2type', related_name='interactions', to='hippie_website.interactiontype'),
+            model_name="interaction",
+            name="interaction_types",
+            field=models.ManyToManyField(
+                db_table="interaction2type",
+                related_name="interactions",
+                to="hippie_website.interactiontype",
+            ),
         ),
         migrations.CreateModel(
-            name='Isoform',
+            name="Isoform",
             fields=[
-                ('protein_ptr', models.OneToOneField(auto_created=True, on_delete=django.db.models.deletion.CASCADE, parent_link=True, primary_key=True, serialize=False, to='hippie_website.protein')),
-                ('isoform_uniprot_id', models.CharField(help_text='Isoform-specific UniProt accession e.g. "P38398-2"', max_length=20, unique=True)),
+                (
+                    "protein_ptr",
+                    models.OneToOneField(
+                        auto_created=True,
+                        on_delete=django.db.models.deletion.CASCADE,
+                        parent_link=True,
+                        primary_key=True,
+                        serialize=False,
+                        to="hippie_website.protein",
+                    ),
+                ),
+                (
+                    "isoform_uniprot_id",
+                    models.CharField(
+                        help_text='Isoform-specific UniProt accession e.g. "P38398-2"',
+                        max_length=20,
+                        unique=True,
+                    ),
+                ),
             ],
             options={
-                'db_table': 'isoform',
+                "db_table": "isoform",
             },
-            bases=('hippie_website.protein',),
+            bases=("hippie_website.protein",),
         ),
         migrations.AddField(
-            model_name='interaction',
-            name='protein_1',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='interactions_as_1', to='hippie_website.protein'),
+            model_name="interaction",
+            name="protein_1",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="interactions_as_1",
+                to="hippie_website.protein",
+            ),
         ),
         migrations.AddField(
-            model_name='interaction',
-            name='protein_2',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='interactions_as_2', to='hippie_website.protein'),
+            model_name="interaction",
+            name="protein_2",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="interactions_as_2",
+                to="hippie_website.protein",
+            ),
         ),
         migrations.AddField(
-            model_name='interaction',
-            name='mesh_terms',
-            field=models.ManyToManyField(db_table='interaction2mesh', related_name='interactions', to='hippie_website.meshterm'),
+            model_name="interaction",
+            name="mesh_terms",
+            field=models.ManyToManyField(
+                db_table="interaction2mesh",
+                related_name="interactions",
+                to="hippie_website.meshterm",
+            ),
         ),
         migrations.CreateModel(
-            name='NonInteraction',
+            name="NonInteraction",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('score', models.FloatField(db_index=True)),
-                ('protein_1', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='noninteractions_as_1', to='hippie_website.protein')),
-                ('protein_2', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='noninteractions_as_2', to='hippie_website.protein')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("score", models.FloatField(db_index=True)),
+                (
+                    "protein_1",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="noninteractions_as_1",
+                        to="hippie_website.protein",
+                    ),
+                ),
+                (
+                    "protein_2",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="noninteractions_as_2",
+                        to="hippie_website.protein",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'noninteraction',
+                "db_table": "noninteraction",
             },
         ),
         migrations.CreateModel(
-            name='BaitPreyAssociation',
+            name="BaitPreyAssociation",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('direction', models.SmallIntegerField(choices=[(1, 'Protein 1 Bait'), (-1, 'Protein 2 Bait')], help_text='1 = protein_1 is bait, -1 = protein_2 is bait')),
-                ('tests_performed', models.ManyToManyField(db_table='bait_prey_assoc2test', related_name='bait_prey_associations', to='hippie_website.baitpreytest')),
-                ('interaction', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='bait_prey', to='hippie_website.interaction')),
-                ('noninteraction', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='bait_prey', to='hippie_website.noninteraction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "direction",
+                    models.SmallIntegerField(
+                        choices=[(1, "Protein 1 Bait"), (-1, "Protein 2 Bait")],
+                        help_text="1 = protein_1 is bait, -1 = protein_2 is bait",
+                    ),
+                ),
+                (
+                    "tests_performed",
+                    models.ManyToManyField(
+                        db_table="bait_prey_assoc2test",
+                        related_name="bait_prey_associations",
+                        to="hippie_website.baitpreytest",
+                    ),
+                ),
+                (
+                    "interaction",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="bait_prey",
+                        to="hippie_website.interaction",
+                    ),
+                ),
+                (
+                    "noninteraction",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="bait_prey",
+                        to="hippie_website.noninteraction",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'bait_prey_assoc',
+                "db_table": "bait_prey_assoc",
             },
         ),
         migrations.CreateModel(
-            name='ProteinEntrez',
+            name="ProteinEntrez",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('gene_id', models.PositiveIntegerField(db_index=True)),
-                ('name', models.CharField(blank=True, db_index=True, default='', max_length=40)),
-                ('protein', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='entrez_ids', to='hippie_website.protein')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("gene_id", models.PositiveIntegerField(db_index=True)),
+                (
+                    "name",
+                    models.CharField(
+                        blank=True, db_index=True, default="", max_length=40
+                    ),
+                ),
+                (
+                    "protein",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="entrez_ids",
+                        to="hippie_website.protein",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'protein_entrez',
+                "db_table": "protein_entrez",
             },
         ),
         migrations.CreateModel(
-            name='ProteinUniProt',
+            name="ProteinUniProt",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('uniprot_id', models.CharField(db_index=True, max_length=16)),
-                ('version', models.IntegerField(default=0)),
-                ('protein', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='uniprot_ids', to='hippie_website.protein')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("uniprot_id", models.CharField(db_index=True, max_length=16)),
+                ("version", models.IntegerField(default=0)),
+                (
+                    "protein",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="uniprot_ids",
+                        to="hippie_website.protein",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'protein2uniprot',
+                "db_table": "protein2uniprot",
             },
         ),
         migrations.AddField(
-            model_name='interaction',
-            name='sources',
-            field=models.ManyToManyField(db_table='interaction2source', related_name='interactions', to='hippie_website.source'),
+            model_name="interaction",
+            name="sources",
+            field=models.ManyToManyField(
+                db_table="interaction2source",
+                related_name="interactions",
+                to="hippie_website.source",
+            ),
         ),
         migrations.CreateModel(
-            name='OrthologInteraction',
+            name="OrthologInteraction",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('source', models.CharField(choices=[('homomint', 'HomoMINT'), ('i2d', 'I2D'), ('ortho', 'Ortho')], db_index=True, max_length=20)),
-                ('protein_1', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='ortholog_interactions_as_1', to='hippie_website.protein')),
-                ('protein_2', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='ortholog_interactions_as_2', to='hippie_website.protein')),
-                ('ortholog_species', models.ManyToManyField(db_table='ortholog_interaction_species', related_name='ortholog_interactions', to='hippie_website.species')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "source",
+                    models.CharField(
+                        choices=[
+                            ("homomint", "HomoMINT"),
+                            ("i2d", "I2D"),
+                            ("ortho", "Ortho"),
+                        ],
+                        db_index=True,
+                        max_length=20,
+                    ),
+                ),
+                (
+                    "protein_1",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="ortholog_interactions_as_1",
+                        to="hippie_website.protein",
+                    ),
+                ),
+                (
+                    "protein_2",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="ortholog_interactions_as_2",
+                        to="hippie_website.protein",
+                    ),
+                ),
+                (
+                    "ortholog_species",
+                    models.ManyToManyField(
+                        db_table="ortholog_interaction_species",
+                        related_name="ortholog_interactions",
+                        to="hippie_website.species",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'ortholog_interaction',
+                "db_table": "ortholog_interaction",
             },
         ),
         migrations.CreateModel(
-            name='InteractionCrossReference',
+            name="InteractionCrossReference",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('link', models.CharField(help_text='e.g. "MINT-10096"', max_length=40)),
-                ('interaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='cross_references', to='hippie_website.interaction')),
-                ('source', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='cross_references', to='hippie_website.source')),
-                ('species', models.ForeignKey(null=True, on_delete=django.db.models.deletion.CASCADE, related_name='cross_references', to='hippie_website.species')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "link",
+                    models.CharField(help_text='e.g. "MINT-10096"', max_length=40),
+                ),
+                (
+                    "interaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="cross_references",
+                        to="hippie_website.interaction",
+                    ),
+                ),
+                (
+                    "source",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="cross_references",
+                        to="hippie_website.source",
+                    ),
+                ),
+                (
+                    "species",
+                    models.ForeignKey(
+                        null=True,
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="cross_references",
+                        to="hippie_website.species",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'interaction2link',
+                "db_table": "interaction2link",
             },
         ),
         migrations.AddField(
-            model_name='interaction',
-            name='conserved_species',
-            field=models.ManyToManyField(db_table='interaction2species', related_name='conserved_interactions', to='hippie_website.species'),
+            model_name="interaction",
+            name="conserved_species",
+            field=models.ManyToManyField(
+                db_table="interaction2species",
+                related_name="conserved_interactions",
+                to="hippie_website.species",
+            ),
         ),
         migrations.CreateModel(
-            name='ProteinTissue',
+            name="ProteinTissue",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('protein', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='tissue_expression', to='hippie_website.protein')),
-                ('tissue', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='expressed_proteins', to='hippie_website.tissue')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "protein",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="tissue_expression",
+                        to="hippie_website.protein",
+                    ),
+                ),
+                (
+                    "tissue",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="expressed_proteins",
+                        to="hippie_website.tissue",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'protein2tissue',
+                "db_table": "protein2tissue",
             },
         ),
         migrations.CreateModel(
-            name='UniProtAccession',
+            name="UniProtAccession",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('accession', models.CharField(db_index=True, max_length=20)),
-                ('uniprot_id', models.CharField(db_index=True, max_length=16)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("accession", models.CharField(db_index=True, max_length=20)),
+                ("uniprot_id", models.CharField(db_index=True, max_length=16)),
             ],
             options={
-                'db_table': 'uniprot_accession2id',
-                'constraints': [models.UniqueConstraint(fields=('accession', 'uniprot_id'), name='uniprot_accession_unique')],
+                "db_table": "uniprot_accession2id",
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("accession", "uniprot_id"),
+                        name="uniprot_accession_unique",
+                    )
+                ],
             },
         ),
         migrations.AddConstraint(
-            model_name='baitpreytest',
-            constraint=models.UniqueConstraint(fields=('pmid', 'method'), name='bait_prey_test_unique'),
+            model_name="baitpreytest",
+            constraint=models.UniqueConstraint(
+                fields=("pmid", "method"), name="bait_prey_test_unique"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='goslimterm',
-            constraint=models.CheckConstraint(condition=models.Q(('namespace__in', ['biological_process', 'cellular_component', 'molecular_function'])), name='go_slim_term_namespace_valid'),
+            model_name="goslimterm",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    (
+                        "namespace__in",
+                        [
+                            "biological_process",
+                            "cellular_component",
+                            "molecular_function",
+                        ],
+                    )
+                ),
+                name="go_slim_term_namespace_valid",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='interactionpublication',
-            constraint=models.UniqueConstraint(fields=('interaction', 'pmid'), name='interaction_publication_unique'),
+            model_name="interactionpublication",
+            constraint=models.UniqueConstraint(
+                fields=("interaction", "pmid"), name="interaction_publication_unique"
+            ),
         ),
         migrations.AddIndex(
-            model_name='noninteraction',
-            index=models.Index(fields=['protein_1', 'score'], name='noninteract_protein_e7033e_idx'),
+            model_name="noninteraction",
+            index=models.Index(
+                fields=["protein_1", "score"], name="noninteract_protein_e7033e_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='noninteraction',
-            index=models.Index(fields=['protein_2', 'score'], name='noninteract_protein_522922_idx'),
+            model_name="noninteraction",
+            index=models.Index(
+                fields=["protein_2", "score"], name="noninteract_protein_522922_idx"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='noninteraction',
-            constraint=models.CheckConstraint(condition=models.Q(('protein_1_id__lte', models.F('protein_2_id'))), name='noninteraction_canonical_order'),
+            model_name="noninteraction",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("protein_1_id__lte", models.F("protein_2_id"))),
+                name="noninteraction_canonical_order",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='noninteraction',
-            constraint=models.CheckConstraint(condition=models.Q(('score__gte', 0.0), ('score__lte', 1.0)), name='noninteraction_score_range'),
+            model_name="noninteraction",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("score__gte", 0.0), ("score__lte", 1.0)),
+                name="noninteraction_score_range",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='noninteraction',
-            constraint=models.UniqueConstraint(fields=('protein_1', 'protein_2'), name='noninteraction_unique_pair'),
+            model_name="noninteraction",
+            constraint=models.UniqueConstraint(
+                fields=("protein_1", "protein_2"), name="noninteraction_unique_pair"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='baitpreyassociation',
-            constraint=models.UniqueConstraint(fields=('interaction', 'direction'), name='bait_pray_unique'),
+            model_name="baitpreyassociation",
+            constraint=models.UniqueConstraint(
+                fields=("interaction", "direction"), name="bait_pray_unique"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='baitpreyassociation',
-            constraint=models.CheckConstraint(condition=models.Q(('interaction__isnull', True), ('direction__isnull', True), _connector='OR'), name='max_one_link_to_interaction_or_noninteraction'),
+            model_name="baitpreyassociation",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("interaction__isnull", True),
+                    ("direction__isnull", True),
+                    _connector="OR",
+                ),
+                name="max_one_link_to_interaction_or_noninteraction",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='proteinentrez',
-            constraint=models.UniqueConstraint(fields=('protein', 'gene_id'), name='protein_entrez_unique'),
+            model_name="proteinentrez",
+            constraint=models.UniqueConstraint(
+                fields=("protein", "gene_id"), name="protein_entrez_unique"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='proteinuniprot',
-            constraint=models.UniqueConstraint(fields=('protein', 'uniprot_id'), name='protein_to_uniprot_unique'),
+            model_name="proteinuniprot",
+            constraint=models.UniqueConstraint(
+                fields=("protein", "uniprot_id"), name="protein_to_uniprot_unique"
+            ),
         ),
         migrations.AddIndex(
-            model_name='orthologinteraction',
-            index=models.Index(fields=['protein_1', 'protein_2'], name='ortholog_in_protein_aaa791_idx'),
+            model_name="orthologinteraction",
+            index=models.Index(
+                fields=["protein_1", "protein_2"], name="ortholog_in_protein_aaa791_idx"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='orthologinteraction',
-            constraint=models.CheckConstraint(condition=models.Q(('protein_1_id__lte', models.F('protein_2_id'))), name='ortholog_interaction_canonical_order'),
+            model_name="orthologinteraction",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("protein_1_id__lte", models.F("protein_2_id"))),
+                name="ortholog_interaction_canonical_order",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='orthologinteraction',
-            constraint=models.UniqueConstraint(fields=('protein_1', 'protein_2', 'source'), name='ortholog_interaction_unique'),
+            model_name="orthologinteraction",
+            constraint=models.UniqueConstraint(
+                fields=("protein_1", "protein_2", "source"),
+                name="ortholog_interaction_unique",
+            ),
         ),
         migrations.AddIndex(
-            model_name='interactioncrossreference',
-            index=models.Index(fields=['interaction', 'source'], name='interaction_interac_2dfcdf_idx'),
+            model_name="interactioncrossreference",
+            index=models.Index(
+                fields=["interaction", "source"], name="interaction_interac_2dfcdf_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='interaction',
-            index=models.Index(fields=['protein_1', 'score'], name='interaction_protein_105d5d_idx'),
+            model_name="interaction",
+            index=models.Index(
+                fields=["protein_1", "score"], name="interaction_protein_105d5d_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='interaction',
-            index=models.Index(fields=['protein_2', 'score'], name='interaction_protein_f2683f_idx'),
+            model_name="interaction",
+            index=models.Index(
+                fields=["protein_2", "score"], name="interaction_protein_f2683f_idx"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='interaction',
-            constraint=models.CheckConstraint(condition=models.Q(('protein_1_id__lte', models.F('protein_2_id'))), name='interaction_canonical_order'),
+            model_name="interaction",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("protein_1_id__lte", models.F("protein_2_id"))),
+                name="interaction_canonical_order",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='interaction',
-            constraint=models.CheckConstraint(condition=models.Q(('score__gte', 0.0), ('score__lte', 1.0)), name='interaction_score_range'),
+            model_name="interaction",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("score__gte", 0.0), ("score__lte", 1.0)),
+                name="interaction_score_range",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='interaction',
-            constraint=models.UniqueConstraint(fields=('protein_1', 'protein_2'), name='interaction_unique_pair'),
+            model_name="interaction",
+            constraint=models.UniqueConstraint(
+                fields=("protein_1", "protein_2"), name="interaction_unique_pair"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='proteintissue',
-            constraint=models.UniqueConstraint(fields=('protein', 'tissue'), name='protein_tissue_unique'),
+            model_name="proteintissue",
+            constraint=models.UniqueConstraint(
+                fields=("protein", "tissue"), name="protein_tissue_unique"
+            ),
         ),
     ]

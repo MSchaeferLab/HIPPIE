@@ -19,7 +19,8 @@ from .models import (
     Source,
     Species,
     Tissue,
-    UniProtAccession, BaitPreyTest,
+    UniProtAccession,
+    BaitPreyTest,
 )
 
 
@@ -39,6 +40,7 @@ class IsoformAdmin(admin.ModelAdmin):
     def parent_symbol(self, obj):
         # obj.protein_ptr is the parent Protein instance
         return obj.protein_ptr.name
+
 
 @admin.register(ProteinUniProt)
 class ProteinUniProtAdmin(admin.ModelAdmin):
@@ -226,6 +228,7 @@ class BaitPreyAssociationAdmin(admin.ModelAdmin):
         "interaction__protein_2",
     )
     autocomplete_fields = ("interaction",)
+
 
 @admin.register(BaitPreyTest)
 class BaitPreyTestAdmin(admin.ModelAdmin):

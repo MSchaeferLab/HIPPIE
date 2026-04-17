@@ -19,9 +19,15 @@ from django.test import TestCase, Client
 from django.urls import reverse
 
 from .models import (
-    Interaction, InteractionPublication, InteractionType,
-    Protein, ProteinEntrez, ProteinUniProt, Source, ExperimentType,
-    Tissue, ProteinTissue, UniProtAccession,
+    Interaction,
+    Protein,
+    ProteinEntrez,
+    ProteinUniProt,
+    Source,
+    ExperimentType,
+    Tissue,
+    ProteinTissue,
+    UniProtAccession,
 )
 from .views import _protein_display, _resolve_interaction_pair
 
@@ -29,6 +35,7 @@ from .views import _protein_display, _resolve_interaction_pair
 # ---------------------------------------------------------------------------
 # Fixtures — wiederverwendbare Testdaten
 # ---------------------------------------------------------------------------
+
 
 def make_protein(name, uniprot_id=None, gene_id=None, accession=None):
     """Erstellt ein Protein mit optionalen Identifier-Mappings."""
@@ -52,15 +59,24 @@ def make_interaction(p1, p2, score=0.8):
 # Basis-Testklasse mit gemeinsamen Fixtures
 # ---------------------------------------------------------------------------
 
+
 class HippieTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.brca1 = make_protein("BRCA1", uniprot_id="BRCA1_HUMAN", gene_id=672, accession="P38398")
-        cls.tp53  = make_protein("TP53",  uniprot_id="P53_HUMAN",   gene_id=7157, accession="P04637")
-        cls.egfr  = make_protein("EGFR",  uniprot_id="EGFR_HUMAN",  gene_id=1956, accession="P00533")
-        cls.ix    = make_interaction(cls.brca1, cls.tp53, score=0.85)
-        cls.src   = Source.objects.create(name="BioGRID", url="https://thebiogrid.org/")
-        cls.exp   = ExperimentType.objects.create(name="Two-hybrid", psi_mi_code="MI:0018", quality_score=5.0)
+        cls.brca1 = make_protein(
+            "BRCA1", uniprot_id="BRCA1_HUMAN", gene_id=672, accession="P38398"
+        )
+        cls.tp53 = make_protein(
+            "TP53", uniprot_id="P53_HUMAN", gene_id=7157, accession="P04637"
+        )
+        cls.egfr = make_protein(
+            "EGFR", uniprot_id="EGFR_HUMAN", gene_id=1956, accession="P00533"
+        )
+        cls.ix = make_interaction(cls.brca1, cls.tp53, score=0.85)
+        cls.src = Source.objects.create(name="BioGRID", url="https://thebiogrid.org/")
+        cls.exp = ExperimentType.objects.create(
+            name="Two-hybrid", psi_mi_code="MI:0018", quality_score=5.0
+        )
         cls.ix.sources.add(cls.src)
         cls.ix.experiments.add(cls.exp)
         cls.client = Client()
@@ -70,8 +86,8 @@ class HippieTestCase(TestCase):
 # 1. URL-Smoke-Tests — jeder Endpunkt muss erreichbar sein
 # ---------------------------------------------------------------------------
 
-class UrlSmokeTest(HippieTestCase):
 
+class UrlSmokeTest(HippieTestCase):
     def test_index_get(self):
         r = self.client.get(reverse("hippie_website:index"))
         self.assertEqual(r.status_code, 200)
@@ -97,7 +113,9 @@ class UrlSmokeTest(HippieTestCase):
         self.assertEqual(r.status_code, 200)
 
     def test_protein_detail_get(self):
-        r = self.client.get(reverse("hippie_website:protein_detail", args=[self.brca1.pk]))
+        r = self.client.get(
+            reverse("hippie_website:protein_detail", args=[self.brca1.pk])
+        )
         self.assertEqual(r.status_code, 200)
 
     def test_protein_detail_404(self):
@@ -105,7 +123,9 @@ class UrlSmokeTest(HippieTestCase):
         self.assertEqual(r.status_code, 404)
 
     def test_interaction_detail_get(self):
-        r = self.client.get(reverse("hippie_website:interaction_detail", args=[self.ix.pk]))
+        r = self.client.get(
+            reverse("hippie_website:interaction_detail", args=[self.ix.pk])
+        )
         self.assertEqual(r.status_code, 200)
 
     def test_interaction_detail_404(self):
@@ -125,8 +145,8 @@ class UrlSmokeTest(HippieTestCase):
 # 2. protein_query_api
 # ---------------------------------------------------------------------------
 
-class ProteinQueryApiTest(HippieTestCase):
 
+class ProteinQueryApiTest(HippieTestCase):
     def _get(self, q):
         r = self.client.get(reverse("hippie_website:protein_query_api"), {"q": q})
         self.assertEqual(r.status_code, 200)
@@ -166,7 +186,14 @@ class ProteinQueryApiTest(HippieTestCase):
         data = self._get("BRCA1")
         self.assertGreater(len(data["interactions"]), 0)
         ix = data["interactions"][0]
-        for key in ("id", "partner", "score", "source_count", "experiment_count", "detail_url"):
+        for key in (
+            "id",
+            "partner",
+            "score",
+            "source_count",
+            "experiment_count",
+            "detail_url",
+        ):
             self.assertIn(key, ix)
         partner = ix["partner"]
         for key in ("id", "name", "symbol", "uniprot_id", "gene_id"):
@@ -191,8 +218,8 @@ class ProteinQueryApiTest(HippieTestCase):
 # 3. interaction_query_api
 # ---------------------------------------------------------------------------
 
-class InteractionQueryApiTest(HippieTestCase):
 
+class InteractionQueryApiTest(HippieTestCase):
     def _post(self, pairs, status=200):
         r = self.client.post(
             reverse("hippie_website:interaction_query_api"),
@@ -254,8 +281,16 @@ class InteractionQueryApiTest(HippieTestCase):
         pairs = [{"a": "BRCA1", "b": "TP53", "input_order": 0}]
         data = self._post(pairs)
         r = data["results"][0]
-        for key in ("symbol_a", "symbol_b", "uniprot_a", "uniprot_b", "score",
-                    "source_count", "experiment_count", "input_order"):
+        for key in (
+            "symbol_a",
+            "symbol_b",
+            "uniprot_a",
+            "uniprot_b",
+            "score",
+            "source_count",
+            "experiment_count",
+            "input_order",
+        ):
             self.assertIn(key, r)
 
 
@@ -263,8 +298,8 @@ class InteractionQueryApiTest(HippieTestCase):
 # 4. browse_api
 # ---------------------------------------------------------------------------
 
-class BrowseApiTest(HippieTestCase):
 
+class BrowseApiTest(HippieTestCase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
@@ -294,7 +329,7 @@ class BrowseApiTest(HippieTestCase):
             self.assertIn(key, p)
 
     def test_tissue_filter_reduces_results(self):
-        all_data  = self._get()
+        all_data = self._get()
         filt_data = self._get(tissue=self.tissue.pk)
         self.assertLess(filt_data["total"], all_data["total"])
         self.assertEqual(filt_data["total"], 1)
@@ -311,7 +346,6 @@ class BrowseApiTest(HippieTestCase):
             self.assertGreaterEqual(p["degree"], 1)
 
     def test_offset_and_limit(self):
-        all_data = self._get()
         page1 = self._get(offset=0, limit=1)
         page2 = self._get(offset=1, limit=1)
         self.assertEqual(len(page1["proteins"]), 1)
@@ -328,8 +362,8 @@ class BrowseApiTest(HippieTestCase):
 # 5. browse_filter_meta
 # ---------------------------------------------------------------------------
 
-class BrowseFilterMetaTest(HippieTestCase):
 
+class BrowseFilterMetaTest(HippieTestCase):
     def test_structure(self):
         r = self.client.get(reverse("hippie_website:browse_filter_meta"))
         data = json.loads(r.content)
@@ -339,7 +373,9 @@ class BrowseFilterMetaTest(HippieTestCase):
         self.assertIsInstance(data["sources"], list)
 
     def test_source_present(self):
-        data = json.loads(self.client.get(reverse("hippie_website:browse_filter_meta")).content)
+        data = json.loads(
+            self.client.get(reverse("hippie_website:browse_filter_meta")).content
+        )
         names = [s["name"] for s in data["sources"]]
         self.assertIn("BioGRID", names)
 
@@ -348,46 +384,55 @@ class BrowseFilterMetaTest(HippieTestCase):
 # 6. network_query (POST via Form)
 # ---------------------------------------------------------------------------
 
-class NetworkQueryTest(HippieTestCase):
 
+class NetworkQueryTest(HippieTestCase):
     def test_get_renders_form(self):
         r = self.client.get(reverse("hippie_website:network_query"))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "hippie-hero")
 
     def test_post_with_valid_seeds(self):
-        r = self.client.post(reverse("hippie_website:network_query"), {
-            "proteins": "BRCA1\nTP53",
-            "output_type": "browser_vis",
-            "layer_0": "on",
-            "score_min": "0.0",
-            "direction": "none",
-            "effect": "none",
-        })
+        r = self.client.post(
+            reverse("hippie_website:network_query"),
+            {
+                "proteins": "BRCA1\nTP53",
+                "output_type": "browser_vis",
+                "layer_0": "on",
+                "score_min": "0.0",
+                "direction": "none",
+                "effect": "none",
+            },
+        )
         self.assertEqual(r.status_code, 200)
         ctx = r.context
         self.assertIsNotNone(ctx["network_result"])
         self.assertGreater(ctx["network_result"]["edge_count"], 0)
 
     def test_post_with_unknown_seed(self):
-        r = self.client.post(reverse("hippie_website:network_query"), {
-            "proteins": "FAKEPROT999",
-            "output_type": "browser_vis",
-            "direction": "none",
-            "effect": "none",
-        })
+        r = self.client.post(
+            reverse("hippie_website:network_query"),
+            {
+                "proteins": "FAKEPROT999",
+                "output_type": "browser_vis",
+                "direction": "none",
+                "effect": "none",
+            },
+        )
         self.assertEqual(r.status_code, 200)
         ctx = r.context
         self.assertIsNotNone(ctx["network_result"]["error"])
 
     def test_post_unresolved_identifiers_reported(self):
-        r = self.client.post(reverse("hippie_website:network_query"), {
-            "proteins": "BRCA1\nFAKEPROT999",
-            "output_type": "browser_vis",
-            "layer_0": "on",
-            "direction": "none",
-            "effect": "none",
-        })
+        r = self.client.post(
+            reverse("hippie_website:network_query"),
+            {
+                "proteins": "BRCA1\nFAKEPROT999",
+                "output_type": "browser_vis",
+                "layer_0": "on",
+                "direction": "none",
+                "effect": "none",
+            },
+        )
         ctx = r.context
         self.assertIn("FAKEPROT999", ctx["network_result"]["unresolved"])
 
@@ -396,8 +441,8 @@ class NetworkQueryTest(HippieTestCase):
 # 7. ProteinQuerySet.resolve()
 # ---------------------------------------------------------------------------
 
-class ResolveTest(HippieTestCase):
 
+class ResolveTest(HippieTestCase):
     def test_resolve_by_symbol(self):
         qs = Protein.objects.resolve("BRCA1")
         self.assertEqual(qs.count(), 1)
@@ -428,8 +473,8 @@ class ResolveTest(HippieTestCase):
 # 8. Canonical Ordering
 # ---------------------------------------------------------------------------
 
-class CanonicalOrderingTest(HippieTestCase):
 
+class CanonicalOrderingTest(HippieTestCase):
     def test_interaction_always_canonical(self):
         """protein_1_id muss immer <= protein_2_id sein."""
         a = Protein.objects.create(name="TESTA")
@@ -449,16 +494,20 @@ class CanonicalOrderingTest(HippieTestCase):
 # 9. _protein_display() Helper
 # ---------------------------------------------------------------------------
 
-class ProteinDisplayTest(HippieTestCase):
 
+class ProteinDisplayTest(HippieTestCase):
     def test_all_keys_present(self):
-        p = Protein.objects.prefetch_related("uniprot_ids", "entrez_ids").get(pk=self.brca1.pk)
+        p = Protein.objects.prefetch_related("uniprot_ids", "entrez_ids").get(
+            pk=self.brca1.pk
+        )
         d = _protein_display(p)
         for key in ("id", "name", "symbol", "uniprot_id", "gene_id"):
             self.assertIn(key, d)
 
     def test_values_correct(self):
-        p = Protein.objects.prefetch_related("uniprot_ids", "entrez_ids").get(pk=self.brca1.pk)
+        p = Protein.objects.prefetch_related("uniprot_ids", "entrez_ids").get(
+            pk=self.brca1.pk
+        )
         d = _protein_display(p)
         self.assertEqual(d["name"], "BRCA1")
         self.assertEqual(d["symbol"], "BRCA1")
@@ -468,7 +517,9 @@ class ProteinDisplayTest(HippieTestCase):
     def test_protein_without_mappings(self):
         """Protein ohne UniProt/Entrez soll nicht crashen."""
         bare = Protein.objects.create(name="BARE")
-        bare_fetched = Protein.objects.prefetch_related("uniprot_ids", "entrez_ids").get(pk=bare.pk)
+        bare_fetched = Protein.objects.prefetch_related(
+            "uniprot_ids", "entrez_ids"
+        ).get(pk=bare.pk)
         d = _protein_display(bare_fetched)
         self.assertEqual(d["uniprot_id"], "")
         self.assertIsNone(d["gene_id"])
@@ -479,16 +530,28 @@ class ProteinDisplayTest(HippieTestCase):
 # 10. Detail-Views Kontext-Check
 # ---------------------------------------------------------------------------
 
-class DetailViewContextTest(HippieTestCase):
 
+class DetailViewContextTest(HippieTestCase):
     def test_interaction_detail_context_keys(self):
-        r = self.client.get(reverse("hippie_website:interaction_detail", args=[self.ix.pk]))
+        r = self.client.get(
+            reverse("hippie_website:interaction_detail", args=[self.ix.pk])
+        )
         ctx = r.context
-        for key in ("interaction", "p1", "p2", "sources", "publications", "experiments", "species"):
+        for key in (
+            "interaction",
+            "p1",
+            "p2",
+            "sources",
+            "publications",
+            "experiments",
+            "species",
+        ):
             self.assertIn(key, ctx)
 
     def test_interaction_detail_p1_p2_structure(self):
-        r = self.client.get(reverse("hippie_website:interaction_detail", args=[self.ix.pk]))
+        r = self.client.get(
+            reverse("hippie_website:interaction_detail", args=[self.ix.pk])
+        )
         ctx = r.context
         for side in ("p1", "p2"):
             d = ctx[side]
@@ -496,11 +559,15 @@ class DetailViewContextTest(HippieTestCase):
                 self.assertIn(key, d)
 
     def test_protein_detail_context_keys(self):
-        r = self.client.get(reverse("hippie_website:protein_detail", args=[self.brca1.pk]))
+        r = self.client.get(
+            reverse("hippie_website:protein_detail", args=[self.brca1.pk])
+        )
         ctx = r.context
         for key in ("protein", "symbol", "uniprot_id", "gene_id", "interaction_count"):
             self.assertIn(key, ctx)
 
     def test_protein_detail_interaction_count(self):
-        r = self.client.get(reverse("hippie_website:protein_detail", args=[self.brca1.pk]))
+        r = self.client.get(
+            reverse("hippie_website:protein_detail", args=[self.brca1.pk])
+        )
         self.assertEqual(r.context["interaction_count"], 1)

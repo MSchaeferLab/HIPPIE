@@ -23,57 +23,159 @@ from django.db import transaction
 # ---------------------------------------------------------------------------
 
 GENE_SYMBOLS = [
-    "BRCA1", "BRCA2", "TP53", "EGFR", "BRAF", "MAP2K1", "MAPK3",
-    "HTT", "AKT1", "PTEN", "MYC", "JUN", "FOS", "KRAS", "NRAS",
-    "PIK3CA", "RB1", "CDKN2A", "ERBB2", "CDH1", "SMAD4", "APC",
-    "VHL", "MTOR", "JAK2", "STAT3", "SRC", "ABL1", "RAF1", "ELK1",
+    "BRCA1",
+    "BRCA2",
+    "TP53",
+    "EGFR",
+    "BRAF",
+    "MAP2K1",
+    "MAPK3",
+    "HTT",
+    "AKT1",
+    "PTEN",
+    "MYC",
+    "JUN",
+    "FOS",
+    "KRAS",
+    "NRAS",
+    "PIK3CA",
+    "RB1",
+    "CDKN2A",
+    "ERBB2",
+    "CDH1",
+    "SMAD4",
+    "APC",
+    "VHL",
+    "MTOR",
+    "JAK2",
+    "STAT3",
+    "SRC",
+    "ABL1",
+    "RAF1",
+    "ELK1",
 ]
 
 UNIPROT_IDS = {
-    "BRCA1": "BRCA1_HUMAN", "BRCA2": "BRCA2_HUMAN", "TP53": "P53_HUMAN",
-    "EGFR": "EGFR_HUMAN",   "BRAF": "BRAF_HUMAN",   "MAP2K1": "MP2K1_HUMAN",
-    "MAPK3": "MK03_HUMAN",  "HTT": "HTT_HUMAN",     "AKT1": "AKT1_HUMAN",
-    "PTEN": "PTEN_HUMAN",   "MYC": "MYC_HUMAN",     "JUN": "JUN_HUMAN",
-    "FOS": "FOS_HUMAN",     "KRAS": "KRAS_HUMAN",   "NRAS": "NRAS_HUMAN",
-    "PIK3CA": "PK3CA_HUMAN","RB1": "RB_HUMAN",      "CDKN2A": "CD2A2_HUMAN",
-    "ERBB2": "ERBB2_HUMAN", "CDH1": "CADH1_HUMAN",  "SMAD4": "SMAD4_HUMAN",
-    "APC": "APC_HUMAN",     "VHL": "VHL_HUMAN",     "MTOR": "MTOR_HUMAN",
-    "JAK2": "JAK2_HUMAN",   "STAT3": "STAT3_HUMAN", "SRC": "SRC_HUMAN",
-    "ABL1": "ABL1_HUMAN",   "RAF1": "RAF1_HUMAN",   "ELK1": "ELK1_HUMAN",
+    "BRCA1": "BRCA1_HUMAN",
+    "BRCA2": "BRCA2_HUMAN",
+    "TP53": "P53_HUMAN",
+    "EGFR": "EGFR_HUMAN",
+    "BRAF": "BRAF_HUMAN",
+    "MAP2K1": "MP2K1_HUMAN",
+    "MAPK3": "MK03_HUMAN",
+    "HTT": "HTT_HUMAN",
+    "AKT1": "AKT1_HUMAN",
+    "PTEN": "PTEN_HUMAN",
+    "MYC": "MYC_HUMAN",
+    "JUN": "JUN_HUMAN",
+    "FOS": "FOS_HUMAN",
+    "KRAS": "KRAS_HUMAN",
+    "NRAS": "NRAS_HUMAN",
+    "PIK3CA": "PK3CA_HUMAN",
+    "RB1": "RB_HUMAN",
+    "CDKN2A": "CD2A2_HUMAN",
+    "ERBB2": "ERBB2_HUMAN",
+    "CDH1": "CADH1_HUMAN",
+    "SMAD4": "SMAD4_HUMAN",
+    "APC": "APC_HUMAN",
+    "VHL": "VHL_HUMAN",
+    "MTOR": "MTOR_HUMAN",
+    "JAK2": "JAK2_HUMAN",
+    "STAT3": "STAT3_HUMAN",
+    "SRC": "SRC_HUMAN",
+    "ABL1": "ABL1_HUMAN",
+    "RAF1": "RAF1_HUMAN",
+    "ELK1": "ELK1_HUMAN",
 }
 
 ACCESSIONS = {
-    "BRCA1": "P38398", "BRCA2": "P51587", "TP53": "P04637",
-    "EGFR": "P00533",  "BRAF": "P15056",  "MAP2K1": "Q02750",
-    "MAPK3": "P27361", "HTT": "P42858",   "AKT1": "P31749",
-    "PTEN": "P60484",  "MYC": "P01106",   "JUN": "P05412",
-    "FOS": "P01100",   "KRAS": "P01116",  "NRAS": "P01111",
-    "PIK3CA": "P42336","RB1": "P06400",   "CDKN2A": "P42771",
-    "ERBB2": "P04626", "CDH1": "P12830",  "SMAD4": "Q13315",
-    "APC": "P25054",   "VHL": "P40337",   "MTOR": "P42345",
-    "JAK2": "O60674",  "STAT3": "P40763", "SRC": "P12931",
-    "ABL1": "P00519",  "RAF1": "P04049",  "ELK1": "P19419",
+    "BRCA1": "P38398",
+    "BRCA2": "P51587",
+    "TP53": "P04637",
+    "EGFR": "P00533",
+    "BRAF": "P15056",
+    "MAP2K1": "Q02750",
+    "MAPK3": "P27361",
+    "HTT": "P42858",
+    "AKT1": "P31749",
+    "PTEN": "P60484",
+    "MYC": "P01106",
+    "JUN": "P05412",
+    "FOS": "P01100",
+    "KRAS": "P01116",
+    "NRAS": "P01111",
+    "PIK3CA": "P42336",
+    "RB1": "P06400",
+    "CDKN2A": "P42771",
+    "ERBB2": "P04626",
+    "CDH1": "P12830",
+    "SMAD4": "Q13315",
+    "APC": "P25054",
+    "VHL": "P40337",
+    "MTOR": "P42345",
+    "JAK2": "O60674",
+    "STAT3": "P40763",
+    "SRC": "P12931",
+    "ABL1": "P00519",
+    "RAF1": "P04049",
+    "ELK1": "P19419",
 }
 
 # Entrez gene IDs (real)
 ENTREZ_IDS = {
-    "BRCA1": 672,    "BRCA2": 675,    "TP53": 7157,
-    "EGFR": 1956,    "BRAF": 673,     "MAP2K1": 5604,
-    "MAPK3": 5595,   "HTT": 3064,     "AKT1": 207,
-    "PTEN": 5728,    "MYC": 4609,     "JUN": 3725,
-    "FOS": 2353,     "KRAS": 3845,    "NRAS": 4893,
-    "PIK3CA": 5290,  "RB1": 5925,     "CDKN2A": 1029,
-    "ERBB2": 2064,   "CDH1": 999,     "SMAD4": 4089,
-    "APC": 324,      "VHL": 7428,     "MTOR": 2475,
-    "JAK2": 3717,    "STAT3": 6774,   "SRC": 6714,
-    "ABL1": 25,      "RAF1": 5894,    "ELK1": 2002,
+    "BRCA1": 672,
+    "BRCA2": 675,
+    "TP53": 7157,
+    "EGFR": 1956,
+    "BRAF": 673,
+    "MAP2K1": 5604,
+    "MAPK3": 5595,
+    "HTT": 3064,
+    "AKT1": 207,
+    "PTEN": 5728,
+    "MYC": 4609,
+    "JUN": 3725,
+    "FOS": 2353,
+    "KRAS": 3845,
+    "NRAS": 4893,
+    "PIK3CA": 5290,
+    "RB1": 5925,
+    "CDKN2A": 1029,
+    "ERBB2": 2064,
+    "CDH1": 999,
+    "SMAD4": 4089,
+    "APC": 324,
+    "VHL": 7428,
+    "MTOR": 2475,
+    "JAK2": 3717,
+    "STAT3": 6774,
+    "SRC": 6714,
+    "ABL1": 25,
+    "RAF1": 5894,
+    "ELK1": 2002,
 }
 
 TISSUES = [
-    "Adipose Tissue", "Adrenal Gland", "Blood", "Blood Vessel",
-    "Brain", "Breast", "Colon", "Esophagus", "Heart", "Kidney",
-    "Liver", "Lung", "Muscle", "Nerve", "Ovary", "Pancreas",
-    "Pituitary", "Prostate", "Skin", "Stomach",
+    "Adipose Tissue",
+    "Adrenal Gland",
+    "Blood",
+    "Blood Vessel",
+    "Brain",
+    "Breast",
+    "Colon",
+    "Esophagus",
+    "Heart",
+    "Kidney",
+    "Liver",
+    "Lung",
+    "Muscle",
+    "Nerve",
+    "Ovary",
+    "Pancreas",
+    "Pituitary",
+    "Prostate",
+    "Skin",
+    "Stomach",
 ]
 
 SOURCES = [
@@ -104,9 +206,13 @@ INTERACTION_TYPES = [
 ]
 
 SPECIES = [
-    "Homo sapiens", "Mus musculus", "Rattus norvegicus",
-    "Drosophila melanogaster", "Caenorhabditis elegans",
-    "Saccharomyces cerevisiae", "Danio rerio",
+    "Homo sapiens",
+    "Mus musculus",
+    "Rattus norvegicus",
+    "Drosophila melanogaster",
+    "Caenorhabditis elegans",
+    "Saccharomyces cerevisiae",
+    "Danio rerio",
 ]
 
 GO_TERMS = [
@@ -127,7 +233,13 @@ GO_TERMS = [
 
 # parent → children mapping for GO hierarchy
 GO_HIERARCHY = {
-    "GO:0008150": ["GO:0007165", "GO:0006468", "GO:0006915", "GO:0008283", "GO:0007049"],
+    "GO:0008150": [
+        "GO:0007165",
+        "GO:0006468",
+        "GO:0006915",
+        "GO:0008283",
+        "GO:0007049",
+    ],
     "GO:0007165": ["GO:0006468"],
     "GO:0005575": ["GO:0005634", "GO:0005737", "GO:0005886", "GO:0005829"],
     "GO:0005737": ["GO:0005829"],
@@ -157,24 +269,49 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         from hippie_website.models import (
-            Protein, Isoform, ProteinUniProt, ProteinEntrez,
-            UniProtAccession, Tissue, ProteinTissue, Source,
-            ExperimentType, InteractionType, Species, GOSlimTerm,
-            MeSHTerm, Interaction, InteractionPublication,
-            InteractionCrossReference, SignalingEndpoint,
-            OrthologInteraction, BaitPreyAssociation,
+            Protein,
+            Isoform,
+            ProteinUniProt,
+            ProteinEntrez,
+            UniProtAccession,
+            Tissue,
+            ProteinTissue,
+            Source,
+            ExperimentType,
+            InteractionType,
+            Species,
+            GOSlimTerm,
+            MeSHTerm,
+            Interaction,
+            InteractionPublication,
+            InteractionCrossReference,
+            SignalingEndpoint,
+            OrthologInteraction,
+            BaitPreyAssociation,
         )
 
         if options["flush"]:
             self.stdout.write("Flushing existing data…")
             for M in [
-                BaitPreyAssociation, InteractionCrossReference,
-                InteractionPublication, OrthologInteraction,
-                Interaction, SignalingEndpoint, ProteinTissue,
-                Isoform, ProteinEntrez, ProteinUniProt,
-                UniProtAccession, Protein, Tissue, Source,
-                ExperimentType, InteractionType, Species,
-                GOSlimTerm, MeSHTerm,
+                BaitPreyAssociation,
+                InteractionCrossReference,
+                InteractionPublication,
+                OrthologInteraction,
+                Interaction,
+                SignalingEndpoint,
+                ProteinTissue,
+                Isoform,
+                ProteinEntrez,
+                ProteinUniProt,
+                UniProtAccession,
+                Protein,
+                Tissue,
+                Source,
+                ExperimentType,
+                InteractionType,
+                Species,
+                GOSlimTerm,
+                MeSHTerm,
             ]:
                 M.objects.all().delete()
             self.stdout.write(self.style.SUCCESS("  Done."))
@@ -187,9 +324,10 @@ class Command(BaseCommand):
 
         self.stdout.write("Creating lookup tables…")
 
-        tissues = {t.name: t for t in [
-            Tissue.objects.get_or_create(name=n)[0] for n in TISSUES
-        ]}
+        tissues = {
+            t.name: t
+            for t in [Tissue.objects.get_or_create(name=n)[0] for n in TISSUES]
+        }
 
         sources = {}
         for name, url in SOURCES:
@@ -260,12 +398,14 @@ class Command(BaseCommand):
             proteins[symbol] = p
 
             ProteinUniProt.objects.get_or_create(
-                protein=p, uniprot_id=UNIPROT_IDS[symbol],
+                protein=p,
+                uniprot_id=UNIPROT_IDS[symbol],
                 defaults={"version": 1},
             )
 
             ProteinEntrez.objects.get_or_create(
-                protein=p, gene_id=ENTREZ_IDS[symbol],
+                protein=p,
+                gene_id=ENTREZ_IDS[symbol],
                 defaults={"name": symbol},
             )
 
@@ -286,7 +426,6 @@ class Command(BaseCommand):
                     },
                 )
                 isoforms[iso_uniprot] = isoform
-
 
         # ---------------------------------------------------------------
         # 5. Tissue expression  (each protein in 3–8 random tissues)
@@ -311,13 +450,24 @@ class Command(BaseCommand):
 
         # Well-known signaling chain: BRAF → MAP2K1 → MAPK3 → ELK1/MYC/JUN
         known_pairs = [
-            ("BRAF", "MAP2K1"), ("MAP2K1", "MAPK3"), ("MAPK3", "ELK1"),
-            ("MAPK3", "MYC"), ("MAPK3", "JUN"), ("BRCA1", "TP53"),
-            ("BRCA1", "BRCA2"), ("EGFR", "ERBB2"), ("EGFR", "SRC"),
-            ("KRAS", "BRAF"), ("KRAS", "RAF1"), ("PIK3CA", "AKT1"),
-            ("AKT1", "MTOR"), ("PTEN", "AKT1"), ("JAK2", "STAT3"),
+            ("BRAF", "MAP2K1"),
+            ("MAP2K1", "MAPK3"),
+            ("MAPK3", "ELK1"),
+            ("MAPK3", "MYC"),
+            ("MAPK3", "JUN"),
+            ("BRCA1", "TP53"),
+            ("BRCA1", "BRCA2"),
+            ("EGFR", "ERBB2"),
+            ("EGFR", "SRC"),
+            ("KRAS", "BRAF"),
+            ("KRAS", "RAF1"),
+            ("PIK3CA", "AKT1"),
+            ("AKT1", "MTOR"),
+            ("PTEN", "AKT1"),
+            ("JAK2", "STAT3"),
             ("TP53", "MDM2") if "MDM2" in proteins else ("TP53", "RB1"),
-            ("ABL1", "SRC"), ("FOS", "JUN"),
+            ("ABL1", "SRC"),
+            ("FOS", "JUN"),
         ]
 
         def make_interaction(sym1, sym2, score=None):
@@ -342,7 +492,8 @@ class Command(BaseCommand):
                 effect_source = random.choice([1, 25])
 
             obj, created = Interaction.objects.get_or_create(
-                protein_1=p1, protein_2=p2,
+                protein_1=p1,
+                protein_2=p2,
                 defaults={
                     "score": score,
                     "kegg_direction": kegg_dir,
@@ -374,7 +525,11 @@ class Command(BaseCommand):
         exp_list = list(exp_types.values())
         int_type_list = list(int_types.values())
         species_list = list(species_objs.values())
-        go_list = [go_objs[gid] for gid, _, ns in GO_TERMS if gid not in ("GO:0008150", "GO:0005575")]
+        go_list = [
+            go_objs[gid]
+            for gid, _, ns in GO_TERMS
+            if gid not in ("GO:0008150", "GO:0005575")
+        ]
         mesh_list = list(mesh_objs.values())
 
         for inter in interaction_objs:
@@ -383,7 +538,9 @@ class Command(BaseCommand):
             # 1–3 experiment types
             inter.experiments.set(random.sample(exp_list, k=random.randint(1, 3)))
             # 1–2 interaction types
-            inter.interaction_types.set(random.sample(int_type_list, k=random.randint(1, 2)))
+            inter.interaction_types.set(
+                random.sample(int_type_list, k=random.randint(1, 2))
+            )
             # 0–3 conserved species
             if random.random() < 0.6:
                 inter.conserved_species.set(
@@ -428,7 +585,8 @@ class Command(BaseCommand):
         for inter in interaction_objs:
             for pmid in random.sample(pmid_pool, k=random.randint(1, 4)):
                 InteractionPublication.objects.get_or_create(
-                    interaction=inter, pmid=pmid,
+                    interaction=inter,
+                    pmid=pmid,
                 )
 
         # ---------------------------------------------------------------
@@ -494,11 +652,14 @@ class Command(BaseCommand):
             if p1.pk > p2.pk:
                 p1, p2 = p2, p1
             oi, created = OrthologInteraction.objects.get_or_create(
-                protein_1=p1, protein_2=p2, source=src_tag,
+                protein_1=p1,
+                protein_2=p2,
+                source=src_tag,
             )
             if created:
-                oi.ortholog_species.set(random.sample(non_human, k=random.randint(1, 3)))
-
+                oi.ortholog_species.set(
+                    random.sample(non_human, k=random.randint(1, 3))
+                )
 
         # ---------------------------------------------------------------
         # Summary

@@ -1,4 +1,3 @@
-
 import json
 import time
 import urllib.error
@@ -7,9 +6,14 @@ import urllib.request
 from pathlib import Path
 
 from hippie_website.models import (
-    BaitPreyTest, BaitPreyAssociation,
-    ExperimentType, Interaction, Protein,
-    ProteinEntrez, ProteinUniProt, UniProtAccession,
+    BaitPreyTest,
+    BaitPreyAssociation,
+    ExperimentType,
+    Interaction,
+    Protein,
+    ProteinEntrez,
+    ProteinUniProt,
+    UniProtAccession,
 )
 
 from django.core.management.base import BaseCommand, CommandError
@@ -22,7 +26,7 @@ NCBI_ESUMMARY = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 UNIPROT_SEARCH = "https://rest.uniprot.org/uniprotkb/search"
 
 NCBI_RATE_LIMIT_SLEEP = 0.4  # stay within NCBI's 3 req/s limit (no API key)
-BATCH_SIZE = 100              # gene names per external API call
+BATCH_SIZE = 100  # gene names per external API call
 
 PSI_MI_CODE_MAP = {
     "MI-0006": "MI:0004",
@@ -45,22 +49,34 @@ def _fetch_entrez_batch(gene_names):
         "(" + " OR ".join(f"{n}[Gene Name]" for n in gene_names) + ")"
         " AND 9606[Taxonomy ID]"
     )
-    search_url = NCBI_ESEARCH + "?" + urllib.parse.urlencode({
-        "db": "gene",
-        "term": term,
-        "retmode": "json",
-        "retmax": str(len(gene_names) * 2),  # allow room for aliases
-    })
+    search_url = (
+        NCBI_ESEARCH
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "db": "gene",
+                "term": term,
+                "retmode": "json",
+                "retmax": str(len(gene_names) * 2),  # allow room for aliases
+            }
+        )
+    )
     try:
         ids = _get_json(search_url)["esearchresult"]["idlist"]
         if not ids:
             return {}
         time.sleep(NCBI_RATE_LIMIT_SLEEP)
-        summary_url = NCBI_ESUMMARY + "?" + urllib.parse.urlencode({
-            "db": "gene",
-            "id": ",".join(ids),
-            "retmode": "json",
-        })
+        summary_url = (
+            NCBI_ESUMMARY
+            + "?"
+            + urllib.parse.urlencode(
+                {
+                    "db": "gene",
+                    "id": ",".join(ids),
+                    "retmode": "json",
+                }
+            )
+        )
         result = _get_json(summary_url)["result"]
     except (urllib.error.URLError, KeyError, ValueError):
         return {}
@@ -84,12 +100,18 @@ def _fetch_uniprot_batch(gene_names):
     Unmatched names are silently omitted.
     """
     gene_list = " OR ".join(f"gene_exact:{n}" for n in gene_names)
-    url = UNIPROT_SEARCH + "?" + urllib.parse.urlencode({
-        "query": f"({gene_list}) AND organism_id:9606 AND reviewed:true",
-        "fields": "accession,id,gene_names",
-        "format": "json",
-        "size": str(len(gene_names)),
-    })
+    url = (
+        UNIPROT_SEARCH
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "query": f"({gene_list}) AND organism_id:9606 AND reviewed:true",
+                "fields": "accession,id,gene_names",
+                "format": "json",
+                "size": str(len(gene_names)),
+            }
+        )
+    )
     try:
         results = _get_json(url).get("results", [])
     except (urllib.error.URLError, KeyError):
@@ -139,13 +161,15 @@ class Command(BaseCommand):
                 fields = line.strip().split("\t")
                 if len(fields) < 6:
                     continue
-                rows.append({
-                    "bait":        fields[0],
-                    "prey":        fields[1],
-                    "detection":   bool(int(fields[3])),
-                    "method_code": PSI_MI_CODE_MAP.get(fields[4], fields[4]),
-                    "pmid":        int(fields[5]),
-                })
+                rows.append(
+                    {
+                        "bait": fields[0],
+                        "prey": fields[1],
+                        "detection": bool(int(fields[3])),
+                        "method_code": PSI_MI_CODE_MAP.get(fields[4], fields[4]),
+                        "pmid": int(fields[5]),
+                    }
+                )
 
         self.stdout.write(f"Parsed {len(rows)} rows from {input_file}.")
 
@@ -155,8 +179,9 @@ class Command(BaseCommand):
         # Pass 2: create Protein rows, batch-enrich only the new ones
         # ------------------------------------------------------------------
         existing = set(
-            Protein.objects.filter(name__in=all_gene_names)
-            .values_list("name", flat=True)
+            Protein.objects.filter(name__in=all_gene_names).values_list(
+                "name", flat=True
+            )
         )
         new_names = all_gene_names - existing
         for name in new_names:
@@ -171,10 +196,7 @@ class Command(BaseCommand):
             )
 
         # Name → Protein cache so pass 3 makes no per-row DB lookups
-        proteins = {
-            p.name: p
-            for p in Protein.objects.filter(name__in=all_gene_names)
-        }
+        proteins = {p.name: p for p in Protein.objects.filter(name__in=all_gene_names)}
 
         # ------------------------------------------------------------------
         # Pass 3: create interactions and bait-prey records
@@ -212,7 +234,7 @@ class Command(BaseCommand):
             interaction, _ = Interaction.objects.get_or_create(
                 protein_1=protein_1,
                 protein_2=protein_2,
-                score=0.0,
+                defaults={"score": 0.0},
             )
             bpa, _ = BaitPreyAssociation.objects.get_or_create(
                 interaction=interaction,
@@ -232,7 +254,9 @@ class Command(BaseCommand):
             )
         )
 
-    def _enrich_proteins(self, gene_names, ProteinEntrez, ProteinUniProt, UniProtAccession):
+    def _enrich_proteins(
+        self, gene_names, ProteinEntrez, ProteinUniProt, UniProtAccession
+    ):
         """Batch-fetch Entrez and UniProt data for a set of newly created proteins."""
         names = list(gene_names)
         for i in range(0, len(names), BATCH_SIZE):
@@ -251,10 +275,7 @@ class Command(BaseCommand):
             )
             uniprot_data = _fetch_uniprot_batch(chunk)
 
-            proteins = {
-                p.name: p
-                for p in Protein.objects.filter(name__in=chunk)
-            }
+            proteins = {p.name: p for p in Protein.objects.filter(name__in=chunk)}
 
             for name in chunk:
                 protein = proteins.get(name)
@@ -269,9 +290,7 @@ class Command(BaseCommand):
                         defaults={"name": symbol or name},
                     )
                 else:
-                    self.stderr.write(
-                        f"  Warning: no Entrez entry found for '{name}'"
-                    )
+                    self.stderr.write(f"  Warning: no Entrez entry found for '{name}'")
 
                 if name in uniprot_data:
                     accession, entry_id = uniprot_data[name]
@@ -285,6 +304,4 @@ class Command(BaseCommand):
                         uniprot_id=entry_id,
                     )
                 else:
-                    self.stderr.write(
-                        f"  Warning: no UniProt entry found for '{name}'"
-                    )
+                    self.stderr.write(f"  Warning: no UniProt entry found for '{name}'")
