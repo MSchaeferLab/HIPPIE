@@ -7,36 +7,36 @@ from .models import Tissue, InteractionType
 # ---------------------------------------------------------------------------
 
 SCORE_PRESETS = [
-    ("",     "Custom"),
-    ("0",    "No filter (0.0)"),
+    ("", "Custom"),
+    ("0", "No filter (0.0)"),
     ("0.63", "Medium (0.63)"),
     ("0.72", "High (0.72)"),
 ]
 
 OUTPUT_CHOICES = [
     ("browser_text", "Browser – plain text"),
-    ("browser_vis",  "Browser – network visualization"),
-    ("hippie_tab",   "Download – HIPPIE TAB file"),
-    ("psimitab",     "Download – PSI-MI TAB 2.5"),
+    ("browser_vis", "Browser – network visualization"),
+    ("hippie_tab", "Download – HIPPIE TAB file"),
+    ("psimitab", "Download – PSI-MI TAB 2.5"),
 ]
 
 DIRECTION_CHOICES = [
-    ("none",         "Do not show direction"),
-    ("unweighted_sp","Unweighted shortest paths"),
-    ("weighted_sp",  "Confidence-weighted shortest paths"),
-    ("kegg",         "KEGG direction"),
+    ("none", "Do not show direction"),
+    ("unweighted_sp", "Unweighted shortest paths"),
+    ("weighted_sp", "Confidence-weighted shortest paths"),
+    ("kegg", "KEGG direction"),
 ]
 
 EFFECT_CHOICES = [
-    ("none",      "Do not show effect"),
+    ("none", "Do not show effect"),
     ("predicted", "Show predicted effect"),
-    ("kegg",      "Show KEGG effect"),
+    ("kegg", "Show KEGG effect"),
 ]
 
 NEGATOME_EDGES_CHOICES = [
     ("none", "Only interactions"),
     ("exclusively", "Only non-interactions"),
-    ("both", "Any edges")
+    ("both", "Any edges"),
 ]
 
 
@@ -44,8 +44,8 @@ NEGATOME_EDGES_CHOICES = [
 # Form
 # ---------------------------------------------------------------------------
 
-class NetworkQueryForm(forms.Form):
 
+class NetworkQueryForm(forms.Form):
     # -----------------------------------------------------------------------
     # 1. Query set
     # -----------------------------------------------------------------------
@@ -165,15 +165,14 @@ class NetworkQueryForm(forms.Form):
         initial="none",
         widget=forms.RadioSelect,
     )
-    
+
     negatome_edges = forms.ChoiceField(
         label="Return experimental non-interactions",
         choices=NEGATOME_EDGES_CHOICES,
         initial="none",
-        widget=forms.RadioSelect
+        widget=forms.RadioSelect,
     )
-    
-    
+
     def clean(self):
         cleaned = super().clean()
 

@@ -2,93 +2,12 @@
 {% block title %}Network Query{% endblock %}
 {% block nav_network_query %}active{% endblock %}
 
-{% block extra_styles %}
-  /* ── Sidebar form layout ────────────────────────── */
-  .nq-sidebar {
-    width: 300px;
-    flex-shrink: 0;
-  }
-  @media (max-width: 768px) {
-    .nq-sidebar { width: 100%; }
-  }
-
-  /* ── Form section labels ────────────────────────── */
-  .form-section-label {
-    font-size: .68rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .1em;
-    color: var(--hippie-ink-muted);
-    border-bottom: 1px solid var(--hippie-border);
-    padding-bottom: .35rem;
-    margin-bottom: .75rem;
-    font-family: var(--font-mono);
-  }
-
-  /* ── Tighten Bootstrap controls in sidebar ──────── */
-  .nq-sidebar .form-control,
-  .nq-sidebar .form-select {
-    font-size: .85rem;
-    padding: .35rem .65rem;
-  }
-  .nq-sidebar .form-label {
-    font-size: .82rem;
-    margin-bottom: .25rem;
-    color: var(--hippie-ink);
-    font-weight: 500;
-  }
-  .nq-sidebar .form-check-label { font-size: .82rem; }
-  .nq-sidebar .form-text        { font-size: .75rem; }
-  .nq-sidebar textarea.form-control {
-    font-family: var(--font-mono);
-    font-size: .8rem;
-  }
-  .nq-sidebar .form-check { margin-bottom: .2rem; }
-
-  /* ── Score range ────────────────────────────────── */
-  .score-display {
-    font-family: var(--font-mono);
-    font-size: .8rem;
-    color: var(--hippie-ink-muted);
-  }
-
-  /* ── Submit button ──────────────────────────────── */
-  .btn-nq-submit {
-    background: var(--hippie-teal);
-    color: #fff;
-    border: none;
-    border-radius: var(--radius-md);
-    font-weight: 600;
-    font-size: .875rem;
-    padding: .55rem 1.25rem;
-    width: 100%;
-    cursor: pointer;
-    transition: background .15s;
-  }
-  .btn-nq-submit:hover { background: #145555; }
-
-  /* ── Results placeholder ────────────────────────── */
-  .nq-results-placeholder {
-    border: 2px dashed var(--hippie-border);
-    border-radius: var(--radius-lg);
-    padding: 4rem 2rem;
-    text-align: center;
-    color: var(--hippie-ink-muted);
-  }
-  .nq-results-placeholder i {
-    font-size: 2.5rem;
-    opacity: .3;
-    display: block;
-    margin-bottom: .75rem;
-  }
-{% endblock %}
-
 {% block content %}
 
 {# ── Page heading ───────────────────────────────────────────────────── #}
-<div class="mb-4">
-  <h2 style="font-family:var(--font-display);">Network Query</h2>
-  <p class="text-muted-sm mb-0">
+<div class="hippie-hero mb-4">
+  <h1>Network<br><em style="color:var(--hippie-teal)">Query</em></h1>
+  <p>
     Define a set of seed proteins and filter parameters to extract a
     confidence-scored interaction sub-network from HIPPIE.
   </p>

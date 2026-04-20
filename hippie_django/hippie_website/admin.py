@@ -10,6 +10,7 @@ from .models import (
     InteractionType,
     Isoform,
     MeSHTerm,
+    NonInteraction,
     OrthologInteraction,
     Protein,
     ProteinEntrez,
@@ -20,6 +21,7 @@ from .models import (
     Species,
     Tissue,
     UniProtAccession,
+    BaitPreyTest,
 )
 
 
@@ -39,6 +41,7 @@ class IsoformAdmin(admin.ModelAdmin):
     def parent_symbol(self, obj):
         # obj.protein_ptr is the parent Protein instance
         return obj.protein_ptr.name
+
 
 @admin.register(ProteinUniProt)
 class ProteinUniProtAdmin(admin.ModelAdmin):
@@ -226,3 +229,20 @@ class BaitPreyAssociationAdmin(admin.ModelAdmin):
         "interaction__protein_2",
     )
     autocomplete_fields = ("interaction",)
+
+
+@admin.register(NonInteraction)
+class NonInteractionAdmin(admin.ModelAdmin):
+    list_display = ("id", "protein_1", "protein_2", "score")
+    search_fields = ("=id", "protein_1__name", "protein_2__name")
+    ordering = ("-score", "id")
+    list_select_related = ("protein_1", "protein_2")
+    autocomplete_fields = ("protein_1", "protein_2")
+
+
+@admin.register(BaitPreyTest)
+class BaitPreyTestAdmin(admin.ModelAdmin):
+    list_display = ("id", "detection", "pmid", "method")
+    search_fields = ("detection", "=pmid", "method")
+    list_filter = ("detection",)
+    ordering = ("-pmid",)

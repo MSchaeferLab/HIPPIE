@@ -1,0 +1,32 @@
+{% extends "hippie_website/protein_pair_base.html" %}
+
+{% block detail_content %}
+
+  {# ── Detection evidence ── #}
+  <div class="row g-3 mb-4">
+    <div class="col-md-6 col-lg-4">
+      <div class="evidence-card">
+        <h4><i class="bi bi-search me-2 text-muted"></i>Detection</h4>
+        <p class="text-muted-sm mb-3">
+          Bait-prey assay results from the Negatome database — pairs tested but
+          not detected as interacting.
+        </p>
+        <div class="detection-stats">
+          <div>
+            <div class="detection-stat-value">{{ bait_prey_times_observed }}</div>
+            <div class="detection-stat-label">Times Observed</div>
+          </div>
+          <div>
+            <div class="detection-stat-value">{{ bait_prey_total_tested }}</div>
+            <div class="detection-stat-label">Times Tested</div>
+          </div>
+          <div>
+            <div class="detection-stat-value pending">—</div>
+            <div class="detection-stat-label">Detection Score</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+{% endblock %}

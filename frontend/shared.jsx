@@ -1,27 +1,26 @@
-{# Shared React components — per include-Tag included in React-pages. #}
-{# verbatim-Block protects JSX from Django-Template-Parsing. #}
-{% verbatim %}
-function scoreClass(s) {
+// Shared utilities and components used by all React pages.
+
+export function scoreClass(s) {
   if (s >= 0.72) return "score-badge score-high";
   if (s >= 0.63) return "score-badge score-med";
   return "score-badge score-low";
 }
 
-const uniprotUrl = (id) => id ? `https://www.uniprot.org/uniprot/${id}` : null;
-const entrezUrl  = (id) => id ? `https://www.ncbi.nlm.nih.gov/gene/${id}` : null;
+export const uniprotUrl = (id) => id ? `https://www.uniprot.org/uniprot/${id}` : null;
+export const entrezUrl  = (id) => id ? `https://www.ncbi.nlm.nih.gov/gene/${id}` : null;
 
-function ScoreBadge({ score }) {
+export function ScoreBadge({ score }) {
   if (score < 0) return <span className="tag-chip" style={{color:"var(--hippie-accent)"}}>Not found</span>;
   return <span className={scoreClass(score)}>{score.toFixed(4)}</span>;
 }
 
-function ExtLink({ href, children }) {
+export function ExtLink({ href, children }) {
   return href
     ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
     : <span>{children}</span>;
 }
 
-function Pagination({ page, totalPages, onChange }) {
+export function Pagination({ page, totalPages, onChange }) {
   if (totalPages <= 1) return null;
   const pages = [];
   const lo = Math.max(1, page - 2), hi = Math.min(totalPages, page + 2);
@@ -40,7 +39,7 @@ function Pagination({ page, totalPages, onChange }) {
   );
 }
 
-function PaginationRow({ page, totalPages, totalItems, pageSize, onChange }) {
+export function PaginationRow({ page, totalPages, totalItems, pageSize, onChange }) {
   if (totalPages <= 1) return null;
   return (
     <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -52,11 +51,7 @@ function PaginationRow({ page, totalPages, totalItems, pageSize, onChange }) {
   );
 }
 
-function SortableTh({ sortKey, currentKey, currentDir, onSort, children, className="" }) {
+export function SortableTh({ sortKey, currentKey, currentDir, onSort, children, className="" }) {
   const cls = [className, currentKey === sortKey ? `sorted-${currentDir}` : ""].join(" ").trim();
   return <th className={cls} onClick={() => onSort(sortKey)}>{children}</th>;
 }
-
-
-
-{% endverbatim %}
