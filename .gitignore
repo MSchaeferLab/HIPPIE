@@ -298,3 +298,6 @@ http-client.private.env.json
 node_modules/
 package-lock.json
 hippie_django/hippie_website/static/hippie_website/js/
+
+# Static files
+hippie_django/hippie_website/static_files/*
