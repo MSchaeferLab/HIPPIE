@@ -183,9 +183,9 @@ def protein_query_api(request):
     """
     q = request.GET.get("q", "").strip()
     include_isoforms = request.GET.get("include_isoforms", "") in ("1", "true", "yes")
-    show = request.GET.get(
-        "show", "interactions"
-    )  # "interactions" | "noninteractions" | "both"
+    show = request.GET.get("show", "interactions")
+    if show not in ("interactions", "noninteractions", "both"):
+        show = "interactions"
 
     if not q:
         return JsonResponse(
@@ -368,9 +368,9 @@ def interaction_query_api(request):
 
     raw_pairs = body.get("pairs", [])
     include_isoforms = bool(body.get("include_isoforms", False))
-    show = body.get(
-        "show", "interactions"
-    )  # "interactions" | "noninteractions" | "both"
+    show = body.get("show", "interactions")
+    if show not in ("interactions", "noninteractions", "both"):
+        show = "interactions"
 
     if not isinstance(raw_pairs, list):
         return JsonResponse({"error": "'pairs' must be a list."}, status=400)
@@ -441,6 +441,8 @@ def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> d
         "symbol_b": input_b,
         "uniprot_a": "",
         "uniprot_b": "",
+        "isoform_uniprot_a": None,
+        "isoform_uniprot_b": None,
         "score": -1.0,
         "source_count": 0,
         "experiment_count": 0,
@@ -525,6 +527,8 @@ def _resolve_noninteraction_pair(input_a: str, input_b: str, input_order: int) -
         "symbol_b": input_b,
         "uniprot_a": "",
         "uniprot_b": "",
+        "isoform_uniprot_a": None,
+        "isoform_uniprot_b": None,
         "score": -1.0,
         "source_count": None,
         "experiment_count": None,
