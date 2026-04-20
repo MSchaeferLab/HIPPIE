@@ -1,4 +1,4 @@
-{% load static %}
+{% load static django_vite %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -116,6 +116,7 @@
 {#   React + Babel — only loaded by pages that use JSX. #}
 {#   Pages that don't need React should override this block with an empty block. #}
 
+{% vite_react_refresh %}
 {% block react_cdn %}{% endblock %}
 
 {% block scripts %}{% endblock %}

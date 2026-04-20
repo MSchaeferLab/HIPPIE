@@ -23,5 +23,13 @@ python manage.py migrate
 python manage.py seed_test_data
 python manage.py test_import_bait_prey
 python manage.py createsuperuser
+npm run build
 python manage.py runserver
+```
+
+When you change anything in the frontend, you need to run the following command to build the frontend:
+
+```bash
+npm run build
+python manage.py collectstatic
 ```
