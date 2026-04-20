@@ -2,27 +2,6 @@
 {% block title %}Information{% endblock %}
 {% block react_cdn %}{% endblock %}
 
-{% block extra_styles %}
-  .info-section { margin-bottom: 2.5rem; }
-  .info-section h2 { font-size: 1.5rem; margin-bottom: 1rem; }
-  .source-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .75rem; }
-  .source-chip {
-    background: var(--hippie-bg); border: 1px solid var(--hippie-border);
-    border-radius: var(--radius-md); padding: .6rem .85rem;
-    font-size: .82rem; display: flex; flex-direction: column; gap: .2rem;
-  }
-  .source-chip strong { font-size: .85rem; }
-  .source-chip a { font-size: .75rem; font-family: var(--font-mono); }
-  .formula-box {
-    background: var(--hippie-bg); border: 1px solid var(--hippie-border);
-    border-radius: var(--radius-md); padding: 1rem 1.25rem;
-    font-family: var(--font-mono); font-size: .875rem; line-height: 1.9;
-    overflow-x: auto;
-  }
-  .score-tier { display: flex; align-items: center; gap: .75rem; padding: .45rem 0; border-bottom: 1px solid var(--hippie-border); }
-  .score-tier:last-child { border-bottom: none; }
-{% endblock %}
-
 {% block content %}
 
 <div class="hippie-hero">
