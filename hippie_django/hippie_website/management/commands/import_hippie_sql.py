@@ -649,21 +649,21 @@ class Command(BaseCommand):
         if merged_entrez:
             self.stdout.write(
                 self.style.WARNING(
-                    f"  Merged duplicate protein-entrez mapping: {merged_entrez}"
+                    f"  Merged duplicate protein-entrez mapping: {len(merged_entrez)}"
                 )
             )
         merged_tissue = _deduplicate_tissue_mapping(data)
         if merged_tissue:
             self.stdout.write(
                 self.style.WARNING(
-                    f"  Merged duplicate protein-tissue mapping: {merged_tissue}"
+                    f"  Merged duplicate protein-tissue mapping: {len(merged_tissue)}"
                 )
             )
         merged_uniprot = _deduplicate_uniprot_accession_mapping(data)
         if merged_uniprot:
             self.stdout.write(
                 self.style.WARNING(
-                    f"  Merged duplicate uniprot-accession mapping: {merged_uniprot}"
+                    f"  Merged duplicate uniprot-accession mapping: {len(merged_uniprot)}"
                 )
             )
         merged_interactions = _deduplicate_interactions(data)
