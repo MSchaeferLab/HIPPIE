@@ -259,6 +259,92 @@ def _deduplicate_proteins(data: dict[str, list[tuple]]) -> dict[int, int]:
     return remap
 
 
+def _deduplicate_entrez_mapping(data: dict[str, list[tuple]]) -> dict[int, int]:
+    """
+    Merge protein-entrez mapping rows with the same gene_id and name into one (keep lowest id).
+    Returns {duplicate_old_id: canonical_id}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[int, int] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["protein2entrez"]:
+        old_id, gene_id, name = int(row[0]), int(row[1]), row[2]
+        joint_key = str(gene_id) + ":" + name
+        if joint_key in seen:
+            remap[old_id] = seen[joint_key]
+        else:
+            seen[joint_key] = old_id
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["protein2entrez"] = unique_rows
+
+    return remap
+
+
+def _deduplicate_tissue_mapping(data: dict[str, list[tuple]]) -> dict[int, int]:
+    """
+    Merge protein-tissue mapping rows with the same protein_id and tissue_id into one (keep lowest id).
+    Returns {joint_key: joint_key}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[int, int] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["protein2tissue"]:
+        protein_id, tissue_id = int(row[0]), int(row[1])
+        joint_key = str(protein_id) + "0" + str(tissue_id)
+        if joint_key in seen:
+            remap[int(joint_key)] = int(joint_key)
+        else:
+            seen[joint_key] = 1
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["protein2tissue"] = unique_rows
+
+    return remap
+
+
+def _deduplicate_uniprot_accession_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[str, str]:
+    """
+    Merge accession-uniprot mapping rows with the same accession and uniprot_id into one (keep lowest id).
+    Returns {joint_key: joint_key}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[str, str] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["uniprot_accession2id"]:
+        accession, uniprot_id = row[0], row[1]
+        joint_key = accession + ":" + uniprot_id
+        if joint_key in seen:
+            remap[joint_key] = joint_key
+        else:
+            seen[joint_key] = 1
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["uniprot_accession2id"] = unique_rows
+
+    return remap
+
+
 def _deduplicate_interactions(data: dict[str, list[tuple]]) -> dict[int, int]:
     """
     After protein deduplication, multiple interactions may map to the same
@@ -559,6 +645,27 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.WARNING(f"  Merged duplicate protein IDs: {merged_proteins}")
             )
+        merged_entrez = _deduplicate_entrez_mapping(data)
+        if merged_entrez:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate protein-entrez mapping: {merged_entrez}"
+                )
+            )
+        merged_tissue = _deduplicate_tissue_mapping(data)
+        if merged_tissue:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate protein-tissue mapping: {merged_tissue}"
+                )
+            )
+        merged_uniprot = _deduplicate_uniprot_accession_mapping(data)
+        if merged_uniprot:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate uniprot-accession mapping: {merged_uniprot}"
+                )
+            )
         merged_interactions = _deduplicate_interactions(data)
         if merged_interactions:
             self.stdout.write(
@@ -755,6 +862,11 @@ class Command(BaseCommand):
             bs,
             ignore_conflicts=False,
         )
+        self.stdout.write(
+            self.style.WARNING(
+                "  Check whether 'version' should be part of unique key proteinUniProt"
+            )
+        )
         self._say(f"  protein2uniprot:  {len(data['protein2uniprot']):>8,}")
 
         _bulk(
@@ -766,6 +878,7 @@ class Command(BaseCommand):
             bs,
             ignore_conflicts=False,
         )
+        self.stdout.write(self.style.WARNING("  ProteinEntrez is not used anywhere"))
         self._say(f"  protein2entrez:   {len(data['protein2entrez']):>8,}")
 
         pt_rows = []
