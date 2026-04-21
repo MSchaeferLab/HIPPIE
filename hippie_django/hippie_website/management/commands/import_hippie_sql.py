@@ -26,6 +26,13 @@ Decisions encoded here:
   - aggregated_interactions, interaction_id_mapped, uniprot2interaction_amount,
     all tmp_* tables: skipped (derived / denormalised).
   - NonInteraction, Isoform: no source table in dump — left empty.
+  - source table duplicate name (e.g. Rual05 appears as id=11 and id=13): merged
+    to lowest id; all interaction2source and interaction2link rows remapped.
+  - protein table duplicate name: merged to lowest id; all protein_id references
+    in protein2uniprot, protein2entrez, protein2tissue, interaction,
+    homomint_interaction, i2d_interaction, ortho_interaction remapped.
+  - orphaned protein refs (interaction rows pointing to protein_ids absent from
+    the protein table): dropped; dependent junction rows dropped too.
 """
 
 from __future__ import annotations
@@ -161,6 +168,229 @@ def _parse_row(line: str) -> tuple | None:
 # ---------------------------------------------------------------------------
 # Streaming dump parser
 # ---------------------------------------------------------------------------
+
+
+def _deduplicate_sources(data: dict[str, list[tuple]]) -> dict[int, int]:
+    """
+    Merge source rows with the same name into one (keep lowest id).
+    Returns {duplicate_old_id: canonical_id}.
+    Mutates data["source"], data["interaction2source"], data["interaction2link"].
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[int, int] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["source"]:
+        old_id, name = int(row[0]), row[1]
+        if name in seen:
+            remap[old_id] = seen[name]
+        else:
+            seen[name] = old_id
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    data["source"] = unique_rows
+
+    # interaction2source: (interaction_id, source_id)
+    data["interaction2source"] = [
+        (r[0], remap.get(int(r[1]), int(r[1]))) for r in data["interaction2source"]
+    ]
+
+    # interaction2link: (interaction_id, link, source_id, species_text)
+    data["interaction2link"] = [
+        (r[0], r[1], remap.get(int(r[2]), int(r[2])), r[3])
+        for r in data["interaction2link"]
+    ]
+
+    return remap
+
+
+def _deduplicate_proteins(data: dict[str, list[tuple]]) -> dict[int, int]:
+    """
+    Merge protein rows with the same name into one (keep lowest id).
+    Returns {duplicate_old_id: canonical_id}.
+    Mutates all tables that reference protein_id.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[int, int] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["protein"]:
+        old_id, name = int(row[0]), row[1]
+        if name in seen:
+            remap[old_id] = seen[name]
+        else:
+            seen[name] = old_id
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    data["protein"] = unique_rows
+
+    def _rc0(rows: list[tuple]) -> list[tuple]:
+        return [(remap.get(int(r[0]), int(r[0])), *r[1:]) for r in rows]
+
+    def _rc12(rows: list[tuple]) -> list[tuple]:
+        return [
+            (
+                r[0],
+                remap.get(int(r[1]), int(r[1])),
+                remap.get(int(r[2]), int(r[2])),
+                *r[3:],
+            )
+            for r in rows
+        ]
+
+    data["protein2uniprot"] = _rc0(data["protein2uniprot"])
+    data["protein2entrez"] = _rc0(data["protein2entrez"])
+    data["protein2tissue"] = _rc0(data["protein2tissue"])
+
+    for tbl in (
+        "interaction",
+        "homomint_interaction",
+        "i2d_interaction",
+        "ortho_interaction",
+    ):
+        data[tbl] = _rc12(data[tbl])
+
+    return remap
+
+
+def _deduplicate_interactions(data: dict[str, list[tuple]]) -> dict[int, int]:
+    """
+    After protein deduplication, multiple interactions may map to the same
+    canonical (protein_1_id, protein_2_id) pair.  Keep lowest interaction_id;
+    remap all junction table references so ignore_conflicts doesn't leave
+    orphaned junction rows.
+    Returns {duplicate_id: canonical_id}.
+    Mutates data["interaction"] and all interaction junction tables.
+    """
+    seen: dict[tuple[int, int], int] = {}
+    remap: dict[int, int] = {}
+
+    for r in data["interaction"]:
+        iid, p1, p2 = int(r[0]), int(r[1]), int(r[2])
+        if p1 > p2:
+            p1, p2 = p2, p1
+        pair = (p1, p2)
+        if pair in seen:
+            remap[iid] = seen[pair]
+        else:
+            seen[pair] = iid
+
+    if not remap:
+        return remap
+
+    duplicate_ids = set(remap.keys())
+    data["interaction"] = [
+        r for r in data["interaction"] if int(r[0]) not in duplicate_ids
+    ]
+
+    for tbl in (
+        "interaction2GO",
+        "interaction2effect",
+        "interaction2experiment",
+        "interaction2keggDirection",
+        "interaction2link",
+        "interaction2mesh",
+        "interaction2pubmed",
+        "interaction2source",
+        "interaction2species",
+        "interaction2type",
+        "bait_prey_assoc",
+    ):
+        data[tbl] = [(remap.get(int(r[0]), int(r[0])), *r[1:]) for r in data[tbl]]
+
+    return remap
+
+
+def _filter_orphaned_protein_refs(data: dict[str, list[tuple]]) -> dict[str, int]:
+    """
+    Drop rows that reference a protein_id not present in data["protein"].
+    Returns {table_name: dropped_count} for any table where rows were removed.
+    Mutates data in-place.
+    """
+    valid_pids: set[int] = {int(r[0]) for r in data["protein"]}
+    dropped: dict[str, int] = {}
+
+    # Tables where col 0 is protein_id
+    for tbl in ("protein2uniprot", "protein2entrez", "protein2tissue"):
+        before = len(data[tbl])
+        data[tbl] = [r for r in data[tbl] if int(r[0]) in valid_pids]
+        n = before - len(data[tbl])
+        if n:
+            dropped[tbl] = n
+
+    # Tables where cols 1 and 2 are protein_1_id / protein_2_id
+    for tbl in (
+        "interaction",
+        "homomint_interaction",
+        "i2d_interaction",
+        "ortho_interaction",
+    ):
+        before = len(data[tbl])
+        data[tbl] = [
+            r for r in data[tbl] if int(r[1]) in valid_pids and int(r[2]) in valid_pids
+        ]
+        n = before - len(data[tbl])
+        if n:
+            dropped[tbl] = n
+
+    # Drop junction rows for interactions that were just removed
+    valid_iids: set[int] = {int(r[0]) for r in data["interaction"]}
+    for tbl in (
+        "interaction2GO",
+        "interaction2effect",
+        "interaction2experiment",
+        "interaction2keggDirection",
+        "interaction2link",
+        "interaction2mesh",
+        "interaction2pubmed",
+        "interaction2source",
+        "interaction2species",
+        "interaction2type",
+        "bait_prey_assoc",
+    ):
+        before = len(data[tbl])
+        data[tbl] = [r for r in data[tbl] if int(r[0]) in valid_iids]
+        n = before - len(data[tbl])
+        if n:
+            dropped[tbl] = n
+
+    return dropped
+
+
+def _filter_orphaned_lookup_refs(data: dict[str, list[tuple]]) -> dict[str, int]:
+    dropped: dict[str, int] = {}
+
+    def _filter(tbl: str, col: int, valid: set) -> None:
+        before = len(data[tbl])
+        data[tbl] = [r for r in data[tbl] if r[col] in valid]
+        n = before - len(data[tbl])
+        if n:
+            dropped[tbl] = n
+
+    valid_tissue = {r[0] for r in data["tissue"]}
+    valid_source = {int(r[0]) for r in data["source"]}
+    valid_species = {r[0] for r in data["species"]}
+    valid_exp = {r[0] for r in data["experiment_type"]}
+    valid_inttype = {r[0] for r in data["interaction_type"]}
+    valid_go = {r[0] for r in data["GO_slim_term"]}
+    valid_mesh = {r[0] for r in data["mesh_term"]}
+
+    _filter("protein2tissue", 1, valid_tissue)
+    _filter("interaction2source", 1, valid_source)
+    _filter("interaction2link", 2, valid_source)
+    _filter("interaction2experiment", 1, valid_exp)
+    _filter("interaction2type", 1, valid_inttype)
+    _filter("interaction2GO", 1, valid_go)
+    _filter("interaction2mesh", 1, valid_mesh)
+    _filter("interaction2species", 1, valid_species)
+
+    return dropped
 
 
 def parse_dump(path: Path) -> dict[str, list[tuple]]:
@@ -319,6 +549,33 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Parsing {path} …")
         data = parse_dump(path)
+        merged = _deduplicate_sources(data)
+        if merged:
+            self.stdout.write(
+                self.style.WARNING(f"  Merged duplicate source IDs: {merged}")
+            )
+        merged_proteins = _deduplicate_proteins(data)
+        if merged_proteins:
+            self.stdout.write(
+                self.style.WARNING(f"  Merged duplicate protein IDs: {merged_proteins}")
+            )
+        merged_interactions = _deduplicate_interactions(data)
+        if merged_interactions:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate interaction pairs: {len(merged_interactions)}"
+                )
+            )
+        orphaned = _filter_orphaned_protein_refs(data)
+        if orphaned:
+            self.stdout.write(
+                self.style.WARNING(f"  Dropped orphaned protein refs: {orphaned}")
+            )
+        orphaned_lookup = _filter_orphaned_lookup_refs(data)
+        if orphaned_lookup:
+            self.stdout.write(
+                self.style.WARNING(f"  Dropped orphaned lookup refs: {orphaned_lookup}")
+            )
 
         if dry:
             self.stdout.write(self.style.WARNING("Dry-run — no DB writes."))
@@ -455,7 +712,7 @@ class Command(BaseCommand):
                 for r in data["GO_slim_term2term"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  GO_slim_term2term:{len(data['GO_slim_term2term']):>8,}")
 
@@ -496,7 +753,7 @@ class Command(BaseCommand):
                 for r in data["protein2uniprot"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  protein2uniprot:  {len(data['protein2uniprot']):>8,}")
 
@@ -507,7 +764,7 @@ class Command(BaseCommand):
                 for r in data["protein2entrez"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  protein2entrez:   {len(data['protein2entrez']):>8,}")
 
@@ -518,7 +775,7 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
             pt_rows.append(ProteinTissue(protein_id=r[0], tissue_id=r[1]))
-        _bulk(ProteinTissue, pt_rows, bs, ignore_conflicts=True)
+        _bulk(ProteinTissue, pt_rows, bs, ignore_conflicts=False)
         self._say(
             f"  protein2tissue:   {len(pt_rows):>8,}  (skipped {skipped} with tissue_id=0)"
         )
@@ -531,7 +788,7 @@ class Command(BaseCommand):
                 if r[1]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  uniprot_acc2id:   {len(data['uniprot_accession2id']):>8,}")
 
@@ -544,7 +801,7 @@ class Command(BaseCommand):
                 for r in data["sp_analysis_end_nodes"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  sp_analysis_end_nodes: {len(data['sp_analysis_end_nodes']):>5,}")
 
@@ -583,7 +840,7 @@ class Command(BaseCommand):
                 )
             )
 
-        _bulk(Interaction, objs, bs, ignore_conflicts=True)
+        _bulk(Interaction, objs, bs, ignore_conflicts=False)
         _reset_sequence(Interaction)
         self._say(
             f"  interaction:      {len(objs):>8,}"
@@ -690,7 +947,7 @@ class Command(BaseCommand):
                 for r in data["interaction2GO"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  interaction2GO:     {len(data['interaction2GO']):>6,}")
 
@@ -702,7 +959,7 @@ class Command(BaseCommand):
                 for r in data["interaction2mesh"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  interaction2mesh:   {len(data['interaction2mesh']):>6,}")
 
@@ -713,7 +970,7 @@ class Command(BaseCommand):
                 for r in data["interaction2pubmed"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  interaction2pubmed: {len(data['interaction2pubmed']):>6,}")
 
@@ -725,7 +982,7 @@ class Command(BaseCommand):
                 for r in data["interaction2source"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  interaction2source: {len(data['interaction2source']):>6,}")
 
@@ -737,7 +994,7 @@ class Command(BaseCommand):
                 for r in data["interaction2species"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  interaction2species:{len(data['interaction2species']):>6,}")
 
@@ -749,7 +1006,7 @@ class Command(BaseCommand):
                 for r in data["interaction2type"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  interaction2type:   {len(data['interaction2type']):>6,}")
 
@@ -761,7 +1018,7 @@ class Command(BaseCommand):
                 for r in data["interaction2experiment"]
             ],
             bs,
-            ignore_conflicts=True,
+            ignore_conflicts=False,
         )
         self._say(f"  interaction2expt:   {len(data['interaction2experiment']):>6,}")
 
@@ -808,7 +1065,7 @@ class Command(BaseCommand):
                 )
             )
 
-        _bulk(InteractionCrossReference, objs, bs, ignore_conflicts=True)
+        _bulk(InteractionCrossReference, objs, bs, ignore_conflicts=False)
         self._say(f"  interaction2link:   {len(objs):>6,}")
 
     def _import_ortholog(
@@ -866,7 +1123,7 @@ class Command(BaseCommand):
                     for p1, p2 in unique_pairs
                 ],
                 bs,
-                ignore_conflicts=True,
+                ignore_conflicts=False,
             )
             self._say(f"  {int_table}: {len(unique_pairs):,}")
 
@@ -895,7 +1152,7 @@ class Command(BaseCommand):
                         Through(orthologinteraction_id=oi_id, species_id=sid)
                     )
 
-            _bulk(Through, species_objs, bs, ignore_conflicts=True)
+            _bulk(Through, species_objs, bs, ignore_conflicts=False)
             self._say(f"  {sp_table}: {len(species_objs):,}")
 
     def _import_bait_prey(
