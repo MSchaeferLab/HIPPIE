@@ -121,10 +121,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DJANGO_VITE = {
     "default": {
-        "dev_mode": DEBUG,
-        "dev_server_port": 5173,
+        "dev_mode": False,
         "manifest_path": BASE_DIR
         / "hippie_website/static/hippie_website/js/.vite/manifest.json",
+        "static_url_prefix": "hippie_website/js",
     }
 }
 
