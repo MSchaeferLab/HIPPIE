@@ -16,7 +16,7 @@ Decisions encoded here:
     rows written to log.
   - interaction2link.species text → Species FK: prefix-match (Species.name
     startswith text); misses set NULL and written to log.
-  - protein2tissue tissue_id=0: silently skipped.
+  - protein2tissue #NOT: tissue_id=0: silently skipped.
   - Interaction.score NULL: imported as 0.0; written to log.
   - Canonical order (protein_1_id ≤ protein_2_id): enforced by swapping pair;
     kegg_direction inverted for swapped rows.
@@ -345,6 +345,216 @@ def _deduplicate_uniprot_accession_mapping(
     return remap
 
 
+def _deduplicate_interaction_go_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[str, str]:
+    """
+    Merge interaction-go mapping rows with the same interaction_id and term_id into one (keep lowest id).
+    Returns {joint_key: joint_key}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[str, str] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["interaction2GO"]:
+        interaction_id, term_id = int(row[0]), row[1]
+        joint_key = str(interaction_id) + ":" + term_id
+        if joint_key in seen:
+            remap[joint_key] = joint_key
+        else:
+            seen[joint_key] = 1
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["interaction2GO"] = unique_rows
+
+    return remap
+
+
+def _deduplicate_interaction_pmid_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[str, str]:
+    """
+    Merge interaction-pmid mapping rows with the same interaction_id and pmid into one (keep lowest id).
+    Returns {joint_key: joint_key}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[str, str] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["interaction2pubmed"]:
+        interaction_id, pmid = int(row[0]), int(row[1])
+        joint_key = str(interaction_id) + ":" + str(pmid)
+        if joint_key in seen:
+            remap[joint_key] = joint_key
+        else:
+            seen[joint_key] = 1
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["interaction2pubmed"] = unique_rows
+
+    return remap
+
+
+def _deduplicate_interaction_source_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[str, str]:
+    """
+    Merge interaction-source mapping rows with the same interaction_id and source_id into one (keep lowest id).
+    Returns {joint_key: joint_key}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[str, str] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["interaction2source"]:
+        interaction_id, source_id = int(row[0]), int(row[1])
+        joint_key = str(interaction_id) + ":" + str(source_id)
+        if joint_key in seen:
+            remap[joint_key] = joint_key
+        else:
+            seen[joint_key] = 1
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["interaction2source"] = unique_rows
+
+    return remap
+
+
+def _deduplicate_interaction_species_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[str, str]:
+    """
+    Merge interaction-species mapping rows with the same interaction_id and species_id into one (keep lowest id).
+    Returns {joint_key: joint_key}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[str, str] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["interaction2species"]:
+        interaction_id, species_id = int(row[0]), int(row[1])
+        joint_key = str(interaction_id) + ":" + str(species_id)
+        if joint_key in seen:
+            remap[joint_key] = joint_key
+        else:
+            seen[joint_key] = 1
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["interaction2species"] = unique_rows
+
+    return remap
+
+
+def _deduplicate_interaction_type_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[str, str]:
+    """
+    Merge interaction-type mapping rows with the same interaction_id and type_id into one (keep lowest id).
+    Returns {joint_key: joint_key}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[str, str] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["interaction2type"]:
+        interaction_id, type_id = int(row[0]), int(row[1])
+        joint_key = str(interaction_id) + ":" + str(type_id)
+        if joint_key in seen:
+            remap[joint_key] = joint_key
+        else:
+            seen[joint_key] = 1
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["interaction2type"] = unique_rows
+
+    return remap
+
+
+def _deduplicate_interaction_experiment_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[str, str]:
+    """
+    Merge interaction-experiment mapping rows with the same interaction_id and experiment_id into one (keep lowest id).
+    Returns {joint_key: joint_key}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[str, str] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["interaction2experiment"]:
+        interaction_id, experiment_id = int(row[0]), int(row[1])
+        joint_key = str(interaction_id) + ":" + str(experiment_id)
+        if joint_key in seen:
+            remap[joint_key] = joint_key
+        else:
+            seen[joint_key] = 1
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["interaction2experiment"] = unique_rows
+
+    return remap
+
+
+def _deduplicate_interaction_effect_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[str, str]:
+    """
+    Merge interaction-effect mapping rows with the same interaction_id, effect_type, and source into one (keep lowest id).
+    Returns {joint_key: joint_key}.
+    """
+    seen: dict[str, int] = {}  # name → canonical id
+    remap: dict[str, str] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["interaction2effect"]:
+        interaction_id, effect_type, source = int(row[0]), int(row[1]), int(row[2])
+        joint_key = str(interaction_id) + ":" + str(effect_type) + ":" + str(source)
+        if joint_key in seen:
+            remap[joint_key] = joint_key
+        else:
+            seen[joint_key] = 1
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    # Not referenced in any other classes
+
+    data["interaction2effect"] = unique_rows
+
+    return remap
+
+
 def _deduplicate_interactions(data: dict[str, list[tuple]]) -> dict[int, int]:
     """
     After protein deduplication, multiple interactions may map to the same
@@ -643,7 +853,9 @@ class Command(BaseCommand):
         merged_proteins = _deduplicate_proteins(data)
         if merged_proteins:
             self.stdout.write(
-                self.style.WARNING(f"  Merged duplicate protein IDs: {merged_proteins}")
+                self.style.WARNING(
+                    f"  Merged duplicate protein IDs: {len(merged_proteins)}"
+                )
             )
         merged_entrez = _deduplicate_entrez_mapping(data)
         if merged_entrez:
@@ -671,6 +883,63 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.WARNING(
                     f"  Merged duplicate interaction pairs: {len(merged_interactions)}"
+                )
+            )
+        merged_interaction_go_mapping = _deduplicate_interaction_go_mapping(data)
+        if merged_interaction_go_mapping:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate interaction-go mapping: {len(merged_interaction_go_mapping)}"
+                )
+            )
+        merged_interaction_pmid_mapping = _deduplicate_interaction_pmid_mapping(data)
+        if merged_interaction_pmid_mapping:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate interaction-pmid mapping: {len(merged_interaction_pmid_mapping)}"
+                )
+            )
+        merged_interaction_source_mapping = _deduplicate_interaction_source_mapping(
+            data
+        )
+        if merged_interaction_source_mapping:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate interaction-source mapping: {len(merged_interaction_source_mapping)}"
+                )
+            )
+        merged_interaction_species_mapping = _deduplicate_interaction_species_mapping(
+            data
+        )
+        if merged_interaction_species_mapping:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate interaction-species mapping: {len(merged_interaction_species_mapping)}"
+                )
+            )
+        merged_interaction_type_mapping = _deduplicate_interaction_type_mapping(data)
+        if merged_interaction_type_mapping:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate interaction-type mapping: {len(merged_interaction_type_mapping)}"
+                )
+            )
+        merged_interaction_experiment_mapping = (
+            _deduplicate_interaction_experiment_mapping(data)
+        )
+        if merged_interaction_experiment_mapping:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate interaction-experiment mapping: {len(merged_interaction_experiment_mapping)}"
+                )
+            )
+        merged_interaction_effect_mapping = _deduplicate_interaction_effect_mapping(
+            data
+        )
+        if merged_interaction_effect_mapping:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  Merged duplicate interaction-effect mapping: {len(merged_interaction_effect_mapping)}"
                 )
             )
         orphaned = _filter_orphaned_protein_refs(data)
@@ -882,15 +1151,15 @@ class Command(BaseCommand):
         self._say(f"  protein2entrez:   {len(data['protein2entrez']):>8,}")
 
         pt_rows = []
-        skipped = 0
+        # skipped = 0
         for r in data["protein2tissue"]:
-            if r[1] == 0:
-                skipped += 1
-                continue
+            # if r[1] == 0:
+            #    skipped += 1
+            #    continue
             pt_rows.append(ProteinTissue(protein_id=r[0], tissue_id=r[1]))
         _bulk(ProteinTissue, pt_rows, bs, ignore_conflicts=False)
         self._say(
-            f"  protein2tissue:   {len(pt_rows):>8,}  (skipped {skipped} with tissue_id=0)"
+            f"  protein2tissue:   {len(pt_rows):>8,}"  #  (skipped {skipped} with tissue_id=0)"
         )
 
         _bulk(
@@ -980,9 +1249,16 @@ class Command(BaseCommand):
                 log.record(
                     "interaction2effect",
                     {"interaction_id": iid, "superseded": list(effect_map[iid])},
-                    "replaced by later row — last-row-wins",
+                    "replaced by later row - last-row-wins",
                 )
             effect_map[iid] = (etype, esrc)
+
+        self.stdout.write(
+            self.style.WARNING(
+                "5 Entries with multiple sources in interaction2effect"
+                "8, 58, 147, 186, 199"
+            )
+        )
 
         if not effect_map:
             return
