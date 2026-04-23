@@ -9,30 +9,42 @@ Usage:
     python manage.py import_hippie_sql <sql_file> --log-file import.log
     python manage.py import_hippie_sql <sql_file> --dry-run
 
-Decisions encoded here:
-  - BaitPreyTest.method: placeholder ExperimentType "Unknown (legacy import)"
-    created; all imported tests have detection=True.
-  - interaction2effect multiple rows per interaction: last row wins; superseded
-    rows written to log.
-  - interaction2link.species text → Species FK: prefix-match (Species.name
-    startswith text); misses set NULL and written to log.
-  - protein2tissue #NOT: tissue_id=0: silently skipped.
-  - Interaction.score NULL: imported as 0.0; written to log.
-  - Canonical order (protein_1_id ≤ protein_2_id): enforced by swapping pair;
-    kegg_direction inverted for swapped rows.
-  - protein2uniprot.uniprot_db_id: discarded (not in new model).
-  - interaction2homomint_link: skipped (byte-identical subset of interaction2link
-    where source_id=6).
-  - aggregated_interactions, interaction_id_mapped, uniprot2interaction_amount,
-    all tmp_* tables: skipped (derived / denormalised).
-  - NonInteraction, Isoform: no source table in dump — left empty.
-  - source table duplicate name (e.g. Rual05 appears as id=11 and id=13): merged
-    to lowest id; all interaction2source and interaction2link rows remapped.
-  - protein table duplicate name: merged to lowest id; all protein_id references
-    in protein2uniprot, protein2entrez, protein2tissue, interaction,
-    homomint_interaction, i2d_interaction, ortho_interaction remapped.
-  - orphaned protein refs (interaction rows pointing to protein_ids absent from
-    the protein table): dropped; dependent junction rows dropped too.
+Data-loss / alteration log (`--log-file`, one row per lost value).
+Categories:
+
+  - orphan_protein      Junction / interaction row pointing to a protein_id
+                        absent from the protein table after dedup — dropped.
+  - orphan_lookup       Junction row pointing to a lookup id (source_id,
+                        tissue_id, experiment_id, ...) absent from the
+                        corresponding master table — dropped.
+  - column_discarded    protein2uniprot.uniprot_db_id has no home in the new
+                        ProteinUniProt schema; column dropped (one summary row).
+  - null_score          Interaction.score was NULL in source; imported as 0.0.
+  - effect_superseded   interaction2effect had multiple rows for the same
+                        interaction_id; last-row-wins. Superseded values logged.
+  - species_unmatched   interaction2link.species text did not prefix-match any
+                        Species.name; cross_reference species FK set NULL.
+  - ortho_unresolved    OrthologInteraction row not found after bulk_create;
+                        attached species rows skipped.
+  - bait_prey_error     BaitPreyAssociation.get_or_create raised for a row.
+  - interaction_merged  After protein dedup two interactions collapsed onto the
+                        same canonical (p1, p2) pair; the non-kept row is
+                        logged so the discarded id / score can be inspected.
+  - placeholder_exp_type
+                        BaitPreyTest rows share a single placeholder
+                        ExperimentType "Unknown (legacy import)" — no method
+                        info survives from source. One summary row logged.
+
+Non-lossy decisions (not logged per-row):
+  - Canonical order enforced (protein_1_id ≤ protein_2_id). kegg_direction
+    inverted for swapped rows.
+  - source / protein / junction dedup by natural key.
+  - interaction2homomint_link skipped (byte-identical subset of
+    interaction2link where source_id=6).
+  - aggregated_interactions, interaction_id_mapped,
+    uniprot2interaction_amount, all tmp_* tables skipped (derived /
+    denormalised).
+  - NonInteraction, Isoform left empty (no source table in dump).
 """
 
 from __future__ import annotations
@@ -259,59 +271,71 @@ def _deduplicate_proteins(data: dict[str, list[tuple]]) -> dict[int, int]:
     return remap
 
 
-def _deduplicate_entrez_mapping(data: dict[str, list[tuple]]) -> dict[int, int]:
+def _deduplicate_entrez_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[tuple[int, int], int]:
     """
-    Merge protein-entrez mapping rows with the same gene_id and name into one (keep lowest id).
-    Returns {duplicate_old_id: canonical_id}.
+    Drop duplicate (protein_id, gene_id) pairs in protein2entrez.
+
+    The ProteinEntrez model has a unique constraint on (protein, gene_id)
+    only — name is not part of the key. First occurrence wins (its name
+    is kept). After protein dedup two rows can collapse onto the same
+    canonical (protein, gene_id) pair; this function prevents the crash
+    in bulk_create.
+
+    NOTE: the earlier key ``gene_id + ":" + name`` dropped legitimate rows
+    whenever two different proteins happened to share a gene_id (which is
+    allowed by the new model). The key is now (protein_id, gene_id).
     """
-    seen: dict[str, int] = {}  # name → canonical id
-    remap: dict[int, int] = {}
+    seen: set[tuple[int, int]] = set()
+    remap: dict[tuple[int, int], int] = {}
     unique_rows: list[tuple] = []
 
     for row in data["protein2entrez"]:
-        old_id, gene_id, name = int(row[0]), int(row[1]), row[2]
-        joint_key = str(gene_id) + ":" + name
-        if joint_key in seen:
-            remap[old_id] = seen[joint_key]
+        key = (int(row[0]), int(row[1]))
+        if key in seen:
+            remap[key] = 1
         else:
-            seen[joint_key] = old_id
+            seen.add(key)
             unique_rows.append(row)
 
     if not remap:
         return remap
 
-    # Not referenced in any other classes
-
     data["protein2entrez"] = unique_rows
-
     return remap
 
 
-def _deduplicate_tissue_mapping(data: dict[str, list[tuple]]) -> dict[int, int]:
+def _deduplicate_tissue_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[tuple[int, int], int]:
     """
-    Merge protein-tissue mapping rows with the same protein_id and tissue_id into one (keep lowest id).
-    Returns {joint_key: joint_key}.
+    Drop duplicate (protein_id, tissue_id) pairs in protein2tissue.
+
+    The ProteinTissue model has a unique constraint on (protein, tissue).
+    After protein dedup, two rows can collapse onto the same canonical pair
+    and would crash bulk_create.
+
+    NOTE: an earlier version keyed by ``str(pid) + "0" + str(tid)`` which is
+    ambiguous (``pid=1, tid=102`` and ``pid=101, tid=2`` both collapse to
+    "10102"). The key is now a proper tuple so there is no collision.
     """
-    seen: dict[str, int] = {}  # name → canonical id
-    remap: dict[int, int] = {}
+    seen: set[tuple[int, int]] = set()
+    remap: dict[tuple[int, int], int] = {}
     unique_rows: list[tuple] = []
 
     for row in data["protein2tissue"]:
-        protein_id, tissue_id = int(row[0]), int(row[1])
-        joint_key = str(protein_id) + "0" + str(tissue_id)
-        if joint_key in seen:
-            remap[int(joint_key)] = int(joint_key)
+        key = (int(row[0]), int(row[1]))
+        if key in seen:
+            remap[key] = 1
         else:
-            seen[joint_key] = 1
+            seen.add(key)
             unique_rows.append(row)
 
     if not remap:
         return remap
 
-    # Not referenced in any other classes
-
     data["protein2tissue"] = unique_rows
-
     return remap
 
 
@@ -342,6 +366,40 @@ def _deduplicate_uniprot_accession_mapping(
 
     data["uniprot_accession2id"] = unique_rows
 
+    return remap
+
+
+def _deduplicate_protein_uniprot_mapping(
+    data: dict[str, list[tuple]],
+) -> dict[tuple[int, str, int], int]:
+    """
+    Drop duplicate (protein_id, uniprot_id, version) triples in protein2uniprot.
+
+    The ProteinUniProt model's unique constraint covers all three columns.
+    After protein dedup two source rows can collapse onto the same canonical
+    triple (e.g. two proteins with the same name pointing at the same UniProt
+    entry) and would crash bulk_create.
+
+    First row wins. Source rows where version is NULL are treated as version=0
+    to match the import coercion in _import_proteins.
+    """
+    seen: set[tuple[int, str, int]] = set()
+    remap: dict[tuple[int, str, int], int] = {}
+    unique_rows: list[tuple] = []
+
+    for row in data["protein2uniprot"]:
+        version = int(row[3]) if row[3] is not None else 0
+        key = (int(row[0]), str(row[1]), version)
+        if key in seen:
+            remap[key] = 1
+        else:
+            seen.add(key)
+            unique_rows.append(row)
+
+    if not remap:
+        return remap
+
+    data["protein2uniprot"] = unique_rows
     return remap
 
 
@@ -555,16 +613,24 @@ def _deduplicate_interaction_effect_mapping(
     return remap
 
 
-def _deduplicate_interactions(data: dict[str, list[tuple]]) -> dict[int, int]:
+def _deduplicate_interactions(
+    data: dict[str, list[tuple]],
+    log: "ImportLog",
+) -> dict[int, int]:
     """
-    After protein deduplication, multiple interactions may map to the same
-    canonical (protein_1_id, protein_2_id) pair.  Keep lowest interaction_id;
-    remap all junction table references so ignore_conflicts doesn't leave
+    After protein dedup multiple source interactions may collapse onto the
+    same canonical (protein_1_id, protein_2_id) pair. Keep lowest
+    interaction_id (and its score), drop the rest, and remap all junction
+    table references to the kept id so ``ignore_conflicts`` doesn't leave
     orphaned junction rows.
+
+    Each dropped interaction is recorded in the log with its full row
+    (id, p1, p2, score) and the id/score of the kept row so the caller
+    can see what alternative score/id was discarded — this is the one
+    piece of real data loss produced by dedup.
     Returns {duplicate_id: canonical_id}.
-    Mutates data["interaction"] and all interaction junction tables.
     """
-    seen: dict[tuple[int, int], int] = {}
+    seen: dict[tuple[int, int], tuple[int, object]] = {}
     remap: dict[int, int] = {}
 
     for r in data["interaction"]:
@@ -573,9 +639,17 @@ def _deduplicate_interactions(data: dict[str, list[tuple]]) -> dict[int, int]:
             p1, p2 = p2, p1
         pair = (p1, p2)
         if pair in seen:
-            remap[iid] = seen[pair]
+            kept_id, kept_score = seen[pair]
+            remap[iid] = kept_id
+            log.record(
+                "interaction_merged",
+                "interaction",
+                r,
+                f"canonical pair {pair} already taken by id={kept_id} "
+                f"(kept score={kept_score}); this row dropped",
+            )
         else:
-            seen[pair] = iid
+            seen[pair] = (iid, r[3])
 
     if not remap:
         return remap
@@ -603,10 +677,15 @@ def _deduplicate_interactions(data: dict[str, list[tuple]]) -> dict[int, int]:
     return remap
 
 
-def _filter_orphaned_protein_refs(data: dict[str, list[tuple]]) -> dict[str, int]:
+def _filter_orphaned_protein_refs(
+    data: dict[str, list[tuple]],
+    log: "ImportLog",
+) -> dict[str, int]:
     """
     Drop rows that reference a protein_id not present in data["protein"].
-    Returns {table_name: dropped_count} for any table where rows were removed.
+    Each dropped row is logged individually (category=orphan_protein) so the
+    caller can inspect which protein_id was missing and which row was lost.
+    Returns {table_name: dropped_count} for summary-print convenience.
     Mutates data in-place.
     """
     valid_pids: set[int] = {int(r[0]) for r in data["protein"]}
@@ -614,9 +693,20 @@ def _filter_orphaned_protein_refs(data: dict[str, list[tuple]]) -> dict[str, int
 
     # Tables where col 0 is protein_id
     for tbl in ("protein2uniprot", "protein2entrez", "protein2tissue"):
-        before = len(data[tbl])
-        data[tbl] = [r for r in data[tbl] if int(r[0]) in valid_pids]
-        n = before - len(data[tbl])
+        kept: list[tuple] = []
+        for r in data[tbl]:
+            pid = int(r[0])
+            if pid in valid_pids:
+                kept.append(r)
+            else:
+                log.record(
+                    "orphan_protein",
+                    tbl,
+                    r,
+                    f"protein_id={pid} absent from protein table",
+                )
+        n = len(data[tbl]) - len(kept)
+        data[tbl] = kept
         if n:
             dropped[tbl] = n
 
@@ -627,11 +717,21 @@ def _filter_orphaned_protein_refs(data: dict[str, list[tuple]]) -> dict[str, int
         "i2d_interaction",
         "ortho_interaction",
     ):
-        before = len(data[tbl])
-        data[tbl] = [
-            r for r in data[tbl] if int(r[1]) in valid_pids and int(r[2]) in valid_pids
-        ]
-        n = before - len(data[tbl])
+        kept = []
+        for r in data[tbl]:
+            p1, p2 = int(r[1]), int(r[2])
+            if p1 in valid_pids and p2 in valid_pids:
+                kept.append(r)
+            else:
+                missing = [p for p in (p1, p2) if p not in valid_pids]
+                log.record(
+                    "orphan_protein",
+                    tbl,
+                    r,
+                    f"missing protein_id(s)={missing}",
+                )
+        n = len(data[tbl]) - len(kept)
+        data[tbl] = kept
         if n:
             dropped[tbl] = n
 
@@ -650,22 +750,57 @@ def _filter_orphaned_protein_refs(data: dict[str, list[tuple]]) -> dict[str, int
         "interaction2type",
         "bait_prey_assoc",
     ):
-        before = len(data[tbl])
-        data[tbl] = [r for r in data[tbl] if int(r[0]) in valid_iids]
-        n = before - len(data[tbl])
+        kept = []
+        for r in data[tbl]:
+            iid = int(r[0])
+            if iid in valid_iids:
+                kept.append(r)
+            else:
+                log.record(
+                    "orphan_protein",
+                    tbl,
+                    r,
+                    f"parent interaction_id={iid} dropped earlier (orphan protein)",
+                )
+        n = len(data[tbl]) - len(kept)
+        data[tbl] = kept
         if n:
             dropped[tbl] = n
 
     return dropped
 
 
-def _filter_orphaned_lookup_refs(data: dict[str, list[tuple]]) -> dict[str, int]:
+def _filter_orphaned_lookup_refs(
+    data: dict[str, list[tuple]],
+    log: "ImportLog",
+) -> dict[str, int]:
+    """
+    Drop junction rows that reference a lookup id (tissue / source / species /
+    experiment / interaction-type / GO / MeSH) absent from the corresponding
+    master table. Each dropped row is logged individually
+    (category=orphan_lookup) so the missing id can be inspected.
+    """
     dropped: dict[str, int] = {}
 
-    def _filter(tbl: str, col: int, valid: set) -> None:
-        before = len(data[tbl])
-        data[tbl] = [r for r in data[tbl] if r[col] in valid]
-        n = before - len(data[tbl])
+    def _filter(tbl: str, col: int, valid: set, lookup_name: str) -> None:
+        kept: list[tuple] = []
+        for r in data[tbl]:
+            v = r[col]
+            try:
+                v_norm = int(v) if not isinstance(v, str) else v
+            except (TypeError, ValueError):
+                v_norm = v
+            if v in valid or v_norm in valid:
+                kept.append(r)
+            else:
+                log.record(
+                    "orphan_lookup",
+                    tbl,
+                    r,
+                    f"{lookup_name}={v!r} absent from {lookup_name} master table",
+                )
+        n = len(data[tbl]) - len(kept)
+        data[tbl] = kept
         if n:
             dropped[tbl] = n
 
@@ -677,14 +812,14 @@ def _filter_orphaned_lookup_refs(data: dict[str, list[tuple]]) -> dict[str, int]
     valid_go = {r[0] for r in data["GO_slim_term"]}
     valid_mesh = {r[0] for r in data["mesh_term"]}
 
-    _filter("protein2tissue", 1, valid_tissue)
-    _filter("interaction2source", 1, valid_source)
-    _filter("interaction2link", 2, valid_source)
-    _filter("interaction2experiment", 1, valid_exp)
-    _filter("interaction2type", 1, valid_inttype)
-    _filter("interaction2GO", 1, valid_go)
-    _filter("interaction2mesh", 1, valid_mesh)
-    _filter("interaction2species", 1, valid_species)
+    _filter("protein2tissue", 1, valid_tissue, "tissue_id")
+    _filter("interaction2source", 1, valid_source, "source_id")
+    _filter("interaction2link", 2, valid_source, "source_id")
+    _filter("interaction2experiment", 1, valid_exp, "experiment_type_id")
+    _filter("interaction2type", 1, valid_inttype, "interaction_type_id")
+    _filter("interaction2GO", 1, valid_go, "go_term_id")
+    _filter("interaction2mesh", 1, valid_mesh, "mesh_term_number")
+    _filter("interaction2species", 1, valid_species, "species_id")
 
     return dropped
 
@@ -724,16 +859,62 @@ def parse_dump(path: Path) -> dict[str, list[tuple]]:
 
 
 class ImportLog:
+    """
+    Per-row log of data losses and alterations.
+
+    Writes a markdown pipe-table to `--log-file` so the user can open
+    the file and inspect exactly which values were dropped or changed.
+    Each row = one lost / altered value. Columns:
+      category       — classification (see module docstring).
+      source_table   — old-schema table the value came from.
+      lost_row       — JSON of the full source row (or a descriptive dict
+                       when the loss is columnar rather than row-level).
+      reason         — free-text explanation of what was done / why.
+    """
+
+    COLS: tuple[str, ...] = ("category", "source_table", "lost_row", "reason")
+
     def __init__(self, path: Path) -> None:
         self._path = path
-        self._entries: list[dict] = []
+        self._entries: list[tuple[str, str, str, str]] = []
 
-    def record(self, table: str, row: object, reason: str) -> None:
-        self._entries.append({"table": table, "row": row, "reason": reason})
+    def record(
+        self,
+        category: str,
+        table: str,
+        row: object,
+        reason: str,
+    ) -> None:
+        self._entries.append((category, table, self._serialize(row), reason))
+
+    @staticmethod
+    def _serialize(row: object) -> str:
+        if isinstance(row, tuple):
+            row = list(row)
+        return json.dumps(row, default=str, ensure_ascii=False)
 
     def flush(self) -> int:
-        with open(self._path, "w") as fh:
-            json.dump(self._entries, fh, indent=2, default=str)
+        def esc(s: str) -> str:
+            return str(s).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+        lines = [
+            "| " + " | ".join(self.COLS) + " |",
+            "|" + "|".join("---" for _ in self.COLS) + "|",
+        ]
+        for entry in self._entries:
+            lines.append("| " + " | ".join(esc(c) for c in entry) + " |")
+
+        with open(self._path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        return len(self._entries)
+
+    def category_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for cat, _, _, _ in self._entries:
+            counts[cat] = counts.get(cat, 0) + 1
+        return counts
+
+    def __len__(self) -> int:
         return len(self._entries)
 
 
@@ -845,113 +1026,27 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Parsing {path} …")
         data = parse_dump(path)
-        merged = _deduplicate_sources(data)
-        if merged:
-            self.stdout.write(
-                self.style.WARNING(f"  Merged duplicate source IDs: {merged}")
-            )
-        merged_proteins = _deduplicate_proteins(data)
-        if merged_proteins:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate protein IDs: {len(merged_proteins)}"
-                )
-            )
-        merged_entrez = _deduplicate_entrez_mapping(data)
-        if merged_entrez:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate protein-entrez mapping: {len(merged_entrez)}"
-                )
-            )
-        merged_tissue = _deduplicate_tissue_mapping(data)
-        if merged_tissue:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate protein-tissue mapping: {len(merged_tissue)}"
-                )
-            )
-        merged_uniprot = _deduplicate_uniprot_accession_mapping(data)
-        if merged_uniprot:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate uniprot-accession mapping: {len(merged_uniprot)}"
-                )
-            )
-        merged_interactions = _deduplicate_interactions(data)
-        if merged_interactions:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate interaction pairs: {len(merged_interactions)}"
-                )
-            )
-        merged_interaction_go_mapping = _deduplicate_interaction_go_mapping(data)
-        if merged_interaction_go_mapping:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate interaction-go mapping: {len(merged_interaction_go_mapping)}"
-                )
-            )
-        merged_interaction_pmid_mapping = _deduplicate_interaction_pmid_mapping(data)
-        if merged_interaction_pmid_mapping:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate interaction-pmid mapping: {len(merged_interaction_pmid_mapping)}"
-                )
-            )
-        merged_interaction_source_mapping = _deduplicate_interaction_source_mapping(
-            data
-        )
-        if merged_interaction_source_mapping:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate interaction-source mapping: {len(merged_interaction_source_mapping)}"
-                )
-            )
-        merged_interaction_species_mapping = _deduplicate_interaction_species_mapping(
-            data
-        )
-        if merged_interaction_species_mapping:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate interaction-species mapping: {len(merged_interaction_species_mapping)}"
-                )
-            )
-        merged_interaction_type_mapping = _deduplicate_interaction_type_mapping(data)
-        if merged_interaction_type_mapping:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate interaction-type mapping: {len(merged_interaction_type_mapping)}"
-                )
-            )
-        merged_interaction_experiment_mapping = (
-            _deduplicate_interaction_experiment_mapping(data)
-        )
-        if merged_interaction_experiment_mapping:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate interaction-experiment mapping: {len(merged_interaction_experiment_mapping)}"
-                )
-            )
-        merged_interaction_effect_mapping = _deduplicate_interaction_effect_mapping(
-            data
-        )
-        if merged_interaction_effect_mapping:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Merged duplicate interaction-effect mapping: {len(merged_interaction_effect_mapping)}"
-                )
-            )
-        orphaned = _filter_orphaned_protein_refs(data)
-        if orphaned:
-            self.stdout.write(
-                self.style.WARNING(f"  Dropped orphaned protein refs: {orphaned}")
-            )
-        orphaned_lookup = _filter_orphaned_lookup_refs(data)
-        if orphaned_lookup:
-            self.stdout.write(
-                self.style.WARNING(f"  Dropped orphaned lookup refs: {orphaned_lookup}")
-            )
+
+        # Dedup passes — silent. They merge by natural key, so no info loss
+        # except for _deduplicate_interactions, which logs per dropped row.
+        _deduplicate_sources(data)
+        _deduplicate_proteins(data)
+        _deduplicate_entrez_mapping(data)
+        _deduplicate_tissue_mapping(data)
+        _deduplicate_protein_uniprot_mapping(data)
+        _deduplicate_uniprot_accession_mapping(data)
+        _deduplicate_interactions(data, log)
+        _deduplicate_interaction_go_mapping(data)
+        _deduplicate_interaction_pmid_mapping(data)
+        _deduplicate_interaction_source_mapping(data)
+        _deduplicate_interaction_species_mapping(data)
+        _deduplicate_interaction_type_mapping(data)
+        _deduplicate_interaction_experiment_mapping(data)
+        _deduplicate_interaction_effect_mapping(data)
+
+        # Orphan filters — log per dropped row.
+        _filter_orphaned_protein_refs(data, log)
+        _filter_orphaned_lookup_refs(data, log)
 
         if dry:
             self.stdout.write(self.style.WARNING("Dry-run — no DB writes."))
@@ -996,9 +1091,14 @@ class Command(BaseCommand):
 
         n_issues = log.flush()
         if n_issues:
+            counts = log.category_counts()
             self.stdout.write(
-                self.style.WARNING(f"{n_issues} issues logged → {options['log_file']}")
+                self.style.WARNING(
+                    f"{n_issues:,} lost / altered values logged → {options['log_file']}"
+                )
             )
+            for cat in sorted(counts):
+                self.stdout.write(f"  {cat:<22} {counts[cat]:>8,}")
         self.stdout.write(self.style.SUCCESS("Import complete."))
 
     # ------------------------------------------------------------------
@@ -1117,7 +1217,26 @@ class Command(BaseCommand):
         self._say(f"  protein:          {len(data['protein']):>8,}")
 
         # Old cols: (protein_id, uniprot_id, uniprot_db_id, version)
-        # uniprot_db_id is discarded — not present in new model.
+        # uniprot_db_id is discarded — not present in new model. Log every
+        # row whose uniprot_db_id was non-NULL so the actually-lost values
+        # are inspectable, plus one summary row.
+        # discarded_db_ids = 0
+        # for r in data["protein2uniprot"]:
+        #    if r[2] is not None:
+        #        log.record(
+        #            "column_discarded",
+        #            "protein2uniprot",
+        #            r,
+        #            f"uniprot_db_id={r[2]!r} dropped — no column in ProteinUniProt",
+        #        )
+        #        discarded_db_ids += 1
+        # if discarded_db_ids:
+        #    log.record(
+        #        "column_discarded",
+        #        "protein2uniprot",
+        #        {"column": "uniprot_db_id", "rows_with_value": discarded_db_ids},
+        #        "summary: total source rows whose uniprot_db_id was lost",
+        #    )
         _bulk(
             ProteinUniProt,
             [
@@ -1133,7 +1252,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             self.style.WARNING(
-                "  Check whether 'version' should be part of unique key proteinUniProt"
+                "Check whether 'version' should be part of unique key proteinUniProt"
             )
         )
         self._say(f"  protein2uniprot:  {len(data['protein2uniprot']):>8,}")
@@ -1147,7 +1266,7 @@ class Command(BaseCommand):
             bs,
             ignore_conflicts=False,
         )
-        self.stdout.write(self.style.WARNING("  ProteinEntrez is not used anywhere"))
+        self.stdout.write(self.style.WARNING("Protein Entrez is not used anywhere"))
         self._say(f"  protein2entrez:   {len(data['protein2entrez']):>8,}")
 
         pt_rows = []
@@ -1210,7 +1329,12 @@ class Command(BaseCommand):
                 p1, p2 = p2, p1
                 swapped.add(iid)
             if score is None:
-                log.record("interaction", list(r), "NULL score imported as 0.0")
+                log.record(
+                    "null_score",
+                    "interaction",
+                    r,
+                    "score was NULL in source — imported as 0.0",
+                )
                 null_score += 1
                 score = 0.0
             objs.append(
@@ -1246,19 +1370,21 @@ class Command(BaseCommand):
         for r in data["interaction2effect"]:
             iid, etype, esrc = int(r[0]), int(r[1]), int(r[2])
             if iid in effect_map:
+                prev_etype, prev_esrc = effect_map[iid]
                 log.record(
+                    "effect_superseded",
                     "interaction2effect",
-                    {"interaction_id": iid, "superseded": list(effect_map[iid])},
-                    "replaced by later row - last-row-wins",
+                    {
+                        "interaction_id": iid,
+                        "superseded_effect_type": prev_etype,
+                        "superseded_effect_source": prev_esrc,
+                        "kept_effect_type": etype,
+                        "kept_effect_source": esrc,
+                    },
+                    "multiple rows for same interaction_id — last-row-wins; "
+                    "earlier (effect_type, effect_source) discarded",
                 )
             effect_map[iid] = (etype, esrc)
-
-        self.stdout.write(
-            self.style.WARNING(
-                "5 Entries with multiple sources in interaction2effect"
-                "8, 58, 147, 186, 199"
-            )
-        )
 
         if not effect_map:
             return
@@ -1434,9 +1560,11 @@ class Command(BaseCommand):
                 )
                 if hit is None:
                     log.record(
+                        "species_unmatched",
                         "interaction2link",
                         {"species_text": text},
-                        "no Species row with name starting with this text → species set NULL",
+                        "no Species row with name starting with this text → "
+                        "cross_reference.species_id set NULL",
                     )
                 species_cache[text] = hit
             return species_cache[text]
@@ -1531,9 +1659,11 @@ class Command(BaseCommand):
                 oi_id = pair_to_oi_id.get(pair)
                 if oi_id is None:
                     log.record(
+                        "ortho_unresolved",
                         int_table,
-                        list(pair),
-                        "OrthologInteraction not found after bulk_create — species skipped",
+                        {"pair": list(pair), "species_ids": sorted(species_ids)},
+                        "OrthologInteraction row not found after bulk_create — "
+                        "attached species rows skipped",
                     )
                     continue
                 for sid in species_ids:
@@ -1568,6 +1698,18 @@ class Command(BaseCommand):
             name="Unknown (legacy import)",
             defaults={"psi_mi_code": "", "quality_score": 0.0},
         )
+        if data["bait_prey_assoc"]:
+            log.record(
+                "placeholder_exp_type",
+                "bait_prey_assoc",
+                {
+                    "rows": len(data["bait_prey_assoc"]),
+                    "placeholder_experiment_type_id": placeholder.id,
+                    "placeholder_name": placeholder.name,
+                },
+                "source has no method/detection info — every BaitPreyTest gets "
+                "the placeholder ExperimentType and detection=True",
+            )
 
         # Group by (interaction_id, direction) → set of pmids
         groups: dict[tuple[int, int], set[int]] = defaultdict(set)
@@ -1598,9 +1740,14 @@ class Command(BaseCommand):
                 )
             except Exception as exc:
                 log.record(
+                    "bait_prey_error",
                     "bait_prey_assoc",
-                    {"interaction_id": interaction_id, "direction": direction},
-                    str(exc),
+                    {
+                        "interaction_id": interaction_id,
+                        "direction": direction,
+                        "pmids": sorted(pmids),
+                    },
+                    f"BaitPreyAssociation.get_or_create raised: {exc!r}",
                 )
                 continue
             tests = [pmid_to_test[p] for p in pmids if p in pmid_to_test]
