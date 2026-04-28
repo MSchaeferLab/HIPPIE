@@ -66,7 +66,7 @@ class ProteinUniProt(models.Model):
         db_table = "protein2uniprot"
         constraints = [
             models.UniqueConstraint(
-                fields=["protein", "uniprot_id"],
+                fields=["protein", "uniprot_id", "version"],
                 name="protein_to_uniprot_unique",
             ),
         ]

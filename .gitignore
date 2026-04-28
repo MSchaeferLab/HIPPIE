@@ -306,3 +306,6 @@ hippie_django/staticfiles/
 .claude/
 .mcp.json
 .pre-commit-config.yaml
+
+# Data loading
+hippie_django/data/*.sql
