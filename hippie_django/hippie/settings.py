@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -129,3 +130,15 @@ DJANGO_VITE = {
 }
 
 default_auto_field = "django.db.models.BigAutoField"
+
+# ── Media files (split zips) ───────────────────────────────────────────────
+MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL  = "/media/"
+
+# ── Celery ─────────────────────────────────────────────────────────────────
+CELERY_BROKER_URL     = "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+CELERY_TASK_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT  = ["json"]
+# Uncomment to run tasks synchronously (no Redis required for dev/testing):
+# CELERY_TASK_ALWAYS_EAGER = True

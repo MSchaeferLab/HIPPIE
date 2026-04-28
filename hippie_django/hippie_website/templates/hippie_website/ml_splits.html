@@ -1,0 +1,23 @@
+{% extends "hippie_website/base.html" %}
+{% load django_vite %}
+{% block title %}Generate ML Splits{% endblock %}
+{% block nav_browse %}active{% endblock %}
+
+{% block content %}
+<script>
+  window.SPLITS_CONFIG = {
+    createUrl:        "{% url 'hippie_website:browse_splits_create' %}",
+    statusBase:       "{% url 'hippie_website:browse_splits_status' job_id='00000000-0000-0000-0000-000000000000' %}".replace("/00000000-0000-0000-0000-000000000000/", "/"),
+    browseUrl:        "{% url 'hippie_website:browse' %}",
+    tissue:           "{{ tissue|escapejs }}",
+    source:           "{{ source|escapejs }}",
+    minScore:         "{{ min_score|escapejs }}",
+    interactionTypes: {{ interaction_types|safe }},
+  };
+</script>
+<div id="hippie-ml-splits-app"></div>
+{% endblock %}
+
+{% block scripts %}
+{% vite_asset "frontend/ml_splits.jsx" %}
+{% endblock %}

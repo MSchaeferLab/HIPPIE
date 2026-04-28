@@ -16,7 +16,7 @@ All database access goes through the custom managers defined in managers.py:
 
 import json
 from django.db.models import Q, Prefetch
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
@@ -31,7 +31,12 @@ from .models import (
     UniProtAccession,
     Tissue,
     NonInteraction,
+    SplitJob,
+    InteractionType
 )
+
+from .tasks import run_split_job
+
 
 
 # ---------------------------------------------------------------------------
@@ -1443,6 +1448,81 @@ def protein_detail_view(request, pk: int):
 
 
 # ---------------------------------------------------------------------------
+# Static pages
+# ---------------------------------------------------------------------------
+
+
+@require_GET
+def download_view(request):
+    return render(request, "hippie_website/download.html", {})
+
+
+@require_GET
+def information_view(request):
+    return render(request, "hippie_website/information.html", {})
+
+# ---------------------------------------------------------------------------
+# ML splits helpers + views
+# ---------------------------------------------------------------------------
+
+def _validate_split_params(body: dict) -> dict:
+    from django.core.exceptions import BadRequest
+    try:
+        params = {
+            "min_score":  float(body.get("min_score", 0.0)),
+            "tissue_ids": [int(x) for x in body.get("tissue_ids") or []],
+            "source_ids": [int(x) for x in body.get("source_ids") or []],
+            "type_ids":   [int(x) for x in body.get("type_ids") or []],
+            "neg_ratio":  float(body.get("neg_ratio", 1.0)),
+            "seed":       int(body.get("seed", 78539105873)),
+        }
+    except (ValueError, TypeError) as exc:
+        raise BadRequest(str(exc))
+    if not 0.0 <= params["min_score"] <= 1.0:
+        raise BadRequest("min_score must be between 0.0 and 1.0")
+    if not 0.1 <= params["neg_ratio"] <= 10.0:
+        raise BadRequest("neg_ratio must be between 0.1 and 10.0")
+    return params
+
+
+@require_GET
+def ml_splits_view(request):
+    types = list(InteractionType.objects.values("id", "name"))
+    return render(request, "hippie_website/ml_splits.html", {
+        "interaction_types": types,
+        "tissue":    request.GET.get("tissue", ""),
+        "source":    request.GET.get("source", ""),
+        "min_score": request.GET.get("min_score", "0"),
+    })
+
+
+@require_POST
+def browse_splits_create(request):
+    body = json.loads(request.body)
+    params = _validate_split_params(body)            # raises 400 on bad input
+    job = SplitJob.objects.create(params=params)
+    run_split_job.delay(str(job.id))
+    return JsonResponse({"job_id": str(job.id), "status": job.status}, status=202)
+
+@require_GET
+def browse_splits_status(request, job_id):
+    job = get_object_or_404(SplitJob, pk=job_id)
+    return JsonResponse({
+        "status": job.status, "step": job.step,
+        "progress": job.progress, "summary": job.summary,
+        "error": job.error or None,
+        "download_url": (
+            reverse("hippie_website:browse_splits_download", args=[job.id])
+            if job.status == "DONE" else None
+        ),
+    })
+
+@require_GET
+def browse_splits_download(request, job_id):
+    job = get_object_or_404(SplitJob, pk=job_id, status="DONE")
+    return FileResponse(open(job.zip_path, "rb"),
+                        as_attachment=True,
+                        filename=f"hippie_splits_{job_id}.zip")# ---------------------------------------------------------------------------
 # Static pages
 # ---------------------------------------------------------------------------
 

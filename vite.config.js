@@ -14,6 +14,7 @@ export default defineConfig({
         index:             resolve(__dirname, "frontend/index.jsx"),
         browse:            resolve(__dirname, "frontend/browse.jsx"),
         interaction_query: resolve(__dirname, "frontend/interaction_query.jsx"),
+        ml_splits:         resolve(__dirname, "frontend/ml_splits.jsx"),
       },
     },
   },

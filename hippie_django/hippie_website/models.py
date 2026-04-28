@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from .managers import InteractionManager, ProteinManager
 
@@ -693,5 +695,25 @@ class BaitPreyAssociation(models.Model):
             ),
         ]
 
+
     def __str__(self):
         return f"{self.interaction} direction={self.get_direction_display()} tests={self.tests_performed.count()}"
+
+class SplitJob(models.Model):
+    STATUS = [
+        ("PENDING", "PENDING"),
+        ("RUNNING", "RUNNING"),
+        ("DONE", "DONE"),
+        ("FAILED", "FAILED"),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    status = models.CharField(max_length=10, choices=STATUS, default="PENDING")
+    params = models.JSONField()
+    progress = models.FloatField(default=0.0)
+    step = models.CharField(max_length=40, blank=True)
+    zip_path = models.CharField(max_length=512, blank=True)
+    summary = models.JSONField(null=True, blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+

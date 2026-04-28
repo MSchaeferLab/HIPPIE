@@ -29,6 +29,15 @@ python manage.py import_hippie_sql data/mschaefer_hippie_v2_v2-4.sql --log-file 
 
 python manage.py createsuperuser
 npm run build
+```
+
+Start the celery working in a seperate terminal
+```bash
+cd hippie_django
+celery -A hippie worker -l info 2>&1 > celery.log & 
+```
+Start the server in the first terminal
+```bash
 python manage.py runserver
 ```
 
