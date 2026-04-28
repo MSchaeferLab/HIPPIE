@@ -37,12 +37,9 @@ cd hippie_django
 celery -A hippie worker -l info 2>&1 > celery.log & 
 ```
 Start the server in the first terminal
-```
+```bash
 python manage.py runserver
 ```
-
-	
-celery -A hippie worker -l info 2>&1 > celery.log & 
 
 When you change anything in the frontend, you need to run the following command to build the frontend:
 
