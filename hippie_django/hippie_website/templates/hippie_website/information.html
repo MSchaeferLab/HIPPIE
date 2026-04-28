@@ -1,4 +1,203 @@
 {% extends "hippie_website/base.html" %}
 {% block title %}Information{% endblock %}
 {% block react_cdn %}{% endblock %}
-{% block content %}<h2>Information</h2><p>Coming soon.</p>{% endblock %}
+
+{% block content %}
+
+<div class="hippie-hero">
+  <span class="page-eyebrow">HIPPIE</span>
+  <h1>Information &amp;<br /><em>Documentation</em></h1>
+  <p class="page-subtitle">
+    Methodology, confidence scoring, data sources, and citation guidelines.
+  </p>
+</div>
+
+{# ── About ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <span class="section-label">About HIPPIE</span>
+    <p>
+      HIPPIE (<strong>H</strong>uman <strong>I</strong>ntegrated <strong>P</strong>rotein–<strong>P</strong>rotein
+      <strong>I</strong>nteraction r<strong>E</strong>ference) is a scored, integrated resource of human
+      protein–protein interactions (PPIs). It aggregates experimental interaction data from multiple
+      public databases and assigns a unified confidence score to each interaction based on the quality
+      and quantity of supporting evidence.
+    </p>
+    <p class="mb-0 text-muted-sm">
+      HIPPIE is maintained at ExB / TU München. It is freely available for academic use.
+    </p>
+  </div>
+</div>
+
+{# ── Confidence scoring ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <span class="section-label">Confidence Scoring</span>
+    <p>
+      Each interaction is assigned a score between 0 and 1 based on a weighted sum of experimental
+      evidence. The formula accounts for the quality of the detection method, the number of
+      independent studies, and cross-species conservation.
+    </p>
+
+    <div class="formula-box mb-3">
+      score(A, B) = norm( Σ<sub>e</sub> w(e) × n(e) + conservation_bonus )
+      <br />
+      where:
+      <br />
+      &nbsp;&nbsp;w(e) = quality weight of experiment type e (see table below)
+      <br />
+      &nbsp;&nbsp;n(e) = number of independent studies using method e
+      <br />
+      &nbsp;&nbsp;conservation_bonus = 0.1 × (number of orthologous species)
+    </div>
+
+    <span class="section-label section-label--inline">Score thresholds</span>
+    <div class="mt-2">
+      <div class="score-tier">
+        <span class="score-badge score-high">≥ 0.72</span>
+        <div>
+          <strong style="font-size:.875rem;">High confidence</strong>
+          <div class="text-muted-sm">Supported by multiple independent studies using high-quality methods (e.g. X-ray crystallography, SPR).</div>
+        </div>
+      </div>
+      <div class="score-tier">
+        <span class="score-badge score-med">≥ 0.63</span>
+        <div>
+          <strong style="font-size:.875rem;">Medium confidence</strong>
+          <div class="text-muted-sm">Supported by at least one well-validated method or multiple lower-quality studies.</div>
+        </div>
+      </div>
+      <div class="score-tier">
+        <span class="score-badge score-low">&lt; 0.63</span>
+        <div>
+          <strong style="font-size:.875rem;">Low confidence</strong>
+          <div class="text-muted-sm">Single study or low-quality detection method. Use with caution.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Data sources ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <span class="section-label">Data Sources</span>
+    <p class="text-muted-sm mb-3">
+      HIPPIE integrates interaction evidence from the following databases:
+    </p>
+    <div class="source-grid">
+      <div class="source-chip">
+        <strong>BioGRID</strong>
+        <span class="text-muted-sm">General repository</span>
+        <a href="https://thebiogrid.org/" target="_blank" rel="noopener">thebiogrid.org</a>
+      </div>
+      <div class="source-chip">
+        <strong>IntAct</strong>
+        <span class="text-muted-sm">EBI curated database</span>
+        <a href="https://www.ebi.ac.uk/intact/" target="_blank" rel="noopener">ebi.ac.uk/intact</a>
+      </div>
+      <div class="source-chip">
+        <strong>MINT</strong>
+        <span class="text-muted-sm">Molecular interactions</span>
+        <a href="https://mint.bio.uniroma2.it/" target="_blank" rel="noopener">mint.bio.uniroma2.it</a>
+      </div>
+      <div class="source-chip">
+        <strong>HPRD</strong>
+        <span class="text-muted-sm">Human proteome reference</span>
+        <a href="http://www.hprd.org/" target="_blank" rel="noopener">hprd.org</a>
+      </div>
+      <div class="source-chip">
+        <strong>DIP</strong>
+        <span class="text-muted-sm">Database of interacting proteins</span>
+        <a href="https://dip.doe-mbi.ucla.edu/" target="_blank" rel="noopener">dip.doe-mbi.ucla.edu</a>
+      </div>
+      <div class="source-chip">
+        <strong>HomoMINT</strong>
+        <span class="text-muted-sm">Predicted human interactions</span>
+        <a href="https://mint.bio.uniroma2.it/" target="_blank" rel="noopener">mint.bio.uniroma2.it</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Querying ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <span class="section-label">Querying HIPPIE</span>
+    <div class="row g-3">
+
+      <div class="col-md-6">
+        <span class="section-label section-label--inline">Accepted identifier formats</span>
+        <ul class="mt-2 mb-0" style="font-size:.875rem; padding-left:1.25rem; line-height:2;">
+          <li><strong>Gene symbol</strong> — e.g. <code class="mono">BRCA1</code>, <code class="mono">TP53</code></li>
+          <li><strong>UniProt entry ID</strong> — e.g. <code class="mono">BRCA1_HUMAN</code></li>
+          <li><strong>UniProt accession</strong> — e.g. <code class="mono">P38398</code></li>
+          <li><strong>Entrez Gene ID</strong> — e.g. <code class="mono">672</code></li>
+        </ul>
+      </div>
+
+      <div class="col-md-6">
+        <span class="section-label section-label--inline">Query types</span>
+        <ul class="mt-2 mb-0" style="font-size:.875rem; padding-left:1.25rem; line-height:2;">
+          <li><strong>Protein Query</strong> — all interactions for a single protein</li>
+          <li><strong>Interaction Query</strong> — look up specific protein pairs in bulk</li>
+          <li><strong>Network Query</strong> — extract a sub-network from seed proteins</li>
+          <li><strong>Browse</strong> — explore all proteins with filtering</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{# ── REST API ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <span class="section-label">REST API</span>
+    <p class="text-muted-sm mb-3">
+      All query functions are available programmatically via JSON endpoints.
+    </p>
+
+    <div class="hippie-card--muted mb-2">
+      <div style="font-family:var(--font-mono); font-size:.82rem; color:var(--hippie-ink-muted);">GET</div>
+      <code class="mono" style="font-size:.875rem;">/api/query/?q=BRCA1</code>
+      <div class="text-muted-sm mt-1">Returns all interactions for a protein. Accepts any identifier format.</div>
+    </div>
+
+    <div class="hippie-card--muted mb-2">
+      <div style="font-family:var(--font-mono); font-size:.82rem; color:var(--hippie-ink-muted);">POST</div>
+      <code class="mono" style="font-size:.875rem;">/api/interaction/</code>
+      <div class="text-muted-sm mt-1">
+        Look up specific protein pairs. Body: <code class="mono">{"pairs": [{"a": "BRCA1", "b": "TP53", "input_order": 0}]}</code>
+      </div>
+    </div>
+
+    <div class="hippie-card--muted mb-2">
+      <div style="font-family:var(--font-mono); font-size:.82rem; color:var(--hippie-ink-muted);">GET</div>
+      <code class="mono" style="font-size:.875rem;">/api/browse/?offset=0&amp;limit=500&amp;tissue=5&amp;min_score=0.63</code>
+      <div class="text-muted-sm mt-1">Paginated protein list with server-side filtering by tissue, source, degree, and score.</div>
+    </div>
+
+    <div class="hippie-card--muted">
+      <div style="font-family:var(--font-mono); font-size:.82rem; color:var(--hippie-ink-muted);">GET</div>
+      <code class="mono" style="font-size:.875rem;">/api/browse/filters/</code>
+      <div class="text-muted-sm mt-1">Returns available tissue and source database lists for filter dropdowns.</div>
+    </div>
+  </div>
+</div>
+
+{# ── Citation ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <span class="section-label">How to Cite</span>
+    <p class="text-muted-sm mb-3">If you use HIPPIE in your research, please cite:</p>
+    <div class="hippie-card--muted" style="font-size:.875rem; line-height:1.9;">
+      Alanis-Lobato G, Andrade-Navarro MA, Schaefer MH.
+      <strong>HIPPIE v2.0: Enhancing meaningfulness and reliability of protein–protein interaction networks.</strong>
+      <em>Nucleic Acids Research</em>, 2017;45(D1):D408–D414.
+      <a href="https://doi.org/10.1093/nar/gkw985" target="_blank" rel="noopener">doi:10.1093/nar/gkw985</a>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

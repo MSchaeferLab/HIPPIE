@@ -7,30 +7,36 @@ from .models import Tissue, InteractionType
 # ---------------------------------------------------------------------------
 
 SCORE_PRESETS = [
-    ("",     "Custom"),
-    ("0",    "No filter (0.0)"),
+    ("", "Custom"),
+    ("0", "No filter (0.0)"),
     ("0.63", "Medium (0.63)"),
     ("0.72", "High (0.72)"),
 ]
 
 OUTPUT_CHOICES = [
     ("browser_text", "Browser – plain text"),
-    ("browser_vis",  "Browser – network visualization"),
-    ("hippie_tab",   "Download – HIPPIE TAB file"),
-    ("psimitab",     "Download – PSI-MI TAB 2.5"),
+    ("browser_vis", "Browser – network visualization"),
+    ("hippie_tab", "Download – HIPPIE TAB file"),
+    ("psimitab", "Download – PSI-MI TAB 2.5"),
 ]
 
 DIRECTION_CHOICES = [
-    ("none",         "Do not show direction"),
-    ("unweighted_sp","Unweighted shortest paths"),
-    ("weighted_sp",  "Confidence-weighted shortest paths"),
-    ("kegg",         "KEGG direction"),
+    ("none", "Do not show direction"),
+    ("unweighted_sp", "Unweighted shortest paths"),
+    ("weighted_sp", "Confidence-weighted shortest paths"),
+    ("kegg", "KEGG direction"),
 ]
 
 EFFECT_CHOICES = [
-    ("none",      "Do not show effect"),
+    ("none", "Do not show effect"),
     ("predicted", "Show predicted effect"),
-    ("kegg",      "Show KEGG effect"),
+    ("kegg", "Show KEGG effect"),
+]
+
+NEGATOME_EDGES_CHOICES = [
+    ("none", "Only interactions"),
+    ("exclusively", "Only non-interactions"),
+    ("both", "Any edges"),
 ]
 
 
@@ -38,8 +44,8 @@ EFFECT_CHOICES = [
 # Form
 # ---------------------------------------------------------------------------
 
-class NetworkQueryForm(forms.Form):
 
+class NetworkQueryForm(forms.Form):
     # -----------------------------------------------------------------------
     # 1. Query set
     # -----------------------------------------------------------------------
@@ -71,12 +77,12 @@ class NetworkQueryForm(forms.Form):
     layer_0 = forms.BooleanField(
         label="Layer 0 – within input set",
         required=False,
-        initial=True,
+        initial=False,
     )
     layer_1 = forms.BooleanField(
         label="Layer 1 – between input set and HIPPIE",
         required=False,
-        initial=False,
+        initial=True,
     )
     min_ppi = forms.IntegerField(
         label="Minimum PPIs to query set",
@@ -130,10 +136,6 @@ class NetworkQueryForm(forms.Form):
         help_text="Comma-separated MeSH numbers, e.g. C01.252,C01.252.400",
     )
 
-    # -----------------------------------------------------------------------
-    # 4. Edge directionality
-    # -----------------------------------------------------------------------
-
     direction = forms.ChoiceField(
         label="Edge directionality",
         choices=DIRECTION_CHOICES,
@@ -157,10 +159,6 @@ class NetworkQueryForm(forms.Form):
         ),
     )
 
-    # -----------------------------------------------------------------------
-    # 5. Effect display
-    # -----------------------------------------------------------------------
-
     effect = forms.ChoiceField(
         label="Effect display",
         choices=EFFECT_CHOICES,
@@ -168,9 +166,12 @@ class NetworkQueryForm(forms.Form):
         widget=forms.RadioSelect,
     )
 
-    # -----------------------------------------------------------------------
-    # Validation
-    # -----------------------------------------------------------------------
+    negatome_edges = forms.ChoiceField(
+        label="Return experimental non-interactions",
+        choices=NEGATOME_EDGES_CHOICES,
+        initial="none",
+        widget=forms.RadioSelect,
+    )
 
     def clean(self):
         cleaned = super().clean()

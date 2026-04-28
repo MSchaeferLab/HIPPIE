@@ -1,0 +1,99 @@
+{% extends "hippie_website/base.html" %}
+
+{% block title %}
+  {% if is_noninteraction %}Non-Interaction{% else %}Interaction{% endif %} — {{ p1.symbol }} × {{ p2.symbol }}
+{% endblock %}
+
+{% block content %}
+<div>
+  <a href="javascript:history.back()" class="back-link text-muted-sm">
+    <i class="bi bi-arrow-left"></i> Back to results
+  </a>
+
+  {# ── Detail hero ── #}
+  <div class="detail-hero">
+    <p class="section-label mb-2">{{ pair_label|default:"Evidence" }}</p>
+    <h1>
+      <span>{{ p1.symbol }}</span>
+      <span style="color: var(--hippie-ink-muted); font-family: var(--font-mono); font-size: .7em; margin: 0 .5rem;">×</span>
+      <span>{{ p2.symbol }}</span>
+    </h1>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      {% with score=pair_score %}
+        {% if score >= 0.72 %}
+          <span class="score-badge score-high">{{ score|floatformat:4 }}</span>
+        {% elif score >= 0.63 %}
+          <span class="score-badge score-med">{{ score|floatformat:4 }}</span>
+        {% else %}
+          <span class="score-badge score-low">{{ score|floatformat:4 }}</span>
+        {% endif %}
+      {% endwith %}
+      <span class="text-muted-sm">HIPPIE confidence score</span>
+    </div>
+  </div>
+
+  {# ── Protein mini-cards ── #}
+  <div class="row g-3 mb-4">
+    <div class="col-md-6">
+      <div class="protein-card">
+        <p class="section-label mb-1">Interactor A</p>
+        <div class="protein-name">{{ p1.symbol }}</div>
+        <div class="id-row">
+          <dl>
+            <dt>UniProt</dt>
+            <dd>
+              {% if p1.uniprot_id %}
+                <a href="https://www.uniprot.org/uniprot/{{ p1.uniprot_id }}" target="_blank" rel="noopener">
+                  {{ p1.uniprot_id }}
+                </a>
+              {% else %}—{% endif %}
+            </dd>
+          </dl>
+          <dl>
+            <dt>Entrez</dt>
+            <dd>
+              {% if p1.gene_id %}
+                <a href="https://www.ncbi.nlm.nih.gov/gene/{{ p1.gene_id }}" target="_blank" rel="noopener">
+                  {{ p1.gene_id }}
+                </a>
+              {% else %}—{% endif %}
+            </dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="protein-card">
+        <p class="section-label mb-1">Interactor B</p>
+        <div class="protein-name">{{ p2.symbol }}</div>
+        <div class="id-row">
+          <dl>
+            <dt>UniProt</dt>
+            <dd>
+              {% if p2.uniprot_id %}
+                <a href="https://www.uniprot.org/uniprot/{{ p2.uniprot_id }}" target="_blank" rel="noopener">
+                  {{ p2.uniprot_id }}
+                </a>
+              {% else %}—{% endif %}
+            </dd>
+          </dl>
+          <dl>
+            <dt>Entrez</dt>
+            <dd>
+              {% if p2.gene_id %}
+                <a href="https://www.ncbi.nlm.nih.gov/gene/{{ p2.gene_id }}" target="_blank" rel="noopener">
+                  {{ p2.gene_id }}
+                </a>
+              {% else %}—{% endif %}
+            </dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Page-specific evidence cards ── #}
+  {% block detail_content %}{% endblock %}
+
+</div>
+{% endblock %}

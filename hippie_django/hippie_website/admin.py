@@ -10,6 +10,7 @@ from .models import (
     InteractionType,
     Isoform,
     MeSHTerm,
+    NonInteraction,
     OrthologInteraction,
     Protein,
     ProteinEntrez,
@@ -20,6 +21,7 @@ from .models import (
     Species,
     Tissue,
     UniProtAccession,
+    BaitPreyTest,
 )
 
 
@@ -32,11 +34,13 @@ class ProteinAdmin(admin.ModelAdmin):
 
 @admin.register(Isoform)
 class IsoformAdmin(admin.ModelAdmin):
-    list_display = ("id", "uniprot_id", "name", "protein")
-    search_fields = ("uniprot_id", "name", "protein__name")
-    list_filter = ("protein",)
-    list_select_related = ("protein",)
-    autocomplete_fields = ("protein",)
+    list_display = ("id", "isoform_uniprot_id", "name")
+    search_fields = ("isoform_uniprot_id", "name")
+
+    @admin.display(description="Parent protein")
+    def parent_symbol(self, obj):
+        # obj.protein_ptr is the parent Protein instance
+        return obj.protein_ptr.name
 
 
 @admin.register(ProteinUniProt)
@@ -211,12 +215,12 @@ class OrthologInteractionAdmin(admin.ModelAdmin):
 
 @admin.register(BaitPreyAssociation)
 class BaitPreyAssociationAdmin(admin.ModelAdmin):
-    list_display = ("id", "interaction", "pmid", "direction")
+    list_display = ("id", "interaction", "direction")
     search_fields = (
-        "=pmid",
         "=interaction__id",
         "interaction__protein_1__name",
         "interaction__protein_2__name",
+        "=tests_performed__pmid",
     )
     list_filter = ("direction",)
     list_select_related = (
@@ -225,3 +229,20 @@ class BaitPreyAssociationAdmin(admin.ModelAdmin):
         "interaction__protein_2",
     )
     autocomplete_fields = ("interaction",)
+
+
+@admin.register(NonInteraction)
+class NonInteractionAdmin(admin.ModelAdmin):
+    list_display = ("id", "protein_1", "protein_2", "score")
+    search_fields = ("=id", "protein_1__name", "protein_2__name")
+    ordering = ("-score", "id")
+    list_select_related = ("protein_1", "protein_2")
+    autocomplete_fields = ("protein_1", "protein_2")
+
+
+@admin.register(BaitPreyTest)
+class BaitPreyTestAdmin(admin.ModelAdmin):
+    list_display = ("id", "detection", "pmid", "method")
+    search_fields = ("detection", "=pmid", "method")
+    list_filter = ("detection",)
+    ordering = ("-pmid",)

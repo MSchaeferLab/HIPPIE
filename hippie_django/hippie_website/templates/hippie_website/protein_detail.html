@@ -2,58 +2,6 @@
 
 {% block title %}Protein — {{ symbol }}{% endblock %}
 
-{% block extra_styles %}
-  .protein-hero {
-    padding: 2rem 0 1.5rem;
-    border-bottom: 1px solid var(--hippie-border);
-    margin-bottom: 2rem;
-  }
-  .protein-hero h1 {
-    font-size: clamp(1.8rem, 4vw, 2.8rem);
-    margin-bottom: .4rem;
-  }
-  .id-grid {
-    display: flex;
-    gap: 2rem;
-    flex-wrap: wrap;
-    margin-top: .75rem;
-  }
-  .id-grid dt {
-    font-size: .7rem;
-    font-family: var(--font-mono);
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    color: var(--hippie-ink-muted);
-  }
-  .id-grid dd {
-    font-family: var(--font-mono);
-    font-size: .9rem;
-    margin: 0;
-  }
-  .stat-box {
-    background: var(--hippie-surface);
-    border: 1px solid var(--hippie-border);
-    border-radius: var(--radius-md);
-    padding: 1.25rem 1.5rem;
-    text-align: center;
-  }
-  .stat-box .stat-value {
-    font-family: var(--font-display);
-    font-size: 2.2rem;
-    line-height: 1;
-    color: var(--hippie-teal);
-  }
-  .stat-box .stat-label {
-    font-size: .78rem;
-    font-family: var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    color: var(--hippie-ink-muted);
-    margin-top: .35rem;
-  }
-  .back-link { font-size: .85rem; margin-bottom: 1.25rem; display: inline-flex; align-items: center; gap: .35rem; }
-{% endblock %}
-
 {% block content %}
 <div>
   <a href="javascript:history.back()" class="back-link text-muted-sm">

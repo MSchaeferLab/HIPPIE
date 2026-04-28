@@ -12,9 +12,8 @@ Usage in models.py:
 """
 
 from django.db import models
-from django.db.models import Avg, Count, F, Prefetch, Q, Subquery, OuterRef, Sum, Value
+from django.db.models import Count, Prefetch, Q
 from django.db.models.expressions import RawSQL
-from django.db.models.functions import NullIf
 
 
 # ============================================================================
@@ -51,8 +50,25 @@ class ProteinQuerySet(models.QuerySet):
             if qs.exists():
                 return qs
 
-        # 3) UniProt accession  (e.g. "P38398")
+        # 3) Isoform-specific UniProt accession (e.g. "P38398-2")
+        #    Returns the parent Protein queryset so callers stay consistent
         from . import models as m  # late import to avoid circularity
+
+        isoform_pk = None
+        if "isoform" in identifier:
+            isoform_pk = m.Protein.objects.filter(name=identifier).first().pk
+        elif "-" in identifier:
+            isoform_pk = (
+                m.Isoform.objects.filter(isoform_uniprot_id=identifier)
+                .values_list("protein_ptr_id", flat=True)
+                .first()
+            )
+        if isoform_pk is not None:
+            qs = self.filter(pk=isoform_pk)
+            if qs.exists():
+                return qs
+
+        # 4) UniProt accession  (e.g. "P38398")
 
         uniprot_id = (
             m.UniProtAccession.objects.filter(accession=identifier)
@@ -64,7 +80,7 @@ class ProteinQuerySet(models.QuerySet):
             if qs.exists():
                 return qs
 
-        # 4) Gene symbol
+        # 5) Gene symbol
         qs = self.filter(entrez_ids__name__iexact=identifier)
         if qs.exists():
             return qs
@@ -83,19 +99,17 @@ class ProteinQuerySet(models.QuerySet):
         Also select_related the first UniProt ID and Entrez mapping so
         the template can render them without extra queries.
         """
-        return (
-            self.prefetch_related(
-                Prefetch("uniprot_ids", queryset=self._uniprot_qs()),
-                Prefetch("entrez_ids"),
-            )
-            .annotate(
-                degree=Count("interactions_as_1", distinct=True) + Count("interactions_as_2", distinct=True),
-                avg_score=RawSQL(
-                    """(SELECT AVG(score) FROM interaction
+        return self.prefetch_related(
+            Prefetch("uniprot_ids", queryset=self._uniprot_qs()),
+            Prefetch("entrez_ids"),
+        ).annotate(
+            degree=Count("interactions_as_1", distinct=True)
+            + Count("interactions_as_2", distinct=True),
+            avg_score=RawSQL(
+                """(SELECT AVG(score) FROM interaction
                        WHERE protein_1_id = protein.id OR protein_2_id = protein.id)""",
-                    []
-                ),
-            )
+                [],
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -168,7 +182,8 @@ class InteractionQuerySet(models.QuerySet):
     def with_evidence(self) -> "InteractionQuerySet":
         """
         Prefetch all evidence needed for the interaction detail page:
-        sources, publications, experiments, species, cross-references.
+        sources, publications, experiments, species, cross-references,
+        and bait-prey detection tests.
         """
         return self.prefetch_related(
             "sources",
@@ -179,6 +194,8 @@ class InteractionQuerySet(models.QuerySet):
             "cross_references",
             "cross_references__source",
             "cross_references__species",
+            "bait_prey",
+            "bait_prey__tests_performed",
         )
 
     def with_annotations(self) -> "InteractionQuerySet":
@@ -198,9 +215,7 @@ class InteractionQuerySet(models.QuerySet):
 
     def for_protein(self, protein_id: int) -> "InteractionQuerySet":
         """All interactions involving a protein (either side)."""
-        return self.filter(
-            Q(protein_1_id=protein_id) | Q(protein_2_id=protein_id)
-        )
+        return self.filter(Q(protein_1_id=protein_id) | Q(protein_2_id=protein_id))
 
     def for_proteins(self, protein_ids: list[int]) -> "InteractionQuerySet":
         """All interactions involving any of the given proteins."""
@@ -318,7 +333,6 @@ class InteractionManager(models.Manager):
     def get_queryset(self):
         return InteractionQuerySet(self.model, using=self._db)
 
-    # Expose queryset methods on the manager for convenience
     def with_proteins(self):
         return self.get_queryset().with_proteins()
 
