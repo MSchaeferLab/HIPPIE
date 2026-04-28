@@ -309,3 +309,4 @@ hippie_django/staticfiles/
 
 # Data loading
 hippie_django/data/*.sql
+hippie_django/media

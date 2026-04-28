@@ -802,6 +802,29 @@ a:hover { color: var(--hippie-accent); text-decoration: underline; }
 }
 
 /* ==========================================================
+   ML Splits page
+   ========================================================== */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  background: var(--hippie-teal-soft);
+  border: 1px solid var(--hippie-teal);
+  border-radius: 100px;
+  color: var(--hippie-teal);
+  font-size: .78rem;
+  font-weight: 600;
+  padding: .15rem .65rem;
+  font-family: var(--font-mono);
+}
+.filter-chip.none {
+  background: var(--hippie-bg);
+  border-color: var(--hippie-border);
+  color: var(--hippie-ink-muted);
+}
+
+
+/* ==========================================================
    Information page
    ========================================================== */
 .info-section { margin-bottom: 2.5rem; }

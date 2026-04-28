@@ -672,7 +672,7 @@ class BaitPreyAssociation(models.Model):
     )
     direction = models.SmallIntegerField(
         choices=Directions.choices,
-        help_text="1 = protein_1 is bait, -1 = protein_2 is bait",,
+        help_text="1 = protein_1 is bait, -1 = protein_2 is bait",
     )
 
     tests_performed = models.ManyToManyField(

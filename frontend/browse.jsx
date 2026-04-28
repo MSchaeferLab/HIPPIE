@@ -7,6 +7,7 @@ const {
   filterMetaUrl,
   proteinDetailUrl,
   proteinQueryUrl,
+  mlSplitsUrl,
 } = window.HIPPIE_BROWSE_CONFIG;
 
 const PAGE_SIZE  = 50;
@@ -178,6 +179,15 @@ function App() {
   };
   const hasActiveFilters = filters.tissue || filters.source || filters.minDegree > 0 || filters.minScore > 0;
 
+  function handleGenerateSplits() {
+    const params = new URLSearchParams();
+    if (filters.tissue)       params.set("tissue",    filters.tissue);
+    if (filters.source)       params.set("source",    filters.source);
+    if (filters.minScore > 0) params.set("min_score", filters.minScore);
+    const qs = params.toString();
+    window.location.href = mlSplitsUrl + (qs ? "?" + qs : "");
+  }
+
   return (
     <div>
       <div className="hippie-hero">
@@ -247,6 +257,16 @@ function App() {
               {streaming && " — still loading…"}
             </span>
           </div>
+          <button
+            onClick={handleGenerateSplits}
+            style={{
+              background:"var(--hippie-teal)",color:"#fff",border:"none",
+              borderRadius:"var(--radius-md)",padding:".45rem 1.1rem",
+              fontWeight:600,fontFamily:"var(--font-body)",fontSize:".88rem",cursor:"pointer",
+            }}
+          >
+            <i className="bi bi-scissors me-1"></i> Generate ML Splits
+          </button>
         </div>
       )}
 
