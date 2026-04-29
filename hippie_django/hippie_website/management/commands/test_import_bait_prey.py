@@ -11,9 +11,9 @@ from hippie_website.models import (
     ExperimentType,
     Interaction,
     Protein,
-    ProteinEntrez,
-    ProteinUniProt,
-    UniProtAccession,
+    # ProteinEntrez,
+    # ProteinUniProt,
+    # UniProtAccession,
 )
 
 from django.core.management.base import BaseCommand, CommandError
@@ -191,9 +191,9 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"Fetching external data for {len(new_names)} new proteins …"
             )
-            self._enrich_proteins(
-                new_names, ProteinEntrez, ProteinUniProt, UniProtAccession
-            )
+            # self._enrich_proteins(
+            #    new_names, ProteinEntrez, ProteinUniProt, UniProtAccession
+            # )
 
         # Name → Protein cache so pass 3 makes no per-row DB lookups
         proteins = {p.name: p for p in Protein.objects.filter(name__in=all_gene_names)}

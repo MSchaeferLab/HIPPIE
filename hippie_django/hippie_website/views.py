@@ -15,7 +15,7 @@ All database access goes through the custom managers defined in managers.py:
 """
 
 import json
-from django.db.models import Q, Prefetch
+from django.db.models import Q
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -27,16 +27,13 @@ from .models import (
     Interaction,
     Isoform,
     Protein,
-    ProteinUniProt,
-    UniProtAccession,
     Tissue,
     NonInteraction,
     SplitJob,
-    InteractionType
+    InteractionType,
 )
 
 from .tasks import run_split_job
-
 
 
 # ---------------------------------------------------------------------------
@@ -48,25 +45,19 @@ def _protein_display(protein: Protein, isoform_uid: str | None = None) -> dict:
     """
     Return a compact serialisable dict for a Protein instance.
 
-    Assumes `uniprot_ids` and `entrez_ids` have already been prefetched
-    (either by the manager's with_proteins() or an explicit prefetch_related).
-    Accessing .all() on a prefetched relation hits the prefetch cache —
-    no extra queries.
+    Assumes `gene` has already been select_related (either by the manager's
+    with_proteins() or an explicit select_related("gene")).
 
     isoform_uid: pass the isoform-specific accession (e.g. "P38398-2") explicitly
     when the protein object was fetched as a Protein (not Isoform) queryset.
     """
-    uniprot = (
-        # prefetch cache is ordered by "-version" when loaded via with_proteins()
-        protein.uniprot_ids.all().first()
-    )
-    entrez = protein.entrez_ids.all().first()
+    gene = protein.gene
     return {
         "id": protein.pk,
         "name": protein.name,
-        "uniprot_id": uniprot.uniprot_id if uniprot else "",
-        "gene_id": entrez.gene_id if entrez else None,
-        "symbol": entrez.name if entrez else protein.name,
+        "uniprot_id": protein.uniprot_accession,
+        "gene_id": gene.entrez_id or None,
+        "symbol": gene.entrez_name or protein.name,
         # isoform_uid is set when this protein is an isoform; None for canonical.
         "isoform_uniprot_id": isoform_uid
         if isoform_uid is not None
@@ -97,43 +88,33 @@ def _protein_ids_from_raw(raw: str) -> tuple[list[int], list[str]]:
 
 def _get_isoforms(protein_pk: int) -> list:
     """
-    Given a canonical protein PK, return all its Isoform objects (with
-    uniprot_ids and entrez_ids prefetched for display).
+    Given a canonical protein PK, return all its Isoform objects.
 
     Returns an empty list when the protein is already an isoform — the
     spec says isoform inputs are never expanded further.
 
     Resolution path:
-        protein_pk → ProteinUniProt (entry names)
-                   → UniProtAccession (accessions, e.g. "P38398")
+        protein_pk → Protein.uniprot_accession (e.g. "P38398")
                    → Isoform.isoform_uniprot_id startswith accession + "-"
     """
     # If this protein IS itself an isoform, don't expand.
     if Isoform.objects.filter(protein_ptr_id=protein_pk).exists():
         return []
 
-    uniprot_entry_ids = list(
-        ProteinUniProt.objects.filter(protein_id=protein_pk).values_list(
-            "uniprot_id", flat=True
+    try:
+        accession = Protein.objects.values_list("uniprot_accession", flat=True).get(
+            pk=protein_pk
         )
-    )
-    if not uniprot_entry_ids:
+    except Protein.DoesNotExist:
         return []
 
-    accessions = list(
-        UniProtAccession.objects.filter(uniprot_id__in=uniprot_entry_ids).values_list(
-            "accession", flat=True
-        )
-    )
-    if not accessions:
+    if not accession:
         return []
-
-    iso_q = Q()
-    for acc in accessions:
-        iso_q |= Q(isoform_uniprot_id__startswith=acc + "-")
 
     return list(
-        Isoform.objects.filter(iso_q).prefetch_related("uniprot_ids", "entrez_ids")
+        Isoform.objects.filter(
+            isoform_uniprot_id__startswith=accession + "-"
+        ).select_related("gene")
     )
 
 
@@ -202,7 +183,7 @@ def protein_query_api(request):
         )
 
     # ── Resolve identifier → Protein ──────────────────────────────────
-    proteins = Protein.objects.resolve(q).prefetch_related("uniprot_ids", "entrez_ids")
+    proteins = Protein.objects.resolve(q).select_related("gene")
 
     if not proteins.exists():
         return JsonResponse(
@@ -266,18 +247,8 @@ def protein_query_api(request):
             NonInteraction.objects.filter(
                 Q(protein_1_id__in=protein_pks) | Q(protein_2_id__in=protein_pks)
             )
-            .select_related("protein_1", "protein_2")
-            .prefetch_related(
-                Prefetch(
-                    "protein_1__uniprot_ids",
-                    queryset=ProteinUniProt.objects.order_by("-version"),
-                ),
-                Prefetch("protein_1__entrez_ids"),
-                Prefetch(
-                    "protein_2__uniprot_ids",
-                    queryset=ProteinUniProt.objects.order_by("-version"),
-                ),
-                Prefetch("protein_2__entrez_ids"),
+            .select_related(
+                "protein_1", "protein_1__gene", "protein_2", "protein_2__gene"
             )
             .order_by("-score")
         )
@@ -455,16 +426,8 @@ def _resolve_interaction_pair(input_a: str, input_b: str, input_order: int) -> d
         "detail_url": "",
     }
 
-    protein_a = (
-        Protein.objects.resolve(input_a)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-        .first()
-    )
-    protein_b = (
-        Protein.objects.resolve(input_b)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-        .first()
-    )
+    protein_a = Protein.objects.resolve(input_a).select_related("gene").first()
+    protein_b = Protein.objects.resolve(input_b).select_related("gene").first()
 
     if protein_a is None or protein_b is None:
         return NOT_FOUND
@@ -542,16 +505,8 @@ def _resolve_noninteraction_pair(input_a: str, input_b: str, input_order: int) -
         "detail_url": "",
     }
 
-    protein_a = (
-        Protein.objects.resolve(input_a)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-        .first()
-    )
-    protein_b = (
-        Protein.objects.resolve(input_b)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-        .first()
-    )
+    protein_a = Protein.objects.resolve(input_a).select_related("gene").first()
+    protein_b = Protein.objects.resolve(input_b).select_related("gene").first()
 
     if protein_a is None or protein_b is None:
         return NOT_FOUND
@@ -618,16 +573,8 @@ def _resolve_interaction_pair_with_isoforms(
     isoform_cache: a per-request dict[protein_pk -> list[Isoform]] to avoid
     repeated DB lookups when the same protein appears in multiple pairs.
     """
-    protein_a = (
-        Protein.objects.resolve(input_a)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-        .first()
-    )
-    protein_b = (
-        Protein.objects.resolve(input_b)
-        .prefetch_related("uniprot_ids", "entrez_ids")
-        .first()
-    )
+    protein_a = Protein.objects.resolve(input_a).select_related("gene").first()
+    protein_b = Protein.objects.resolve(input_b).select_related("gene").first()
 
     if protein_a is None or protein_b is None:
         return [_resolve_interaction_pair(input_a, input_b, input_order)]
@@ -647,10 +594,7 @@ def _resolve_interaction_pair_with_isoforms(
     # Load all relevant proteins in one query for display --------------------
     all_pks = list(set(a_pks + b_pks))
     proteins_map: dict[int, Protein] = {
-        p.pk: p
-        for p in Protein.objects.filter(pk__in=all_pks).prefetch_related(
-            "uniprot_ids", "entrez_ids"
-        )
+        p.pk: p for p in Protein.objects.filter(pk__in=all_pks).select_related("gene")
     }
 
     # Build isoform UID map (pk → isoform-specific accession) ----------------
@@ -904,14 +848,7 @@ def _run_network_query(params) -> dict:
         layer=layer,
         score_threshold=score_min,
         tissue_ids=tissue_ids,
-    ).prefetch_related(
-        "sources",
-        "experiments",
-        "protein_1__uniprot_ids",
-        "protein_1__entrez_ids",
-        "protein_2__uniprot_ids",
-        "protein_2__entrez_ids",
-    )
+    ).prefetch_related("sources", "experiments")
 
     # -- 6. Directionality filter -----------------------------------------
     directionality = params.get("directionality", "any")
@@ -950,21 +887,19 @@ def _run_network_query(params) -> dict:
     for ix in qs:
         node_ids.add(ix.protein_1_id)
         node_ids.add(ix.protein_2_id)
-        p1_uniprot = ix.protein_1.uniprot_ids.all().first()
-        p1_entrez = ix.protein_1.entrez_ids.all().first()
-        p2_uniprot = ix.protein_2.uniprot_ids.all().first()
-        p2_entrez = ix.protein_2.entrez_ids.all().first()
+        p1 = ix.protein_1
+        p2 = ix.protein_2
         interactions.append(
             {
                 "interaction_id": ix.pk,
-                "protein_a": ix.protein_1.name,
-                "uniprot_a": p1_uniprot.uniprot_id if p1_uniprot else "",
-                "entrez_a": p1_entrez.gene_id if p1_entrez else "",
-                "gene_name_a": p1_entrez.name if p1_entrez else ix.protein_1.name,
-                "protein_b": ix.protein_2.name,
-                "uniprot_b": p2_uniprot.uniprot_id if p2_uniprot else "",
-                "entrez_b": p2_entrez.gene_id if p2_entrez else "",
-                "gene_name_b": p2_entrez.name if p2_entrez else ix.protein_2.name,
+                "protein_a": p1.name,
+                "uniprot_a": p1.uniprot_accession,
+                "entrez_a": p1.gene.entrez_id or "",
+                "gene_name_a": p1.gene.entrez_name or p1.name,
+                "protein_b": p2.name,
+                "uniprot_b": p2.uniprot_accession,
+                "entrez_b": p2.gene.entrez_id or "",
+                "gene_name_b": p2.gene.entrez_name or p2.name,
                 "score": round(ix.score, 4),
                 "source_count": ix.sources.all().count(),
                 "experiment_count": ix.experiments.all().count(),
@@ -1050,8 +985,7 @@ def browse_api(request):
         ``interaction`` and its indexes — the DB never has to JOIN
         ``protein`` against ``interaction`` twice with a GROUP BY.
     """
-    from .models import ProteinUniProt
-    from django.db.models import Prefetch, Q as _Q
+    from django.db.models import Q as _Q
 
     # ── Parse params ────────────────────────────────────────────────────
     try:
@@ -1142,16 +1076,9 @@ def browse_api(request):
     if not pid_slice:
         return JsonResponse({"total": total, "proteins": []})
 
-    # ── Fetch proteins w/ prefetched identifier mappings ────────────────
+    # ── Fetch proteins w/ gene select_related ───────────────────────────
     proteins_by_pk = {
-        p.pk: p
-        for p in Protein.objects.filter(pk__in=pid_slice).prefetch_related(
-            Prefetch(
-                "uniprot_ids",
-                queryset=ProteinUniProt.objects.order_by("-version"),
-            ),
-            Prefetch("entrez_ids"),
-        )
+        p.pk: p for p in Protein.objects.filter(pk__in=pid_slice).select_related("gene")
     }
 
     # ── Build response in slice order ───────────────────────────────────
@@ -1169,17 +1096,12 @@ def browse_api(request):
         unique_count = c1 + c2 - cl
         avg = round((s1 + s2 - sl) / unique_count, 4) if unique_count > 0 else None
 
-        uniprot_list = list(p.uniprot_ids.all())
-        entrez_list = list(p.entrez_ids.all())
-        uniprot = uniprot_list[0] if uniprot_list else None
-        entrez = entrez_list[0] if entrez_list else None
-
         proteins.append(
             {
                 "id": pid,
-                "symbol": entrez.name if entrez else p.name,
-                "uniprot_id": uniprot.uniprot_id if uniprot else "",
-                "entrez_id": entrez.gene_id if entrez else None,
+                "symbol": p.gene.entrez_name or p.name,
+                "uniprot_id": p.uniprot_accession,
+                "entrez_id": p.gene.entrez_id or None,
                 "degree": degree,
                 "avg_score": avg,
             }
@@ -1300,12 +1222,6 @@ def interaction_detail_view(request, pk: int):
         pk=pk,
     )
 
-    # Convenience accessors — all relations are prefetched, no extra queries.
-    p1_uniprot = interaction.protein_1.uniprot_ids.all().first()
-    p2_uniprot = interaction.protein_2.uniprot_ids.all().first()
-    p1_entrez = interaction.protein_1.entrez_ids.all().first()
-    p2_entrez = interaction.protein_2.entrez_ids.all().first()
-
     # Compute bait-prey detection stats from prefetched data (no extra queries).
     all_tests = [
         test
@@ -1315,19 +1231,21 @@ def interaction_detail_view(request, pk: int):
     bait_prey_total_tested = len(all_tests)
     bait_prey_times_observed = sum(1 for t in all_tests if t.detection)
 
+    p1 = interaction.protein_1
+    p2 = interaction.protein_2
     context = {
         "interaction": interaction,
         "p1": {
-            "protein": interaction.protein_1,
-            "uniprot_id": p1_uniprot.uniprot_id if p1_uniprot else "",
-            "gene_id": p1_entrez.gene_id if p1_entrez else None,
-            "symbol": p1_entrez.name if p1_entrez else interaction.protein_1.name,
+            "protein": p1,
+            "uniprot_id": p1.uniprot_accession,
+            "gene_id": p1.gene.entrez_id or None,
+            "symbol": p1.gene.entrez_name or p1.name,
         },
         "p2": {
-            "protein": interaction.protein_2,
-            "uniprot_id": p2_uniprot.uniprot_id if p2_uniprot else "",
-            "gene_id": p2_entrez.gene_id if p2_entrez else None,
-            "symbol": p2_entrez.name if p2_entrez else interaction.protein_2.name,
+            "protein": p2,
+            "uniprot_id": p2.uniprot_accession,
+            "gene_id": p2.gene.entrez_id or None,
+            "symbol": p2.gene.entrez_name or p2.name,
         },
         # All prefetched — .all() hits the cache.
         "sources": interaction.sources.all(),
@@ -1357,28 +1275,13 @@ def noninteraction_detail_view(request, pk: int):
     """
     noninteraction = get_object_or_404(
         NonInteraction.objects.select_related(
-            "protein_1", "protein_2"
+            "protein_1", "protein_1__gene", "protein_2", "protein_2__gene"
         ).prefetch_related(
-            Prefetch(
-                "protein_1__uniprot_ids",
-                queryset=ProteinUniProt.objects.order_by("-version"),
-            ),
-            Prefetch("protein_1__entrez_ids"),
-            Prefetch(
-                "protein_2__uniprot_ids",
-                queryset=ProteinUniProt.objects.order_by("-version"),
-            ),
-            Prefetch("protein_2__entrez_ids"),
             "bait_prey",
             "bait_prey__tests_performed",
         ),
         pk=pk,
     )
-
-    p1_uniprot = noninteraction.protein_1.uniprot_ids.all().first()
-    p2_uniprot = noninteraction.protein_2.uniprot_ids.all().first()
-    p1_entrez = noninteraction.protein_1.entrez_ids.all().first()
-    p2_entrez = noninteraction.protein_2.entrez_ids.all().first()
 
     all_tests = [
         test
@@ -1388,19 +1291,21 @@ def noninteraction_detail_view(request, pk: int):
     bait_prey_total_tested = len(all_tests)
     bait_prey_times_observed = sum(1 for t in all_tests if t.detection)
 
+    p1 = noninteraction.protein_1
+    p2 = noninteraction.protein_2
     context = {
         "noninteraction": noninteraction,
         "p1": {
-            "protein": noninteraction.protein_1,
-            "uniprot_id": p1_uniprot.uniprot_id if p1_uniprot else "",
-            "gene_id": p1_entrez.gene_id if p1_entrez else None,
-            "symbol": p1_entrez.name if p1_entrez else noninteraction.protein_1.name,
+            "protein": p1,
+            "uniprot_id": p1.uniprot_accession,
+            "gene_id": p1.gene.entrez_id or None,
+            "symbol": p1.gene.entrez_name or p1.name,
         },
         "p2": {
-            "protein": noninteraction.protein_2,
-            "uniprot_id": p2_uniprot.uniprot_id if p2_uniprot else "",
-            "gene_id": p2_entrez.gene_id if p2_entrez else None,
-            "symbol": p2_entrez.name if p2_entrez else noninteraction.protein_2.name,
+            "protein": p2,
+            "uniprot_id": p2.uniprot_accession,
+            "gene_id": p2.gene.entrez_id or None,
+            "symbol": p2.gene.entrez_name or p2.name,
         },
         "bait_prey_total_tested": bait_prey_total_tested,
         "bait_prey_times_observed": bait_prey_times_observed,
@@ -1427,21 +1332,18 @@ def protein_detail_view(request, pk: int):
     extra queries.
     """
     protein = get_object_or_404(
-        Protein.objects.prefetch_related("uniprot_ids", "entrez_ids"),
+        Protein.objects.select_related("gene"),
         pk=pk,
     )
-
-    uniprot = protein.uniprot_ids.all().first()
-    entrez = protein.entrez_ids.all().first()
 
     # Count interactions using the manager for consistency.
     interaction_count = Interaction.objects.for_protein(protein.pk).count()
 
     context = {
         "protein": protein,
-        "uniprot_id": uniprot.uniprot_id if uniprot else "",
-        "gene_id": entrez.gene_id if entrez else None,
-        "symbol": entrez.name if entrez else protein.name,
+        "uniprot_id": protein.uniprot_accession,
+        "gene_id": protein.gene.entrez_id or None,
+        "symbol": protein.gene.entrez_name or protein.name,
         "interaction_count": interaction_count,
     }
     return render(request, "hippie_website/protein_detail.html", context)
@@ -1461,20 +1363,23 @@ def download_view(request):
 def information_view(request):
     return render(request, "hippie_website/information.html", {})
 
+
 # ---------------------------------------------------------------------------
 # ML splits helpers + views
 # ---------------------------------------------------------------------------
 
+
 def _validate_split_params(body: dict) -> dict:
     from django.core.exceptions import BadRequest
+
     try:
         params = {
-            "min_score":  float(body.get("min_score", 0.0)),
+            "min_score": float(body.get("min_score", 0.0)),
             "tissue_ids": [int(x) for x in body.get("tissue_ids") or []],
             "source_ids": [int(x) for x in body.get("source_ids") or []],
-            "type_ids":   [int(x) for x in body.get("type_ids") or []],
-            "neg_ratio":  float(body.get("neg_ratio", 1.0)),
-            "seed":       int(body.get("seed", 78539105873)),
+            "type_ids": [int(x) for x in body.get("type_ids") or []],
+            "neg_ratio": float(body.get("neg_ratio", 1.0)),
+            "seed": int(body.get("seed", 78539105873)),
         }
     except (ValueError, TypeError) as exc:
         raise BadRequest(str(exc))
@@ -1488,50 +1393,51 @@ def _validate_split_params(body: dict) -> dict:
 @require_GET
 def ml_splits_view(request):
     types = list(InteractionType.objects.values("id", "name"))
-    return render(request, "hippie_website/ml_splits.html", {
-        "interaction_types": types,
-        "tissue":    request.GET.get("tissue", ""),
-        "source":    request.GET.get("source", ""),
-        "min_score": request.GET.get("min_score", "0"),
-    })
+    return render(
+        request,
+        "hippie_website/ml_splits.html",
+        {
+            "interaction_types": types,
+            "tissue": request.GET.get("tissue", ""),
+            "source": request.GET.get("source", ""),
+            "min_score": request.GET.get("min_score", "0"),
+        },
+    )
 
 
 @require_POST
 def browse_splits_create(request):
     body = json.loads(request.body)
-    params = _validate_split_params(body)            # raises 400 on bad input
+    params = _validate_split_params(body)  # raises 400 on bad input
     job = SplitJob.objects.create(params=params)
     run_split_job.delay(str(job.id))
     return JsonResponse({"job_id": str(job.id), "status": job.status}, status=202)
 
+
 @require_GET
 def browse_splits_status(request, job_id):
     job = get_object_or_404(SplitJob, pk=job_id)
-    return JsonResponse({
-        "status": job.status, "step": job.step,
-        "progress": job.progress, "summary": job.summary,
-        "error": job.error or None,
-        "download_url": (
-            reverse("hippie_website:browse_splits_download", args=[job.id])
-            if job.status == "DONE" else None
-        ),
-    })
+    return JsonResponse(
+        {
+            "status": job.status,
+            "step": job.step,
+            "progress": job.progress,
+            "summary": job.summary,
+            "error": job.error or None,
+            "download_url": (
+                reverse("hippie_website:browse_splits_download", args=[job.id])
+                if job.status == "DONE"
+                else None
+            ),
+        }
+    )
+
 
 @require_GET
 def browse_splits_download(request, job_id):
     job = get_object_or_404(SplitJob, pk=job_id, status="DONE")
-    return FileResponse(open(job.zip_path, "rb"),
-                        as_attachment=True,
-                        filename=f"hippie_splits_{job_id}.zip")# ---------------------------------------------------------------------------
-# Static pages
-# ---------------------------------------------------------------------------
-
-
-@require_GET
-def download_view(request):
-    return render(request, "hippie_website/download.html", {})
-
-
-@require_GET
-def information_view(request):
-    return render(request, "hippie_website/information.html", {})
+    return FileResponse(
+        open(job.zip_path, "rb"),
+        as_attachment=True,
+        filename=f"hippie_splits_{job_id}.zip",
+    )  # ---------------------------------------------------------------------------

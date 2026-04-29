@@ -271,9 +271,9 @@ class Command(BaseCommand):
         from hippie_website.models import (
             Protein,
             Isoform,
-            ProteinUniProt,
-            ProteinEntrez,
-            UniProtAccession,
+            # ProteinUniProt,
+            # ProteinEntrez,
+            # UniProtAccession,
             Tissue,
             ProteinTissue,
             Source,
@@ -283,7 +283,7 @@ class Command(BaseCommand):
             GOSlimTerm,
             MeSHTerm,
             Interaction,
-            InteractionPublication,
+            # InteractionPublication,
             InteractionCrossReference,
             SignalingEndpoint,
             OrthologInteraction,
@@ -295,15 +295,15 @@ class Command(BaseCommand):
             for M in [
                 BaitPreyAssociation,
                 InteractionCrossReference,
-                InteractionPublication,
+                # InteractionPublication,
                 OrthologInteraction,
                 Interaction,
                 SignalingEndpoint,
                 ProteinTissue,
                 Isoform,
-                ProteinEntrez,
-                ProteinUniProt,
-                UniProtAccession,
+                # ProteinEntrez,
+                # ProteinUniProt,
+                # UniProtAccession,
                 Protein,
                 Tissue,
                 Source,
@@ -397,22 +397,22 @@ class Command(BaseCommand):
             p, _ = Protein.objects.get_or_create(name=symbol)
             proteins[symbol] = p
 
-            ProteinUniProt.objects.get_or_create(
-                protein=p,
-                uniprot_id=UNIPROT_IDS[symbol],
-                defaults={"version": 1},
-            )
+            # ProteinUniProt.objects.get_or_create(
+            #    protein=p,
+            #    uniprot_id=UNIPROT_IDS[symbol],
+            #    defaults={"version": 1},
+            # )
 
-            ProteinEntrez.objects.get_or_create(
-                protein=p,
-                gene_id=ENTREZ_IDS[symbol],
-                defaults={"name": symbol},
-            )
+            # ProteinEntrez.objects.get_or_create(
+            #    protein=p,
+            #    gene_id=ENTREZ_IDS[symbol],
+            #    defaults={"name": symbol},
+            # )
 
-            UniProtAccession.objects.get_or_create(
-                accession=ACCESSIONS[symbol],
-                uniprot_id=UNIPROT_IDS[symbol],
-            )
+            # UniProtAccession.objects.get_or_create(
+            #    accession=ACCESSIONS[symbol],
+            #    uniprot_id=UNIPROT_IDS[symbol],
+            # )
 
         # Isoforms for a few proteins (MTI — each Isoform IS a Protein row)
         isoforms = {}
@@ -581,13 +581,13 @@ class Command(BaseCommand):
 
         self.stdout.write("Creating publications…")
 
-        pmid_pool = list(range(20000000, 20000200))
-        for inter in interaction_objs:
-            for pmid in random.sample(pmid_pool, k=random.randint(1, 4)):
-                InteractionPublication.objects.get_or_create(
-                    interaction=inter,
-                    pmid=pmid,
-                )
+        # pmid_pool = list(range(20000000, 20000200))
+        # for inter in interaction_objs:
+        #    for pmid in random.sample(pmid_pool, k=random.randint(1, 4)):
+        #        InteractionPublication.objects.get_or_create(
+        #            interaction=inter,
+        #            pmid=pmid,
+        #        )
 
         # ---------------------------------------------------------------
         # 9. Cross-references  (some from HomoMINT, some from others)
@@ -670,9 +670,9 @@ class Command(BaseCommand):
         counts = [
             ("Protein", Protein),
             ("Isoform", Isoform),
-            ("ProteinUniProt", ProteinUniProt),
-            ("ProteinEntrez", ProteinEntrez),
-            ("UniProtAccession", UniProtAccession),
+            # ("ProteinUniProt", ProteinUniProt),
+            # ("ProteinEntrez", ProteinEntrez),
+            # ("UniProtAccession", UniProtAccession),
             ("Tissue", Tissue),
             ("ProteinTissue", ProteinTissue),
             ("Source", Source),
@@ -682,7 +682,7 @@ class Command(BaseCommand):
             ("GOSlimTerm", GOSlimTerm),
             ("MeSHTerm", MeSHTerm),
             ("Interaction", Interaction),
-            ("InteractionPublication", InteractionPublication),
+            # ("InteractionPublication", InteractionPublication),
             ("InteractionCrossReference", InteractionCrossReference),
             ("SignalingEndpoint", SignalingEndpoint),
             ("OrthologInteraction", OrthologInteraction),

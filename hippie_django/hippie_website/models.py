@@ -9,20 +9,102 @@ from .managers import InteractionManager, ProteinManager
 # =============================================================================
 
 
+class Gene(models.Model):
+    """
+    To map proteins that link to the same gene, we added a gene class that is defined by the entrez id.
+    """
+
+    entrez_id = models.PositiveIntegerField(db_index=True)
+    entrez_name = models.CharField(max_length=40, blank=True, default="", db_index=True)
+
+    class Meta:
+        db_table = "gene"
+
+    def __str__(self):
+        if self.entrez_name is not None:
+            return f"{self.entrez_name} ({self.entrez_id})"
+        return self.entrez_id
+
+
+class GeneSynonym(models.Model):
+    """
+    Alternative names / symbols for a Gene.
+    Examples: 'TP53', 'P53', 'BCC7'
+    """
+
+    gene = models.ForeignKey(
+        Gene,
+        on_delete=models.CASCADE,
+        related_name="synonyms",
+    )
+    synonym = models.CharField(
+        max_length=60,
+        db_index=True,
+        help_text="Alternative name or symbol for the gene",
+    )
+    additional_information = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        db_table = "gene_synonym"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["gene", "synonym"],
+                name="unique_gene_synonym",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.synonym} -> {self.gene}"
+
+
 class Protein(models.Model):
     """
     Central entity — one row per unique protein in HIPPIE.
     The `name` field stores the primary gene symbol (e.g. "BRCA1").
     """
 
+    gene = models.ForeignKey(Gene, on_delete=models.CASCADE, related_name="proteins")
     name = models.CharField(max_length=30, unique=True)
+    uniprot_accession = models.CharField(max_length=20, db_index=True)
+    uniprot_id = models.CharField(max_length=16, db_index=True)
     objects = ProteinManager()
 
     class Meta:
         db_table = "protein"
 
     def __str__(self):
-        return self.name
+        return self.uniprot_accession
+
+
+class ProteinSynonym(models.Model):
+    """
+    Alternative names / identifiers for a Protein.
+    Examples: alternative gene symbols, legacy protein names, etc.
+    """
+
+    protein = models.ForeignKey(
+        Protein,
+        on_delete=models.CASCADE,
+        related_name="synonyms",
+    )
+    synonym = models.CharField(
+        max_length=60,
+        db_index=True,
+        help_text="Alternative name or identifier for the protein",
+    )
+    additional_information = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        db_table = "protein_synonym"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["protein", "synonym"],
+                name="unique_protein_synonym",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.synonym} -> {self.protein}"
 
 
 class Isoform(Protein):
@@ -44,88 +126,6 @@ class Isoform(Protein):
 
     def __str__(self):
         return self.isoform_uniprot_id
-
-
-# =============================================================================
-# Identifier mappings
-# =============================================================================
-
-
-class ProteinUniProt(models.Model):
-    """
-    Maps a protein to its UniProt entry ID (e.g. "BRCA1_HUMAN").
-    `version` is used to pick the latest mapping when multiple exist
-    (ORDER BY version DESC LIMIT 1).
-    """
-
-    protein = models.ForeignKey(
-        Protein, on_delete=models.CASCADE, related_name="uniprot_ids"
-    )
-    uniprot_id = models.CharField(max_length=16, db_index=True)
-    version = models.IntegerField(default=0)
-
-    class Meta:
-        db_table = "protein2uniprot"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["protein", "uniprot_id", "version"],
-                name="protein_to_uniprot_unique",
-            ),
-        ]
-
-    def __str__(self):
-        return self.uniprot_id
-
-
-class ProteinEntrez(models.Model):
-    """
-    Maps a protein to its NCBI Entrez Gene ID + gene symbol.
-    """
-
-    protein = models.ForeignKey(
-        Protein, on_delete=models.CASCADE, related_name="entrez_ids"
-    )
-    gene_id = models.PositiveIntegerField(db_index=True)
-    name = models.CharField(max_length=40, blank=True, default="", db_index=True)
-
-    class Meta:
-        db_table = "protein_entrez"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["protein", "gene_id"],
-                name="protein_entrez_unique",
-            ),
-        ]
-
-    def __str__(self):
-        return f"{self.name} ({self.gene_id})"
-
-
-class UniProtAccession(models.Model):
-    """
-    Maps UniProt accessions (e.g. "P38398") to UniProt entry IDs
-    (e.g. "BRCA1_HUMAN").  Multiple accessions can map to the same ID.
-
-    Resolution path: accession → uniprot_id → ProteinUniProt → Protein.
-    We keep the indirect link rather than adding a direct protein FK to
-    avoid denormalization and sync risk when UniProt updates accession
-    mappings.
-    """
-
-    accession = models.CharField(max_length=20, db_index=True)
-    uniprot_id = models.CharField(max_length=16, db_index=True)
-
-    class Meta:
-        db_table = "uniprot_accession2id"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["accession", "uniprot_id"],
-                name="uniprot_accession_unique",
-            ),
-        ]
-
-    def __str__(self):
-        return f"{self.accession} -> {self.uniprot_id}"
 
 
 # =============================================================================
@@ -179,6 +179,17 @@ class ProteinTissue(models.Model):
 # =============================================================================
 # Reference / lookup tables
 # =============================================================================
+
+
+class Publication(models.Model):
+    """
+    Publications that are connected to any of the other classes..
+    """
+
+    pmid = models.PositiveIntegerField(db_index=True)
+
+    def __str__(self):
+        return str(self.pmid)
 
 
 class Source(models.Model):
@@ -382,6 +393,9 @@ class Interaction(models.Model):
     sources = models.ManyToManyField(
         Source, related_name="interactions", db_table="interaction2source"
     )
+    publications = models.ManyToManyField(
+        Publication, related_name="interactions", db_table="interaction2pubmed"
+    )
     experiments = models.ManyToManyField(
         ExperimentType, related_name="interactions", db_table="interaction2experiment"
     )
@@ -472,34 +486,6 @@ class NonInteraction(models.Model):
         return (
             f"NonInteraction {self.protein_1.name}–{self.protein_2.name} ({self.score})"
         )
-
-
-# =============================================================================
-# Evidence junction tables
-# =============================================================================
-
-
-class InteractionPublication(models.Model):
-    """
-    PubMed citations supporting an interaction.
-    """
-
-    interaction = models.ForeignKey(
-        Interaction, on_delete=models.CASCADE, related_name="publications"
-    )
-    pmid = models.PositiveIntegerField(db_index=True)
-
-    class Meta:
-        db_table = "interaction2pubmed"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["interaction", "pmid"],
-                name="interaction_publication_unique",
-            ),
-        ]
-
-    def __str__(self):
-        return f"{self.interaction_id} PMID:{self.pmid}"
 
 
 # =============================================================================
@@ -634,20 +620,22 @@ class BaitPreyTest(models.Model):
     detection = models.BooleanField(
         help_text="True if bait-prey association is detected, False if tested but not detected"
     )
-    pmid = models.PositiveIntegerField()  # NOTE:  We should have a PMID table
+    publication = models.ForeignKey(
+        Publication, on_delete=models.CASCADE, related_name="bait_prey_tests"
+    )
     method = models.ForeignKey(ExperimentType, on_delete=models.CASCADE)
 
     class Meta:
         db_table = "bait_prey_test"
         constraints = [
             models.UniqueConstraint(
-                fields=["detection", "pmid", "method"],
+                fields=["detection", "publication", "method"],
                 name="bait_prey_test_unique",
             ),
         ]
 
     def __str__(self):
-        return f"PMID:{self.pmid} {self.method.name} detected={self.detection}"
+        return f"Publication ID:{self.publication} {self.method.name} detected={self.detection}"
 
 
 class BaitPreyAssociation(models.Model):
@@ -695,9 +683,9 @@ class BaitPreyAssociation(models.Model):
             ),
         ]
 
-
     def __str__(self):
         return f"{self.interaction} direction={self.get_direction_display()} tests={self.tests_performed.count()}"
+
 
 class SplitJob(models.Model):
     STATUS = [
@@ -716,4 +704,3 @@ class SplitJob(models.Model):
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
-
