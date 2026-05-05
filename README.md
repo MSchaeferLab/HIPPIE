@@ -34,7 +34,7 @@ npm run build
 Start the celery working in a seperate terminal
 ```bash
 cd hippie_django
-celery -A hippie worker -l info 2>&1 > celery.log & 
+celery -A hippie worker -l info 2>&1 > celery.log &
 ```
 Start the server in the first terminal
 ```bash
@@ -47,3 +47,39 @@ When you change anything in the frontend, you need to run the following command 
 npm run build
 python manage.py collectstatic
 ```
+
+## Run with Docker Compose
+
+A full stack (MariaDB + Redis + Django/Gunicorn + Celery worker + Apache) is
+defined in `docker-compose.yml`. The reverse proxy runs `Apache/2.4.66
+(Debian)` (debian:trixie-slim base) with `mod_proxy_http` in front of
+gunicorn. The Vite React frontend is built inside the web image via a
+multi-stage Dockerfile, so no host Node toolchain is required.
+
+```bash
+cp .env.example .env       # then edit secrets / passwords
+docker compose build
+docker compose up -d
+```
+
+Open `http://localhost:8080/`. To deploy under a sub-path, set
+`APACHE_PUBLISHED_PATH=/your-prefix` in `.env` before `up`; Apache will
+mount `/static/` and `/media/` under that prefix via `Alias` directives.
+
+Useful one-shots:
+
+```bash
+docker compose exec web python manage.py createsuperuser
+docker compose exec web python manage.py seed_test_data
+docker compose exec web python manage.py test_import_bait_prey
+docker compose logs -f web worker apache
+docker compose down              # stop; volumes preserved
+docker compose down -v           # stop + wipe DB / static / media volumes
+```
+
+Migrations and `collectstatic` run automatically on each `web` boot. The
+`worker` container reuses the same image with `RUN_MIGRATIONS=0` and
+`RUN_COLLECTSTATIC=0` to avoid racing the web container. The `apache`
+container enables `proxy`, `proxy_http`, `headers`, `rewrite`, and
+`expires` modules and forwards everything except `/static/` and `/media/`
+to `web:8000`.
