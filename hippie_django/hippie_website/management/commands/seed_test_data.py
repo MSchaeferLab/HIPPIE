@@ -394,7 +394,28 @@ class Command(BaseCommand):
 
         proteins = {}
         for symbol in GENE_SYMBOLS:
-            p, _ = Protein.objects.get_or_create(name=symbol)
+            gene, _ = Gene.objects.get_or_create(name=symbol)
+            p, created = Protein.objects.get_or_create(
+                name=symbol,
+                defaults={
+                    "gene": gene,
+                    "uniprot_accession": ACCESSIONS[symbol],
+                    "uniprot_id": UNIPROT_IDS[symbol],
+                },
+            )
+            if not created:
+                update_fields = []
+                if p.gene_id != gene.id:
+                    p.gene = gene
+                    update_fields.append("gene")
+                if p.uniprot_accession != ACCESSIONS[symbol]:
+                    p.uniprot_accession = ACCESSIONS[symbol]
+                    update_fields.append("uniprot_accession")
+                if p.uniprot_id != UNIPROT_IDS[symbol]:
+                    p.uniprot_id = UNIPROT_IDS[symbol]
+                    update_fields.append("uniprot_id")
+                if update_fields:
+                    p.save(update_fields=update_fields)
             proteins[symbol] = p
 
             # ProteinUniProt.objects.get_or_create(

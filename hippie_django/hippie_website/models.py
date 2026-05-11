@@ -21,9 +21,9 @@ class Gene(models.Model):
         db_table = "gene"
 
     def __str__(self):
-        if self.entrez_name is not None:
+        if self.entrez_name:
             return f"{self.entrez_name} ({self.entrez_id})"
-        return self.entrez_id
+        return str(self.entrez_id)
 
 
 class GeneSynonym(models.Model):
@@ -186,7 +186,7 @@ class Publication(models.Model):
     Publications that are connected to any of the other classes..
     """
 
-    pmid = models.PositiveIntegerField(db_index=True)
+    pmid = models.PositiveIntegerField(unique=True, db_index=True)
 
     def __str__(self):
         return str(self.pmid)
@@ -635,7 +635,7 @@ class BaitPreyTest(models.Model):
         ]
 
     def __str__(self):
-        return f"Publication ID:{self.publication} {self.method.name} detected={self.detection}"
+        return f"PMID:{self.publication} {self.method.name} detected={self.detection}"
 
 
 class BaitPreyAssociation(models.Model):
