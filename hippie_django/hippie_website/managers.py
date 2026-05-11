@@ -12,7 +12,7 @@ Usage in models.py:
 """
 
 from django.db import models
-from django.db.models import Count, Q
+from django.db.models import CharField, Count, Q, Value
 from django.db.models.expressions import RawSQL
 
 
@@ -55,18 +55,31 @@ class ProteinQuerySet(models.QuerySet):
         from . import models as m  # late import to avoid circularity
 
         isoform_pk = None
+        isoform_uid = None
         if "isoform" in identifier:
-            protein = m.Protein.objects.filter(name=identifier).first()
-            if protein:
-                isoform_pk = protein.pk
-        elif "-" in identifier:
-            isoform_pk = (
-                m.Isoform.objects.filter(isoform_uniprot_id=identifier)
-                .values_list("protein_ptr_id", flat=True)
+            isoform = (
+                m.Isoform.objects.filter(name=identifier)
+                .values("protein_ptr_id", "isoform_uniprot_id")
                 .first()
             )
+            if isoform:
+                isoform_pk = isoform["protein_ptr_id"]
+                isoform_uid = isoform["isoform_uniprot_id"]
+        elif "-" in identifier:
+            isoform = (
+                m.Isoform.objects.filter(isoform_uniprot_id=identifier)
+                .values("protein_ptr_id", "isoform_uniprot_id")
+                .first()
+            )
+            if isoform:
+                isoform_pk = isoform["protein_ptr_id"]
+                isoform_uid = isoform["isoform_uniprot_id"]
         if isoform_pk is not None:
             qs = self.filter(pk=isoform_pk)
+            if isoform_uid is not None:
+                qs = qs.annotate(
+                    isoform_uniprot_id=Value(isoform_uid, output_field=CharField())
+                )
             if qs.exists():
                 return qs
 

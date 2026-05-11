@@ -269,6 +269,7 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         from hippie_website.models import (
+            Gene,
             Protein,
             Isoform,
             # ProteinUniProt,
@@ -394,7 +395,13 @@ class Command(BaseCommand):
 
         proteins = {}
         for symbol in GENE_SYMBOLS:
-            gene, _ = Gene.objects.get_or_create(name=symbol)
+            gene, created = Gene.objects.get_or_create(
+                entrez_id=ENTREZ_IDS[symbol],
+                defaults={"entrez_name": symbol},
+            )
+            if not created and gene.entrez_name != symbol:
+                gene.entrez_name = symbol
+                gene.save(update_fields=["entrez_name"])
             p, created = Protein.objects.get_or_create(
                 name=symbol,
                 defaults={
@@ -440,12 +447,32 @@ class Command(BaseCommand):
         for symbol in ["BRCA1", "TP53", "EGFR"]:
             for iso_num in range(2, 4):
                 iso_uniprot = f"{ACCESSIONS[symbol]}-{iso_num}"
-                isoform, _ = Isoform.objects.get_or_create(
+                isoform, created = Isoform.objects.get_or_create(
                     isoform_uniprot_id=iso_uniprot,
                     defaults={
                         "name": f"{symbol} isoform {iso_num}",  # Protein.name
+                        "gene": proteins[symbol].gene,
+                        "uniprot_accession": iso_uniprot,
+                        "uniprot_id": f"{UNIPROT_IDS[symbol]}_{iso_num}"[:16],
                     },
                 )
+                if not created:
+                    update_fields = []
+                    if isoform.name != f"{symbol} isoform {iso_num}":
+                        isoform.name = f"{symbol} isoform {iso_num}"
+                        update_fields.append("name")
+                    if isoform.gene_id != proteins[symbol].gene_id:
+                        isoform.gene = proteins[symbol].gene
+                        update_fields.append("gene")
+                    if isoform.uniprot_accession != iso_uniprot:
+                        isoform.uniprot_accession = iso_uniprot
+                        update_fields.append("uniprot_accession")
+                    isoform_uniprot_id = f"{UNIPROT_IDS[symbol]}_{iso_num}"[:16]
+                    if isoform.uniprot_id != isoform_uniprot_id:
+                        isoform.uniprot_id = isoform_uniprot_id
+                        update_fields.append("uniprot_id")
+                    if update_fields:
+                        isoform.save(update_fields=update_fields)
                 isoforms[iso_uniprot] = isoform
 
         # ---------------------------------------------------------------

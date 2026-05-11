@@ -196,6 +196,18 @@ class ProteinQueryApiTest(HippieTestCase):
         self.assertIsNone(data["error"])
         self.assertEqual(data["query_protein"]["name"], "BRCA1")
 
+    def test_resolve_isoform_query_exposes_isoform_uid(self):
+        Isoform.objects.create(
+            name="BRCA1_ISO2",
+            isoform_uniprot_id="P38398-2",
+            gene=self.brca1.gene,
+            uniprot_id="BRCA1_2_HUMAN",
+            uniprot_accession="P38398-2",
+        )
+        data = self._get("P38398-2")
+        self.assertIsNone(data["error"])
+        self.assertEqual(data["query_protein"]["isoform_uniprot_id"], "P38398-2")
+
     def test_resolve_by_entrez_id(self):
         data = self._get("672")
         self.assertIsNone(data["error"])
@@ -495,6 +507,18 @@ class ResolveTest(HippieTestCase):
     def test_resolve_by_accession(self):
         qs = Protein.objects.resolve("P38398")
         self.assertEqual(qs.first().name, "BRCA1")
+
+    def test_resolve_isoform_keeps_isoform_uid(self):
+        isoform = Isoform.objects.create(
+            name="BRCA1_ISO2",
+            isoform_uniprot_id="P38398-2",
+            gene=self.brca1.gene,
+            uniprot_id="BRCA1_2_HUMAN",
+            uniprot_accession="P38398-2",
+        )
+        qs = Protein.objects.resolve("P38398-2")
+        self.assertEqual(qs.first().pk, isoform.pk)
+        self.assertEqual(qs.first().isoform_uniprot_id, "P38398-2")
 
     def test_resolve_unknown_returns_none_queryset(self):
         qs = Protein.objects.resolve("XXXXXXX")
