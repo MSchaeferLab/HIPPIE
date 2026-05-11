@@ -141,7 +141,7 @@ def _fetch_uniprot_batch(gene_names):
 
 def _fallback_entrez_id(gene_name: str) -> int:
     """Use a deterministic synthetic ID when NCBI has no Entrez hit for a gene."""
-    return FALLBACK_ENTREZ_ID_BASE + zlib.crc32(gene_name.encode("utf-8"))
+    return FALLBACK_ENTREZ_ID_BASE + (zlib.crc32(gene_name.encode("utf-8")) & 0xFFFFFFFF)
 
 
 def _fallback_uniprot_data(gene_name: str) -> tuple[str, str]:
