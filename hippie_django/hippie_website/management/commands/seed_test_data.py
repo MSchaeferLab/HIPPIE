@@ -397,13 +397,16 @@ class Command(BaseCommand):
         for symbol in GENE_SYMBOLS:
             try:
                 entrez_id = ENTREZ_IDS[symbol]
+            except KeyError as exc:
+                raise KeyError(f"Missing ENTREZ_IDS entry for {symbol}") from exc
+            try:
                 accession = ACCESSIONS[symbol]
+            except KeyError as exc:
+                raise KeyError(f"Missing ACCESSIONS entry for {symbol}") from exc
+            try:
                 uniprot_id = UNIPROT_IDS[symbol]
             except KeyError as exc:
-                missing_identifier = exc.args[0] if exc.args else "unknown"
-                raise KeyError(
-                    f"Missing seed identifier for {symbol}: {missing_identifier}"
-                ) from exc
+                raise KeyError(f"Missing UNIPROT_IDS entry for {symbol}") from exc
             gene, created = Gene.objects.get_or_create(
                 entrez_id=entrez_id,
                 defaults={"entrez_name": symbol},
@@ -481,9 +484,9 @@ class Command(BaseCommand):
                     if isoform.uniprot_accession != iso_uniprot:
                         isoform.uniprot_accession = iso_uniprot
                         update_fields.append("uniprot_accession")
-                    isoform_uniprot_id = f"{UNIPROT_IDS[symbol]}_{iso_num}"[:16]
-                    if isoform.uniprot_id != isoform_uniprot_id:
-                        isoform.uniprot_id = isoform_uniprot_id
+                    isoform_entry_id = f"{UNIPROT_IDS[symbol]}_{iso_num}"[:16]
+                    if isoform.uniprot_id != isoform_entry_id:
+                        isoform.uniprot_id = isoform_entry_id
                         update_fields.append("uniprot_id")
                     if update_fields:
                         isoform.save(update_fields=update_fields)
