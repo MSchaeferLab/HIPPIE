@@ -12,7 +12,7 @@ Usage in models.py:
 """
 
 from django.db import models
-from django.db.models import Count, Prefetch, Q
+from django.db.models import CharField, Count, Q, Value
 from django.db.models.expressions import RawSQL
 
 
@@ -30,7 +30,7 @@ class ProteinQuerySet(models.QuerySet):
 
     def resolve(self, identifier: str) -> "ProteinQuerySet":
         """
-        Resolve an arbitrary identifier (UniProt ID, UniProt accession,
+        Resolve an arbitrary identifier (UniProt accession, UniProt entry ID,
         Entrez gene ID, or gene symbol) to the matching Protein(s).
 
         Returns a queryset so it composes with further filters.
@@ -40,13 +40,13 @@ class ProteinQuerySet(models.QuerySet):
 
         # 1) Pure digits → Entrez gene ID
         if identifier.isdigit():
-            qs = self.filter(entrez_ids__gene_id=int(identifier))
+            qs = self.filter(gene__entrez_id=int(identifier))
             if qs.exists():
                 return qs
 
         # 2) Contains underscore  (e.g. "BRCA1_HUMAN") → UniProt entry ID
         if "_" in identifier:
-            qs = self.filter(uniprot_ids__uniprot_id=identifier)
+            qs = self.filter(uniprot_id=identifier)
             if qs.exists():
                 return qs
 
@@ -55,33 +55,43 @@ class ProteinQuerySet(models.QuerySet):
         from . import models as m  # late import to avoid circularity
 
         isoform_pk = None
+        isoform_uid = None
         if "isoform" in identifier:
-            isoform_pk = m.Protein.objects.filter(name=identifier).first().pk
-        elif "-" in identifier:
-            isoform_pk = (
-                m.Isoform.objects.filter(isoform_uniprot_id=identifier)
-                .values_list("protein_ptr_id", flat=True)
+            isoform = (
+                m.Isoform.objects.filter(name=identifier)
+                .values("protein_ptr_id", "isoform_uniprot_id")
                 .first()
             )
+            if isoform:
+                isoform_pk = isoform["protein_ptr_id"]
+                isoform_uid = isoform["isoform_uniprot_id"]
+        elif "-" in identifier:
+            isoform = (
+                m.Isoform.objects.filter(isoform_uniprot_id=identifier)
+                .values("protein_ptr_id", "isoform_uniprot_id")
+                .first()
+            )
+            if isoform:
+                isoform_pk = isoform["protein_ptr_id"]
+                isoform_uid = isoform["isoform_uniprot_id"]
         if isoform_pk is not None:
             qs = self.filter(pk=isoform_pk)
+            if isoform_uid is not None:
+                qs = qs.annotate(
+                    isoform_uniprot_id=Value(isoform_uid, output_field=CharField())
+                )
             if qs.exists():
                 return qs
 
         # 4) UniProt accession  (e.g. "P38398")
-
-        uniprot_id = (
-            m.UniProtAccession.objects.filter(accession=identifier)
-            .values_list("uniprot_id", flat=True)
-            .first()
-        )
-        if uniprot_id:
-            qs = self.filter(uniprot_ids__uniprot_id=uniprot_id)
-            if qs.exists():
-                return qs
+        qs = self.filter(uniprot_accession=identifier)
+        if qs.exists():
+            return qs
 
         # 5) Gene symbol
-        qs = self.filter(entrez_ids__name__iexact=identifier)
+        qs = self.filter(
+            Q(gene__entrez_name__iexact=identifier) | Q(name__iexact=identifier)
+        )
         if qs.exists():
             return qs
 
@@ -96,13 +106,10 @@ class ProteinQuerySet(models.QuerySet):
         Annotate each protein with its degree (interaction count) and
         average interaction score — the two numbers shown on browse.php.
 
-        Also select_related the first UniProt ID and Entrez mapping so
-        the template can render them without extra queries.
+        Also select_related the Gene so the template can render entrez
+        name and ID without extra queries.
         """
-        return self.prefetch_related(
-            Prefetch("uniprot_ids", queryset=self._uniprot_qs()),
-            Prefetch("entrez_ids"),
-        ).annotate(
+        return self.select_related("gene").annotate(
             degree=Count("interactions_as_1", distinct=True)
             + Count("interactions_as_2", distinct=True),
             avg_score=RawSQL(
@@ -119,17 +126,6 @@ class ProteinQuerySet(models.QuerySet):
     def expressed_in(self, tissue_ids: list[int]) -> "ProteinQuerySet":
         """Filter to proteins expressed in *any* of the given tissues."""
         return self.filter(tissue_expression__tissue_id__in=tissue_ids).distinct()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _uniprot_qs():
-        """Latest-version UniProt mapping (ORDER BY version DESC)."""
-        from . import models as m
-
-        return m.ProteinUniProt.objects.order_by("-version")
 
 
 class ProteinManager(models.Manager):
@@ -160,23 +156,15 @@ class InteractionQuerySet(models.QuerySet):
 
     def with_proteins(self) -> "InteractionQuerySet":
         """
-        select_related both protein FKs + prefetch their identifier
-        mappings.  Covers the columns shown on every results table row:
-            UniProt ID, Entrez gene ID, gene symbol (for both sides).
+        select_related both protein FKs and their Gene.
+        Covers the columns shown on every results table row:
+            UniProt accession, Entrez gene ID, gene symbol (for both sides).
         """
-        from . import models as m
-
-        return self.select_related("protein_1", "protein_2").prefetch_related(
-            Prefetch(
-                "protein_1__uniprot_ids",
-                queryset=m.ProteinUniProt.objects.order_by("-version"),
-            ),
-            Prefetch("protein_1__entrez_ids"),
-            Prefetch(
-                "protein_2__uniprot_ids",
-                queryset=m.ProteinUniProt.objects.order_by("-version"),
-            ),
-            Prefetch("protein_2__entrez_ids"),
+        return self.select_related(
+            "protein_1",
+            "protein_1__gene",
+            "protein_2",
+            "protein_2__gene",
         )
 
     def with_evidence(self) -> "InteractionQuerySet":

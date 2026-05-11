@@ -1,0 +1,36 @@
+<VirtualHost *:80>
+    ServerAdmin webmaster@localhost
+    DocumentRoot /var/www/html
+
+    LimitRequestBody 52428800
+
+    # Static + media served directly by Apache.
+    Alias ${APACHE_PUBLISHED_PATH}/static/ /vol/static/
+    Alias ${APACHE_PUBLISHED_PATH}/media/  /vol/media/
+
+    <Directory /vol/static/>
+        Require all granted
+        Options -Indexes
+    </Directory>
+
+    <Directory /vol/media/>
+        Require all granted
+        Options -Indexes
+    </Directory>
+
+    # Reverse proxy to gunicorn. Exclude static/media so they hit the
+    # Alias above instead of being forwarded.
+    ProxyPreserveHost On
+    ProxyRequests Off
+
+    ProxyPass        ${APACHE_PUBLISHED_PATH}/static/ !
+    ProxyPass        ${APACHE_PUBLISHED_PATH}/media/  !
+    ProxyPass        / http://web:8000/ timeout=120
+    ProxyPassReverse / http://web:8000/
+
+    # mod_proxy_http already sets X-Forwarded-For; add the proto.
+    RequestHeader set X-Forwarded-Proto expr=%{REQUEST_SCHEME}
+
+    ErrorLog  ${APACHE_LOG_DIR}/error.log
+    CustomLog ${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>

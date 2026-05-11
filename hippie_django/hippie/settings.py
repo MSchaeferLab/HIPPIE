@@ -21,12 +21,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-3wq+cj5bp*g)wk1ql%%#%ybb^u=cac5^zg0cv_*if4w!+ff*tn"
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY",
+    "django-insecure-3wq+cj5bp*g)wk1ql%%#%ybb^u=cac5^zg0cv_*if4w!+ff*tn",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+    if h.strip()
+]
 
 
 # Application definition
@@ -75,12 +82,25 @@ WSGI_APPLICATION = "hippie.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+if os.environ.get("DATABASE_ENGINE") == "mariadb":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": os.environ["MARIADB_DATABASE"],
+            "USER": os.environ["MARIADB_USER"],
+            "PASSWORD": os.environ["MARIADB_PASSWORD"],
+            "HOST": os.environ.get("DB_HOST", "db"),
+            "PORT": os.environ.get("DB_PORT", "3306"),
+            "OPTIONS": {"charset": "utf8mb4"},
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation
@@ -133,12 +153,14 @@ default_auto_field = "django.db.models.BigAutoField"
 
 # ── Media files (split zips) ───────────────────────────────────────────────
 MEDIA_ROOT = BASE_DIR / "media"
-MEDIA_URL  = "/media/"
+MEDIA_URL = "/media/"
 
 # ── Celery ─────────────────────────────────────────────────────────────────
-CELERY_BROKER_URL     = "redis://localhost:6379/0"
-CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get(
+    "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"
+)
 CELERY_TASK_SERIALIZER = "json"
-CELERY_ACCEPT_CONTENT  = ["json"]
+CELERY_ACCEPT_CONTENT = ["json"]
 # Uncomment to run tasks synchronously (no Redis required for dev/testing):
 # CELERY_TASK_ALWAYS_EAGER = True

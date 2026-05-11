@@ -29,17 +29,16 @@ from django.urls import reverse
 from .models import (
     BaitPreyAssociation,
     BaitPreyTest,
+    Gene,
     Interaction,
     Isoform,
     NonInteraction,
     Protein,
-    ProteinEntrez,
-    ProteinUniProt,
+    Publication,
     Source,
     ExperimentType,
     Tissue,
     ProteinTissue,
-    UniProtAccession,
 )
 from .views import (
     _protein_display,
@@ -59,14 +58,18 @@ from .views import (
 
 def make_protein(name, uniprot_id=None, gene_id=None, accession=None):
     """Erstellt ein Protein mit optionalen Identifier-Mappings."""
-    p = Protein.objects.create(name=name)
-    if uniprot_id:
-        ProteinUniProt.objects.create(protein=p, uniprot_id=uniprot_id, version=1)
-    if gene_id:
-        ProteinEntrez.objects.create(protein=p, gene_id=gene_id, name=name)
-    if accession and uniprot_id:
-        UniProtAccession.objects.create(accession=accession, uniprot_id=uniprot_id)
-    return p
+    if gene_id is not None:
+        gene, _ = Gene.objects.get_or_create(
+            entrez_id=gene_id, defaults={"entrez_name": name}
+        )
+    else:
+        gene = Gene.objects.create(entrez_id=0, entrez_name=name)
+    return Protein.objects.create(
+        name=name,
+        gene=gene,
+        uniprot_id=uniprot_id or "",
+        uniprot_accession=accession or "",
+    )
 
 
 def make_interaction(p1, p2, score=0.8):
@@ -192,6 +195,18 @@ class ProteinQueryApiTest(HippieTestCase):
         data = self._get("P38398")
         self.assertIsNone(data["error"])
         self.assertEqual(data["query_protein"]["name"], "BRCA1")
+
+    def test_resolve_isoform_query_exposes_isoform_uid(self):
+        Isoform.objects.create(
+            name="BRCA1_ISO2",
+            isoform_uniprot_id="P38398-2",
+            gene=self.brca1.gene,
+            uniprot_id="BRCA1_2_HUMAN",
+            uniprot_accession="P38398-2",
+        )
+        data = self._get("P38398-2")
+        self.assertIsNone(data["error"])
+        self.assertEqual(data["query_protein"]["isoform_uniprot_id"], "P38398-2")
 
     def test_resolve_by_entrez_id(self):
         data = self._get("672")
@@ -493,6 +508,18 @@ class ResolveTest(HippieTestCase):
         qs = Protein.objects.resolve("P38398")
         self.assertEqual(qs.first().name, "BRCA1")
 
+    def test_resolve_isoform_keeps_isoform_uid(self):
+        isoform = Isoform.objects.create(
+            name="BRCA1_ISO2",
+            isoform_uniprot_id="P38398-2",
+            gene=self.brca1.gene,
+            uniprot_id="BRCA1_2_HUMAN",
+            uniprot_accession="P38398-2",
+        )
+        qs = Protein.objects.resolve("P38398-2")
+        self.assertEqual(qs.first().pk, isoform.pk)
+        self.assertEqual(qs.first().isoform_uniprot_id, "P38398-2")
+
     def test_resolve_unknown_returns_none_queryset(self):
         qs = Protein.objects.resolve("XXXXXXX")
         self.assertFalse(qs.exists())
@@ -506,8 +533,8 @@ class ResolveTest(HippieTestCase):
 class CanonicalOrderingTest(HippieTestCase):
     def test_interaction_always_canonical(self):
         """protein_1_id muss immer <= protein_2_id sein."""
-        a = Protein.objects.create(name="TESTA")
-        b = Protein.objects.create(name="TESTB")
+        a = make_protein("TESTA")
+        b = make_protein("TESTB")
         ix = make_interaction(b, a)  # umgekehrt — make_interaction muss korrigieren
         self.assertLessEqual(ix.protein_1_id, ix.protein_2_id)
 
@@ -526,29 +553,23 @@ class CanonicalOrderingTest(HippieTestCase):
 
 class ProteinDisplayTest(HippieTestCase):
     def test_all_keys_present(self):
-        p = Protein.objects.prefetch_related("uniprot_ids", "entrez_ids").get(
-            pk=self.brca1.pk
-        )
+        p = Protein.objects.select_related("gene").get(pk=self.brca1.pk)
         d = _protein_display(p)
         for key in ("id", "name", "symbol", "uniprot_id", "gene_id"):
             self.assertIn(key, d)
 
     def test_values_correct(self):
-        p = Protein.objects.prefetch_related("uniprot_ids", "entrez_ids").get(
-            pk=self.brca1.pk
-        )
+        p = Protein.objects.select_related("gene").get(pk=self.brca1.pk)
         d = _protein_display(p)
         self.assertEqual(d["name"], "BRCA1")
         self.assertEqual(d["symbol"], "BRCA1")
-        self.assertEqual(d["uniprot_id"], "BRCA1_HUMAN")
+        self.assertEqual(d["uniprot_id"], "P38398")
         self.assertEqual(d["gene_id"], 672)
 
     def test_protein_without_mappings(self):
-        """Protein ohne UniProt/Entrez soll nicht crashen."""
-        bare = Protein.objects.create(name="BARE")
-        bare_fetched = Protein.objects.prefetch_related(
-            "uniprot_ids", "entrez_ids"
-        ).get(pk=bare.pk)
+        """Protein ohne gene-Symbol und ohne accession soll nicht crashen."""
+        bare = make_protein("BARE")
+        bare_fetched = Protein.objects.select_related("gene").get(pk=bare.pk)
         d = _protein_display(bare_fetched)
         self.assertEqual(d["uniprot_id"], "")
         self.assertIsNone(d["gene_id"])
@@ -623,8 +644,8 @@ class NonInteractionModelTest(HippieTestCase):
         self.assertLessEqual(self.ni.protein_1_id, self.ni.protein_2_id)
 
     def test_make_noninteraction_canonicalizes_reversed_input(self):
-        a = Protein.objects.create(name="NI_TEST_A")
-        b = Protein.objects.create(name="NI_TEST_B")
+        a = make_protein("NI_TEST_A")
+        b = make_protein("NI_TEST_B")
         ni = make_noninteraction(b, a)
         self.assertLessEqual(ni.protein_1_id, ni.protein_2_id)
 
@@ -648,8 +669,9 @@ class NoninteractionDetailViewTest(HippieTestCase):
     def setUpTestData(cls):
         super().setUpTestData()
         cls.ni = make_noninteraction(cls.brca1, cls.tp53, score=0.25)
+        pub = Publication.objects.create(pmid=99001)
         cls.bp_test = BaitPreyTest.objects.create(
-            detection=True, pmid=99001, method=cls.exp
+            detection=True, publication=pub, method=cls.exp
         )
         cls.bp_assoc = BaitPreyAssociation.objects.create(
             noninteraction=cls.ni,
@@ -916,6 +938,9 @@ class GetIsoformsTest(HippieTestCase):
         cls.isoform = Isoform.objects.create(
             name="BRCA1_ISO2",
             isoform_uniprot_id="P38398-2",
+            gene=cls.brca1.gene,
+            uniprot_id="",
+            uniprot_accession="P38398-2",
         )
 
     def test_canonical_protein_returns_its_isoforms(self):
@@ -928,7 +953,7 @@ class GetIsoformsTest(HippieTestCase):
         self.assertEqual(isoforms, [])
 
     def test_protein_without_uniprot_mapping_returns_empty(self):
-        bare = Protein.objects.create(name="BARE_ISOTEST")
+        bare = make_protein("BARE_ISOTEST")
         self.assertEqual(_get_isoforms(bare.pk), [])
 
     def test_protein_without_accession_returns_empty(self):
@@ -1054,11 +1079,13 @@ class BaitPreyModelTest(HippieTestCase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
+        pub1 = Publication.objects.create(pmid=55555)
+        pub2 = Publication.objects.create(pmid=55556)
         cls.bp_test = BaitPreyTest.objects.create(
-            detection=True, pmid=55555, method=cls.exp
+            detection=True, publication=pub1, method=cls.exp
         )
         cls.bp_test_neg = BaitPreyTest.objects.create(
-            detection=False, pmid=55556, method=cls.exp
+            detection=False, publication=pub2, method=cls.exp
         )
         cls.ni = make_noninteraction(cls.brca1, cls.tp53, score=0.2)
         cls.bp_assoc = BaitPreyAssociation.objects.create(
@@ -1097,9 +1124,7 @@ class BaitPreyModelTest(HippieTestCase):
 
 class ProteinDisplayIsoformTest(HippieTestCase):
     def _fetch(self, protein):
-        return Protein.objects.prefetch_related("uniprot_ids", "entrez_ids").get(
-            pk=protein.pk
-        )
+        return Protein.objects.select_related("gene").get(pk=protein.pk)
 
     def test_isoform_uniprot_id_key_present(self):
         d = _protein_display(self._fetch(self.brca1))

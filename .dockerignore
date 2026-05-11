@@ -1,0 +1,37 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[codz]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+npm-debug.log
+
+# Local databases / build artefacts
+*.sqlite3
+hippie_django/db.sqlite3
+hippie_django/staticfiles/
+hippie_django/media/
+staticfiles/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Docs / misc
+README.md
+.env
+.env.*
+!.env.example
+docker-compose.override.yml

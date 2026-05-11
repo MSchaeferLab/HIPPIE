@@ -3,17 +3,20 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from pathlib import Path
 
 from hippie_website.models import (
     BaitPreyTest,
     BaitPreyAssociation,
     ExperimentType,
+    Gene,
     Interaction,
     Protein,
-    ProteinEntrez,
-    ProteinUniProt,
-    UniProtAccession,
+    Publication,
+    # ProteinEntrez,
+    # ProteinUniProt,
+    # UniProtAccession,
 )
 
 from django.core.management.base import BaseCommand, CommandError
@@ -27,6 +30,9 @@ UNIPROT_SEARCH = "https://rest.uniprot.org/uniprotkb/search"
 
 NCBI_RATE_LIMIT_SLEEP = 0.4  # stay within NCBI's 3 req/s limit (no API key)
 BATCH_SIZE = 100  # gene names per external API call
+MAX_UNIPROT_ACCESSION_LENGTH = 20
+MAX_UNIPROT_ID_LENGTH = 16
+FALLBACK_ENTREZ_ID_BASE = 2_000_000_000
 
 PSI_MI_CODE_MAP = {
     "MI-0006": "MI:0004",
@@ -133,6 +139,17 @@ def _fetch_uniprot_batch(gene_names):
     return mapping
 
 
+def _fallback_entrez_id(gene_name: str) -> int:
+    """Use a deterministic synthetic ID when NCBI has no Entrez hit for a gene."""
+    return FALLBACK_ENTREZ_ID_BASE + (zlib.crc32(gene_name.encode("utf-8")) & 0xFFFFFFFF)
+
+
+def _fallback_uniprot_data(gene_name: str) -> tuple[str, str]:
+    accession = gene_name[:MAX_UNIPROT_ACCESSION_LENGTH]
+    entry_id = f"{gene_name.upper()}_HUMAN"[:MAX_UNIPROT_ID_LENGTH]
+    return accession, entry_id
+
+
 class Command(BaseCommand):
     help = "Import bait-prey test data from a tab-separated CSV file."
 
@@ -184,15 +201,45 @@ class Command(BaseCommand):
             )
         )
         new_names = all_gene_names - existing
-        for name in new_names:
-            Protein.objects.get_or_create(name=name)
-
+        entrez_data = {}
+        uniprot_data = {}
         if new_names:
             self.stdout.write(
                 f"Fetching external data for {len(new_names)} new proteins …"
             )
-            self._enrich_proteins(
-                new_names, ProteinEntrez, ProteinUniProt, UniProtAccession
+            names = list(new_names)
+            for i in range(0, len(names), BATCH_SIZE):
+                chunk = names[i : i + BATCH_SIZE]
+                entrez_data.update(_fetch_entrez_batch(chunk))
+                time.sleep(NCBI_RATE_LIMIT_SLEEP)
+                uniprot_data.update(_fetch_uniprot_batch(chunk))
+        for name in new_names:
+            entrez = entrez_data.get(name)
+            if entrez is None:
+                gene, _ = Gene.objects.get_or_create(
+                    entrez_id=_fallback_entrez_id(name),
+                    defaults={"entrez_name": name},
+                )
+            else:
+                entrez_id, symbol = entrez
+                gene, _ = Gene.objects.get_or_create(
+                    entrez_id=entrez_id,
+                    defaults={"entrez_name": symbol or name},
+                )
+                if gene.entrez_name != (symbol or name):
+                    gene.entrez_name = symbol or name
+                    gene.save(update_fields=["entrez_name"])
+            accession, entry_id = uniprot_data.get(
+                name,
+                _fallback_uniprot_data(name),
+            )
+            Protein.objects.get_or_create(
+                name=name,
+                defaults={
+                    "gene": gene,
+                    "uniprot_accession": accession,
+                    "uniprot_id": entry_id,
+                },
             )
 
         # Name → Protein cache so pass 3 makes no per-row DB lookups
@@ -240,8 +287,11 @@ class Command(BaseCommand):
                 interaction=interaction,
                 direction=direction,
             )
+            publication, _ = Publication.objects.get_or_create(pmid=row["pmid"])
+            interaction.publications.add(publication)
+            interaction.experiments.add(method)
             bpt, _ = BaitPreyTest.objects.get_or_create(
-                pmid=row["pmid"],
+                publication=publication,
                 method=method,
                 detection=row["detection"],
             )

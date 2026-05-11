@@ -1,0 +1,100 @@
+services:
+
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE:      ${MARIADB_DATABASE}
+      MARIADB_USER:          ${MARIADB_USER}
+      MARIADB_PASSWORD:      ${MARIADB_PASSWORD}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - hippie_net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - hippie_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      RUN_MIGRATIONS: "1"
+      RUN_COLLECTSTATIC: "1"
+    volumes:
+      - static_volume:/code/hippie_django/staticfiles
+      - media_volume:/code/hippie_django/media
+    networks:
+      - hippie_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Worker should not race the web container on migrate/collectstatic.
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+    command: ["celery", "-A", "hippie", "worker", "-l", "info"]
+    volumes:
+      - media_volume:/code/hippie_django/media
+    networks:
+      - hippie_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+  apache:
+    build:
+      context: ./docker/apache
+    restart: unless-stopped
+    environment:
+      APACHE_PUBLISHED_PATH: ${APACHE_PUBLISHED_PATH}
+    volumes:
+      - static_volume:/vol/static:ro
+      - media_volume:/vol/media:ro
+    ports:
+      - "${HOST_PORT:-8080}:80"
+    networks:
+      - hippie_net
+    depends_on:
+      - web
+
+networks:
+  hippie_net:
+    driver: bridge
+
+volumes:
+  mariadb_data:
+  static_volume:
+  media_volume:

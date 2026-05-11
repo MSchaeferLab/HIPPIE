@@ -269,11 +269,12 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         from hippie_website.models import (
+            Gene,
             Protein,
             Isoform,
-            ProteinUniProt,
-            ProteinEntrez,
-            UniProtAccession,
+            # ProteinUniProt,
+            # ProteinEntrez,
+            # UniProtAccession,
             Tissue,
             ProteinTissue,
             Source,
@@ -283,7 +284,7 @@ class Command(BaseCommand):
             GOSlimTerm,
             MeSHTerm,
             Interaction,
-            InteractionPublication,
+            # InteractionPublication,
             InteractionCrossReference,
             SignalingEndpoint,
             OrthologInteraction,
@@ -295,15 +296,15 @@ class Command(BaseCommand):
             for M in [
                 BaitPreyAssociation,
                 InteractionCrossReference,
-                InteractionPublication,
+                # InteractionPublication,
                 OrthologInteraction,
                 Interaction,
                 SignalingEndpoint,
                 ProteinTissue,
                 Isoform,
-                ProteinEntrez,
-                ProteinUniProt,
-                UniProtAccession,
+                # ProteinEntrez,
+                # ProteinUniProt,
+                # UniProtAccession,
                 Protein,
                 Tissue,
                 Source,
@@ -394,37 +395,101 @@ class Command(BaseCommand):
 
         proteins = {}
         for symbol in GENE_SYMBOLS:
-            p, _ = Protein.objects.get_or_create(name=symbol)
+            try:
+                entrez_id = ENTREZ_IDS[symbol]
+            except KeyError as exc:
+                raise KeyError(f"Missing ENTREZ_IDS entry for {symbol}") from exc
+            try:
+                accession = ACCESSIONS[symbol]
+            except KeyError as exc:
+                raise KeyError(f"Missing ACCESSIONS entry for {symbol}") from exc
+            try:
+                uniprot_id = UNIPROT_IDS[symbol]
+            except KeyError as exc:
+                raise KeyError(f"Missing UNIPROT_IDS entry for {symbol}") from exc
+            gene, created = Gene.objects.get_or_create(
+                entrez_id=entrez_id,
+                defaults={"entrez_name": symbol},
+            )
+            if not created and gene.entrez_name != symbol:
+                gene.entrez_name = symbol
+                gene.save(update_fields=["entrez_name"])
+            p, created = Protein.objects.get_or_create(
+                name=symbol,
+                defaults={
+                    "gene": gene,
+                    "uniprot_accession": accession,
+                    "uniprot_id": uniprot_id,
+                },
+            )
+            if not created:
+                update_fields = []
+                if p.gene_id != gene.id:
+                    p.gene = gene
+                    update_fields.append("gene")
+                if p.uniprot_accession != accession:
+                    p.uniprot_accession = accession
+                    update_fields.append("uniprot_accession")
+                if p.uniprot_id != uniprot_id:
+                    p.uniprot_id = uniprot_id
+                    update_fields.append("uniprot_id")
+                if update_fields:
+                    p.save(update_fields=update_fields)
             proteins[symbol] = p
 
-            ProteinUniProt.objects.get_or_create(
-                protein=p,
-                uniprot_id=UNIPROT_IDS[symbol],
-                defaults={"version": 1},
-            )
+            # ProteinUniProt.objects.get_or_create(
+            #    protein=p,
+            #    uniprot_id=UNIPROT_IDS[symbol],
+            #    defaults={"version": 1},
+            # )
 
-            ProteinEntrez.objects.get_or_create(
-                protein=p,
-                gene_id=ENTREZ_IDS[symbol],
-                defaults={"name": symbol},
-            )
+            # ProteinEntrez.objects.get_or_create(
+            #    protein=p,
+            #    gene_id=ENTREZ_IDS[symbol],
+            #    defaults={"name": symbol},
+            # )
 
-            UniProtAccession.objects.get_or_create(
-                accession=ACCESSIONS[symbol],
-                uniprot_id=UNIPROT_IDS[symbol],
-            )
+            # UniProtAccession.objects.get_or_create(
+            #    accession=ACCESSIONS[symbol],
+            #    uniprot_id=UNIPROT_IDS[symbol],
+            # )
 
         # Isoforms for a few proteins (MTI — each Isoform IS a Protein row)
         isoforms = {}
         for symbol in ["BRCA1", "TP53", "EGFR"]:
+            protein = proteins.get(symbol)
+            if protein is None:
+                raise KeyError(
+                    f"Parent protein '{symbol}' not found in seeded proteins for isoform creation"
+                )
             for iso_num in range(2, 4):
                 iso_uniprot = f"{ACCESSIONS[symbol]}-{iso_num}"
-                isoform, _ = Isoform.objects.get_or_create(
+                isoform_entry_id = f"{UNIPROT_IDS[symbol]}_{iso_num}"[:16]
+                isoform, created = Isoform.objects.get_or_create(
                     isoform_uniprot_id=iso_uniprot,
                     defaults={
                         "name": f"{symbol} isoform {iso_num}",  # Protein.name
+                        "gene": protein.gene,
+                        "uniprot_accession": iso_uniprot,
+                        "uniprot_id": isoform_entry_id,
                     },
                 )
+                if not created:
+                    update_fields = []
+                    if isoform.name != f"{symbol} isoform {iso_num}":
+                        isoform.name = f"{symbol} isoform {iso_num}"
+                        update_fields.append("name")
+                    if isoform.gene_id != protein.gene_id:
+                        isoform.gene = protein.gene
+                        update_fields.append("gene")
+                    if isoform.uniprot_accession != iso_uniprot:
+                        isoform.uniprot_accession = iso_uniprot
+                        update_fields.append("uniprot_accession")
+                    if isoform.uniprot_id != isoform_entry_id:
+                        isoform.uniprot_id = isoform_entry_id
+                        update_fields.append("uniprot_id")
+                    if update_fields:
+                        isoform.save(update_fields=update_fields)
                 isoforms[iso_uniprot] = isoform
 
         # ---------------------------------------------------------------
@@ -581,13 +646,13 @@ class Command(BaseCommand):
 
         self.stdout.write("Creating publications…")
 
-        pmid_pool = list(range(20000000, 20000200))
-        for inter in interaction_objs:
-            for pmid in random.sample(pmid_pool, k=random.randint(1, 4)):
-                InteractionPublication.objects.get_or_create(
-                    interaction=inter,
-                    pmid=pmid,
-                )
+        # pmid_pool = list(range(20000000, 20000200))
+        # for inter in interaction_objs:
+        #    for pmid in random.sample(pmid_pool, k=random.randint(1, 4)):
+        #        InteractionPublication.objects.get_or_create(
+        #            interaction=inter,
+        #            pmid=pmid,
+        #        )
 
         # ---------------------------------------------------------------
         # 9. Cross-references  (some from HomoMINT, some from others)
@@ -670,9 +735,9 @@ class Command(BaseCommand):
         counts = [
             ("Protein", Protein),
             ("Isoform", Isoform),
-            ("ProteinUniProt", ProteinUniProt),
-            ("ProteinEntrez", ProteinEntrez),
-            ("UniProtAccession", UniProtAccession),
+            # ("ProteinUniProt", ProteinUniProt),
+            # ("ProteinEntrez", ProteinEntrez),
+            # ("UniProtAccession", UniProtAccession),
             ("Tissue", Tissue),
             ("ProteinTissue", ProteinTissue),
             ("Source", Source),
@@ -682,7 +747,7 @@ class Command(BaseCommand):
             ("GOSlimTerm", GOSlimTerm),
             ("MeSHTerm", MeSHTerm),
             ("Interaction", Interaction),
-            ("InteractionPublication", InteractionPublication),
+            # ("InteractionPublication", InteractionPublication),
             ("InteractionCrossReference", InteractionCrossReference),
             ("SignalingEndpoint", SignalingEndpoint),
             ("OrthologInteraction", OrthologInteraction),

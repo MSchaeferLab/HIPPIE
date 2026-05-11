@@ -3,33 +3,58 @@ from django.contrib import admin
 from .models import (
     BaitPreyAssociation,
     ExperimentType,
+    Gene,
+    GeneSynonym,
     GOSlimTerm,
     Interaction,
     InteractionCrossReference,
-    InteractionPublication,
     InteractionType,
     Isoform,
     MeSHTerm,
     NonInteraction,
     OrthologInteraction,
     Protein,
-    ProteinEntrez,
+    ProteinSynonym,
     ProteinTissue,
-    ProteinUniProt,
+    Publication,
     SignalingEndpoint,
     Source,
     Species,
     Tissue,
-    UniProtAccession,
     BaitPreyTest,
 )
 
 
+@admin.register(Gene)
+class GeneAdmin(admin.ModelAdmin):
+    list_display = ("id", "entrez_id", "entrez_name")
+    search_fields = ("=entrez_id", "entrez_name")
+    ordering = ("entrez_id",)
+
+
+@admin.register(GeneSynonym)
+class GeneSynonymAdmin(admin.ModelAdmin):
+    list_display = ("id", "gene", "synonym")
+    search_fields = ("synonym", "gene__entrez_name")
+    list_select_related = ("gene",)
+    autocomplete_fields = ("gene",)
+
+
 @admin.register(Protein)
 class ProteinAdmin(admin.ModelAdmin):
-    list_display = ("id", "name")
-    search_fields = ("name",)
+    list_display = ("id", "name", "uniprot_accession", "uniprot_id", "gene")
+    search_fields = ("name", "uniprot_accession", "uniprot_id", "gene__entrez_name")
     ordering = ("name",)
+    list_select_related = ("gene",)
+    autocomplete_fields = ("gene",)
+
+
+@admin.register(ProteinSynonym)
+class ProteinSynonymAdmin(admin.ModelAdmin):
+    list_display = ("id", "protein", "synonym")
+    search_fields = ("synonym", "protein__name")
+    list_select_related = ("protein",)
+    autocomplete_fields = ("protein",)
 
 
 @admin.register(Isoform)
@@ -39,33 +64,14 @@ class IsoformAdmin(admin.ModelAdmin):
 
     @admin.display(description="Parent protein")
     def parent_symbol(self, obj):
-        # obj.protein_ptr is the parent Protein instance
         return obj.protein_ptr.name
 
 
-@admin.register(ProteinUniProt)
-class ProteinUniProtAdmin(admin.ModelAdmin):
-    list_display = ("id", "uniprot_id", "version", "protein")
-    search_fields = ("uniprot_id", "protein__name")
-    list_filter = ("version",)
-    list_select_related = ("protein",)
-    autocomplete_fields = ("protein",)
-
-
-@admin.register(ProteinEntrez)
-class ProteinEntrezAdmin(admin.ModelAdmin):
-    list_display = ("id", "gene_id", "name", "protein")
-    search_fields = ("=gene_id", "name", "protein__name")
-    list_filter = ("name",)
-    list_select_related = ("protein",)
-    autocomplete_fields = ("protein",)
-
-
-@admin.register(UniProtAccession)
-class UniProtAccessionAdmin(admin.ModelAdmin):
-    list_display = ("id", "accession", "uniprot_id")
-    search_fields = ("accession", "uniprot_id")
-    ordering = ("accession",)
+@admin.register(Publication)
+class PublicationAdmin(admin.ModelAdmin):
+    list_display = ("id", "pmid")
+    search_fields = ("=pmid",)
+    ordering = ("pmid",)
 
 
 @admin.register(Tissue)
@@ -153,25 +159,8 @@ class InteractionAdmin(admin.ModelAdmin):
         "interaction_types",
         "go_terms",
         "mesh_terms",
+        "publications",
     )
-
-
-@admin.register(InteractionPublication)
-class InteractionPublicationAdmin(admin.ModelAdmin):
-    list_display = ("id", "interaction", "pmid")
-    search_fields = (
-        "=pmid",
-        "=interaction__id",
-        "interaction__protein_1__name",
-        "interaction__protein_2__name",
-    )
-    list_filter = ("pmid",)
-    list_select_related = (
-        "interaction",
-        "interaction__protein_1",
-        "interaction__protein_2",
-    )
-    autocomplete_fields = ("interaction",)
 
 
 @admin.register(InteractionCrossReference)
@@ -220,7 +209,7 @@ class BaitPreyAssociationAdmin(admin.ModelAdmin):
         "=interaction__id",
         "interaction__protein_1__name",
         "interaction__protein_2__name",
-        "=tests_performed__pmid",
+        "=tests_performed__publication__pmid",
     )
     list_filter = ("direction",)
     list_select_related = (
@@ -242,7 +231,8 @@ class NonInteractionAdmin(admin.ModelAdmin):
 
 @admin.register(BaitPreyTest)
 class BaitPreyTestAdmin(admin.ModelAdmin):
-    list_display = ("id", "detection", "pmid", "method")
-    search_fields = ("detection", "=pmid", "method")
+    list_display = ("id", "detection", "publication", "method")
+    search_fields = ("detection", "=publication__pmid", "method")
     list_filter = ("detection",)
-    ordering = ("-pmid",)
+    ordering = ("-publication__pmid",)
+    autocomplete_fields = ("publication",)
