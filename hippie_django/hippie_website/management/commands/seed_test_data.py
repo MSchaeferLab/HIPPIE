@@ -400,7 +400,10 @@ class Command(BaseCommand):
                 accession = ACCESSIONS[symbol]
                 uniprot_id = UNIPROT_IDS[symbol]
             except KeyError as exc:
-                raise KeyError(f"Missing seed identifier mapping for {symbol}") from exc
+                missing_identifier = exc.args[0] if exc.args else "unknown"
+                raise KeyError(
+                    f"Missing seed identifier for {symbol}: {missing_identifier}"
+                ) from exc
             gene, created = Gene.objects.get_or_create(
                 entrez_id=entrez_id,
                 defaults={"entrez_name": symbol},
@@ -453,7 +456,9 @@ class Command(BaseCommand):
         for symbol in ["BRCA1", "TP53", "EGFR"]:
             protein = proteins.get(symbol)
             if protein is None:
-                raise KeyError(f"Missing seeded protein for isoform {symbol}")
+                raise KeyError(
+                    f"Parent protein '{symbol}' not found in seeded proteins for isoform creation"
+                )
             for iso_num in range(2, 4):
                 iso_uniprot = f"{ACCESSIONS[symbol]}-{iso_num}"
                 isoform, created = Isoform.objects.get_or_create(

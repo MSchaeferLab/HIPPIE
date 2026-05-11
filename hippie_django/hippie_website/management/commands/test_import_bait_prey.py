@@ -31,7 +31,6 @@ UNIPROT_SEARCH = "https://rest.uniprot.org/uniprotkb/search"
 NCBI_RATE_LIMIT_SLEEP = 0.4  # stay within NCBI's 3 req/s limit (no API key)
 BATCH_SIZE = 100  # gene names per external API call
 MAX_UNIPROT_ACCESSION_LENGTH = 20
-MAX_UNIPROT_ID_GENE_PREFIX_LENGTH = 10
 MAX_UNIPROT_ID_LENGTH = 16
 FALLBACK_ENTREZ_ID_BASE = 2_000_000_000
 
@@ -141,14 +140,13 @@ def _fetch_uniprot_batch(gene_names):
 
 
 def _fallback_entrez_id(gene_name: str) -> int:
+    """Use a deterministic synthetic ID when NCBI has no Entrez hit for a gene."""
     return FALLBACK_ENTREZ_ID_BASE + zlib.crc32(gene_name.encode("utf-8"))
 
 
 def _fallback_uniprot_data(gene_name: str) -> tuple[str, str]:
     accession = gene_name[:MAX_UNIPROT_ACCESSION_LENGTH]
-    entry_id = f"{gene_name[:MAX_UNIPROT_ID_GENE_PREFIX_LENGTH].upper()}_HUMAN"[
-        :MAX_UNIPROT_ID_LENGTH
-    ]
+    entry_id = f"{gene_name.upper()}_HUMAN"[:MAX_UNIPROT_ID_LENGTH]
     return accession, entry_id
 
 
