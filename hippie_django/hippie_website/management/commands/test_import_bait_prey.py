@@ -3,6 +3,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from pathlib import Path
 
 from hippie_website.models import (
@@ -29,6 +30,10 @@ UNIPROT_SEARCH = "https://rest.uniprot.org/uniprotkb/search"
 
 NCBI_RATE_LIMIT_SLEEP = 0.4  # stay within NCBI's 3 req/s limit (no API key)
 BATCH_SIZE = 100  # gene names per external API call
+MAX_UNIPROT_ACCESSION_LENGTH = 20
+MAX_UNIPROT_ID_GENE_PREFIX_LENGTH = 10
+MAX_UNIPROT_ID_LENGTH = 16
+FALLBACK_ENTREZ_ID_BASE = 2_000_000_000
 
 PSI_MI_CODE_MAP = {
     "MI-0006": "MI:0004",
@@ -135,6 +140,18 @@ def _fetch_uniprot_batch(gene_names):
     return mapping
 
 
+def _fallback_entrez_id(gene_name: str) -> int:
+    return FALLBACK_ENTREZ_ID_BASE + zlib.crc32(gene_name.encode("utf-8"))
+
+
+def _fallback_uniprot_data(gene_name: str) -> tuple[str, str]:
+    accession = gene_name[:MAX_UNIPROT_ACCESSION_LENGTH]
+    entry_id = f"{gene_name[:MAX_UNIPROT_ID_GENE_PREFIX_LENGTH].upper()}_HUMAN"[
+        :MAX_UNIPROT_ID_LENGTH
+    ]
+    return accession, entry_id
+
+
 class Command(BaseCommand):
     help = "Import bait-prey test data from a tab-separated CSV file."
 
@@ -202,7 +219,8 @@ class Command(BaseCommand):
             entrez = entrez_data.get(name)
             if entrez is None:
                 gene, _ = Gene.objects.get_or_create(
-                    entrez_name=name, defaults={"entrez_id": 0}
+                    entrez_id=_fallback_entrez_id(name),
+                    defaults={"entrez_name": name},
                 )
             else:
                 entrez_id, symbol = entrez
@@ -215,7 +233,7 @@ class Command(BaseCommand):
                     gene.save(update_fields=["entrez_name"])
             accession, entry_id = uniprot_data.get(
                 name,
-                (name[:20], f"{name[:10].upper()}_HUMAN"[:16]),
+                _fallback_uniprot_data(name),
             )
             Protein.objects.get_or_create(
                 name=name,

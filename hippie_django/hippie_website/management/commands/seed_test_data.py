@@ -395,8 +395,14 @@ class Command(BaseCommand):
 
         proteins = {}
         for symbol in GENE_SYMBOLS:
+            try:
+                entrez_id = ENTREZ_IDS[symbol]
+                accession = ACCESSIONS[symbol]
+                uniprot_id = UNIPROT_IDS[symbol]
+            except KeyError as exc:
+                raise KeyError(f"Missing seed identifier mapping for {symbol}") from exc
             gene, created = Gene.objects.get_or_create(
-                entrez_id=ENTREZ_IDS[symbol],
+                entrez_id=entrez_id,
                 defaults={"entrez_name": symbol},
             )
             if not created and gene.entrez_name != symbol:
@@ -406,8 +412,8 @@ class Command(BaseCommand):
                 name=symbol,
                 defaults={
                     "gene": gene,
-                    "uniprot_accession": ACCESSIONS[symbol],
-                    "uniprot_id": UNIPROT_IDS[symbol],
+                    "uniprot_accession": accession,
+                    "uniprot_id": uniprot_id,
                 },
             )
             if not created:
@@ -415,11 +421,11 @@ class Command(BaseCommand):
                 if p.gene_id != gene.id:
                     p.gene = gene
                     update_fields.append("gene")
-                if p.uniprot_accession != ACCESSIONS[symbol]:
-                    p.uniprot_accession = ACCESSIONS[symbol]
+                if p.uniprot_accession != accession:
+                    p.uniprot_accession = accession
                     update_fields.append("uniprot_accession")
-                if p.uniprot_id != UNIPROT_IDS[symbol]:
-                    p.uniprot_id = UNIPROT_IDS[symbol]
+                if p.uniprot_id != uniprot_id:
+                    p.uniprot_id = uniprot_id
                     update_fields.append("uniprot_id")
                 if update_fields:
                     p.save(update_fields=update_fields)
@@ -445,13 +451,16 @@ class Command(BaseCommand):
         # Isoforms for a few proteins (MTI — each Isoform IS a Protein row)
         isoforms = {}
         for symbol in ["BRCA1", "TP53", "EGFR"]:
+            protein = proteins.get(symbol)
+            if protein is None:
+                raise KeyError(f"Missing seeded protein for isoform {symbol}")
             for iso_num in range(2, 4):
                 iso_uniprot = f"{ACCESSIONS[symbol]}-{iso_num}"
                 isoform, created = Isoform.objects.get_or_create(
                     isoform_uniprot_id=iso_uniprot,
                     defaults={
                         "name": f"{symbol} isoform {iso_num}",  # Protein.name
-                        "gene": proteins[symbol].gene,
+                        "gene": protein.gene,
                         "uniprot_accession": iso_uniprot,
                         "uniprot_id": f"{UNIPROT_IDS[symbol]}_{iso_num}"[:16],
                     },
@@ -461,8 +470,8 @@ class Command(BaseCommand):
                     if isoform.name != f"{symbol} isoform {iso_num}":
                         isoform.name = f"{symbol} isoform {iso_num}"
                         update_fields.append("name")
-                    if isoform.gene_id != proteins[symbol].gene_id:
-                        isoform.gene = proteins[symbol].gene
+                    if isoform.gene_id != protein.gene_id:
+                        isoform.gene = protein.gene
                         update_fields.append("gene")
                     if isoform.uniprot_accession != iso_uniprot:
                         isoform.uniprot_accession = iso_uniprot
