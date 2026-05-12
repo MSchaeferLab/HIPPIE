@@ -4,7 +4,7 @@ import { resolve } from "path";
 
 export default defineConfig({
   plugins: [react()],
-  base: "/static/",
+  base: "/hippienew/static/",
   build: {
     outDir: "hippie_django/hippie_website/static/hippie_website/js",
     emptyOutDir: true,
