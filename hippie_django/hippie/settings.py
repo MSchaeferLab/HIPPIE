@@ -140,6 +140,8 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+FORCE_SCRIPT_NAME = os.environ.get("DJANGO_SCRIPT_NAME", "")
+
 DJANGO_VITE = {
     "default": {
         "dev_mode": False,

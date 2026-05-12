@@ -1,9 +1,9 @@
-Django==6.0.3
+Django==5.2.14
 ruff==0.15.11
 pre-commit==4.5.1
 mysqlclient>=2.2
 celery[redis]>=5.3
 networkx>=3.3
-numpy>=1.26
+numpy<1.26
 django-vite==3.1.0
 gunicorn>=21.2
