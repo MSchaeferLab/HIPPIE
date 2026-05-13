@@ -25,8 +25,8 @@
 
     ProxyPass        ${APACHE_PUBLISHED_PATH}/static/ !
     ProxyPass        ${APACHE_PUBLISHED_PATH}/media/  !
-    ProxyPass        / http://web:8000/ timeout=120
-    ProxyPassReverse / http://web:8000/
+    ProxyPass        ${APACHE_PUBLISHED_PATH}/ http://web:8000/ timeout=120
+    ProxyPassReverse ${APACHE_PUBLISHED_PATH}/ http://web:8000/
 
     # mod_proxy_http already sets X-Forwarded-For; add the proto.
     RequestHeader set X-Forwarded-Proto expr=%{REQUEST_SCHEME}
