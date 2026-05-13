@@ -429,8 +429,8 @@ class Command(BaseCommand):
                     if isoform.name != f"{symbol} isoform {iso_num}":
                         isoform.name = f"{symbol} isoform {iso_num}"
                         update_fields.append("name")
-                    if isoform.gene_id != protein.gene_id:
-                        isoform.gene = protein.gene
+                    if isoform.gene_id != proteins[symbol].gene_id:
+                        isoform.gene = proteins[symbol].gene
                         update_fields.append("gene")
                     if isoform.uniprot_accession != iso_uniprot:
                         isoform.uniprot_accession = iso_uniprot

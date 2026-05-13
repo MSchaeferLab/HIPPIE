@@ -3,51 +3,42 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import zlib
 from pathlib import Path
-
-from hippie_website.models import (
-    BaitPreyTest,
-    BaitPreyAssociation,
-    ExperimentType,
-    Gene,
-    Interaction,
-    Publication,
-    Protein,
-)
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+
+from hippie_website.models import (
+    BaitPreyAssociation,
+    BaitPreyTest,
+    ExperimentType,
+    Gene,
+    Interaction,
+    Protein,
+    Publication,
+)
 
 DEFAULT_DATA_FILE = Path(__file__).resolve().parents[3] / "data" / "dummy-MI-0006.csv"
 
 NCBI_ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 NCBI_ESUMMARY = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 UNIPROT_SEARCH = "https://rest.uniprot.org/uniprotkb/search"
-
 NCBI_RATE_LIMIT_SLEEP = 0.4  # stay within NCBI's 3 req/s limit (no API key)
 BATCH_SIZE = 100  # gene names per external API call
-MAX_UNIPROT_ACCESSION_LENGTH = 20
-MAX_UNIPROT_ID_LENGTH = 16
-FALLBACK_ENTREZ_ID_BASE = 2_000_000_000
 
 PSI_MI_CODE_MAP = {
     "MI-0006": "MI:0004",
 }
 
 
-def _get_json(url):
+def _get_json(url: str) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read())
 
 
-def _fetch_entrez_batch(gene_names):
-    """
-    Batch-fetch Entrez gene data for a list of gene symbols.
-    Returns {gene_name: (gene_id, official_symbol)} for every hit found.
-    Unmatched names are silently omitted.
-    """
+def _fetch_entrez_batch(gene_names: list[str]) -> dict[str, tuple[int, str]]:
+    """Returns {gene_name: (entrez_id, official_symbol)} for matched human genes."""
     term = (
         "(" + " OR ".join(f"{n}[Gene Name]" for n in gene_names) + ")"
         " AND 9606[Taxonomy ID]"
@@ -60,7 +51,7 @@ def _fetch_entrez_batch(gene_names):
                 "db": "gene",
                 "term": term,
                 "retmode": "json",
-                "retmax": str(len(gene_names) * 2),  # allow room for aliases
+                "retmax": str(len(gene_names) * 2),
             }
         )
     )
@@ -73,11 +64,7 @@ def _fetch_entrez_batch(gene_names):
             NCBI_ESUMMARY
             + "?"
             + urllib.parse.urlencode(
-                {
-                    "db": "gene",
-                    "id": ",".join(ids),
-                    "retmode": "json",
-                }
+                {"db": "gene", "id": ",".join(ids), "retmode": "json"}
             )
         )
         result = _get_json(summary_url)["result"]
@@ -85,7 +72,7 @@ def _fetch_entrez_batch(gene_names):
         return {}
 
     lookup = {n.upper(): n for n in gene_names}
-    mapping = {}
+    mapping: dict[str, tuple[int, str]] = {}
     for gene_id_str, summary in result.items():
         if gene_id_str == "uids":
             continue
@@ -96,12 +83,8 @@ def _fetch_entrez_batch(gene_names):
     return mapping
 
 
-def _fetch_uniprot_batch(gene_names):
-    """
-    Batch-fetch UniProt data for a list of gene symbols.
-    Returns {gene_name: (accession, entry_id)} for every reviewed human hit.
-    Unmatched names are silently omitted.
-    """
+def _fetch_uniprot_batch(gene_names: list[str]) -> dict[str, tuple[str, str]]:
+    """Returns {gene_name: (accession, uniprot_id)} for reviewed human hits."""
     gene_list = " OR ".join(f"gene_exact:{n}" for n in gene_names)
     url = (
         UNIPROT_SEARCH
@@ -121,10 +104,10 @@ def _fetch_uniprot_batch(gene_names):
         return {}
 
     lookup = {n.upper(): n for n in gene_names}
-    mapping = {}
+    mapping: dict[str, tuple[str, str]] = {}
     for hit in results:
-        accession = hit.get("primaryAccession")
-        entry_id = hit.get("uniProtkbId")
+        accession = hit.get("primaryAccession", "")
+        entry_id = hit.get("uniProtkbId", "")
         if not accession or not entry_id:
             continue
         for gene in hit.get("genes", []):
@@ -134,17 +117,6 @@ def _fetch_uniprot_batch(gene_names):
                 mapping[original] = (accession, entry_id)
                 break
     return mapping
-
-
-def _fallback_entrez_id(gene_name: str) -> int:
-    """Use a deterministic synthetic ID when NCBI has no Entrez hit for a gene."""
-    return FALLBACK_ENTREZ_ID_BASE + (zlib.crc32(gene_name.encode("utf-8")) & 0xFFFFFFFF)
-
-
-def _fallback_uniprot_data(gene_name: str) -> tuple[str, str]:
-    accession = gene_name[:MAX_UNIPROT_ACCESSION_LENGTH]
-    entry_id = f"{gene_name.upper()}_HUMAN"[:MAX_UNIPROT_ID_LENGTH]
-    return accession, entry_id
 
 
 class Command(BaseCommand):
@@ -213,9 +185,8 @@ class Command(BaseCommand):
             )
 
         if new_names:
-            self.stdout.write(
-                f"Fetching external data for {len(new_names)} new proteins …"
-            )
+            self.stdout.write(f"Created {len(new_names)} new protein stubs, enriching…")
+            self._enrich_proteins(new_names)
 
         # Name → Protein cache so pass 3 makes no per-row DB lookups
         proteins = {p.name: p for p in Protein.objects.filter(name__in=all_gene_names)}
@@ -277,15 +248,18 @@ class Command(BaseCommand):
             )
         )
 
-    def _enrich_proteins(
-        self, gene_names, ProteinEntrez, ProteinUniProt, UniProtAccession
-    ):
-        """Batch-fetch Entrez and UniProt data for a set of newly created proteins."""
-        names = list(gene_names)
+    def _enrich_proteins(self, new_names: set[str]) -> None:
+        """
+        Batch-fetch Entrez + UniProt data for newly created Gene/Protein stubs.
+        Writes directly to Gene.entrez_id/entrez_name and
+        Protein.uniprot_accession/uniprot_id.
+        """
+        names = list(new_names)
+        total_batches = (len(names) + BATCH_SIZE - 1) // BATCH_SIZE
+
         for i in range(0, len(names), BATCH_SIZE):
             chunk = names[i : i + BATCH_SIZE]
             batch_num = i // BATCH_SIZE + 1
-            total_batches = (len(names) + BATCH_SIZE - 1) // BATCH_SIZE
 
             self.stdout.write(
                 f"  Entrez  batch {batch_num}/{total_batches} ({len(chunk)} genes) …"
@@ -298,33 +272,42 @@ class Command(BaseCommand):
             )
             uniprot_data = _fetch_uniprot_batch(chunk)
 
-            proteins = {p.name: p for p in Protein.objects.filter(name__in=chunk)}
+            proteins = {
+                p.name: p
+                for p in Protein.objects.select_related("gene").filter(name__in=chunk)
+            }
 
             for name in chunk:
                 protein = proteins.get(name)
                 if not protein:
                     continue
 
+                gene = protein.gene
+
                 if name in entrez_data:
-                    gene_id, symbol = entrez_data[name]
-                    ProteinEntrez.objects.get_or_create(
-                        protein=protein,
-                        gene_id=gene_id,
-                        defaults={"name": symbol or name},
-                    )
+                    entrez_id, symbol = entrez_data[name]
+                    gene_fields: list[str] = []
+                    if gene.entrez_id != entrez_id:
+                        gene.entrez_id = entrez_id
+                        gene_fields.append("entrez_id")
+                    if gene.entrez_name != symbol:
+                        gene.entrez_name = symbol[:40]
+                        gene_fields.append("entrez_name")
+                    if gene_fields:
+                        gene.save(update_fields=gene_fields)
                 else:
-                    self.stderr.write(f"  Warning: no Entrez entry found for '{name}'")
+                    self.stderr.write(f"  Warning: no Entrez entry for '{name}'")
 
                 if name in uniprot_data:
                     accession, entry_id = uniprot_data[name]
-                    ProteinUniProt.objects.get_or_create(
-                        protein=protein,
-                        uniprot_id=entry_id,
-                        defaults={"version": 1},
-                    )
-                    UniProtAccession.objects.get_or_create(
-                        accession=accession,
-                        uniprot_id=entry_id,
-                    )
+                    protein_fields: list[str] = []
+                    if protein.uniprot_accession != accession:
+                        protein.uniprot_accession = accession[:20]
+                        protein_fields.append("uniprot_accession")
+                    if protein.uniprot_id != entry_id:
+                        protein.uniprot_id = entry_id[:16]
+                        protein_fields.append("uniprot_id")
+                    if protein_fields:
+                        protein.save(update_fields=protein_fields)
                 else:
-                    self.stderr.write(f"  Warning: no UniProt entry found for '{name}'")
+                    self.stderr.write(f"  Warning: no UniProt entry for '{name}'")
