@@ -286,6 +286,7 @@ class Command(BaseCommand):
             InteractionCrossReference,
             SignalingEndpoint,
             OrthologInteraction,
+            NonInteraction,
             BaitPreyAssociation,
             BaitPreyTest,
         )
@@ -295,6 +296,7 @@ class Command(BaseCommand):
             for M in [
                 BaitPreyAssociation,
                 BaitPreyTest,
+                NonInteraction,
                 InteractionCrossReference,
                 OrthologInteraction,
                 Interaction,
@@ -675,6 +677,92 @@ class Command(BaseCommand):
                 )
 
         # ---------------------------------------------------------------
+        # 12. Non-interactions  (~10 protein pairs known to not interact)
+        # ---------------------------------------------------------------
+
+        self.stdout.write("Creating non-interactions…")
+
+        noninteraction_objs = []
+        ni_candidates = [
+            ("BRCA1", "EGFR"),
+            ("TP53", "KRAS"),
+            ("MYC", "PTEN"),
+            ("FOS", "PIK3CA"),
+            ("RB1", "SRC"),
+            ("HTT", "ABL1"),
+            ("VHL", "JAK2"),
+            ("CDH1", "NRAS"),
+            ("SMAD4", "ELK1"),
+            ("APC", "RAF1"),
+        ]
+        for sym1, sym2 in ni_candidates:
+            p1, p2 = proteins[sym1], proteins[sym2]
+            if p1.pk > p2.pk:
+                p1, p2 = p2, p1
+            pair = (p1.pk, p2.pk)
+            if pair in created_pairs:
+                continue  # already an interaction — skip
+            ni, _ = NonInteraction.objects.get_or_create(
+                protein_1=p1,
+                protein_2=p2,
+                defaults={"score": round(random.uniform(0.01, 0.25), 4)},
+            )
+            noninteraction_objs.append(ni)
+
+        # ---------------------------------------------------------------
+        # 13. BaitPreyTests  (detected + not-detected variants)
+        # ---------------------------------------------------------------
+
+        self.stdout.write("Creating bait-prey tests…")
+
+        bp_method = exp_types["Affinity Capture-MS"]
+        bp_tests = []
+        for pmid in [20000060, 20000061, 20000062]:
+            pub, _ = Publication.objects.get_or_create(pmid=pmid)
+            for detected in (True, False):
+                bpt, _ = BaitPreyTest.objects.get_or_create(
+                    detection=detected,
+                    publication=pub,
+                    method=bp_method,
+                )
+                bp_tests.append(bpt)
+
+        # ---------------------------------------------------------------
+        # 14. BaitPreyAssociations  (link tests to interactions + noninteractions)
+        # ---------------------------------------------------------------
+
+        self.stdout.write("Creating bait-prey associations…")
+
+        directions = [
+            BaitPreyAssociation.Directions.PROTEIN_ONE_BAIT,
+            BaitPreyAssociation.Directions.PROTEIN_TWO_BAIT,
+        ]
+
+        for inter in interaction_objs[:10]:
+            direction = random.choice(directions)
+            assoc, created = BaitPreyAssociation.objects.get_or_create(
+                interaction=inter,
+                direction=direction,
+            )
+            if created:
+                assoc.tests_performed.set(
+                    random.sample(bp_tests, k=random.randint(1, min(3, len(bp_tests))))
+                )
+
+        for ni in noninteraction_objs:
+            direction = random.choice(directions)
+            if not BaitPreyAssociation.objects.filter(
+                noninteraction=ni, direction=direction
+            ).exists():
+                assoc = BaitPreyAssociation.objects.create(
+                    noninteraction=ni,
+                    direction=direction,
+                )
+                assoc.tests_performed.set(
+                    random.sample(bp_tests, k=random.randint(1, min(3, len(bp_tests))))
+                )
+
+        # ---------------------------------------------------------------
         # Summary
         # ---------------------------------------------------------------
 
@@ -694,9 +782,11 @@ class Command(BaseCommand):
             ("MeSHTerm", MeSHTerm),
             ("Publication", Publication),
             ("Interaction", Interaction),
+            ("NonInteraction", NonInteraction),
             ("InteractionCrossReference", InteractionCrossReference),
             ("SignalingEndpoint", SignalingEndpoint),
             ("OrthologInteraction", OrthologInteraction),
+            ("BaitPreyTest", BaitPreyTest),
             ("BaitPreyAssociation", BaitPreyAssociation),
         ]
         for label, model in counts:
