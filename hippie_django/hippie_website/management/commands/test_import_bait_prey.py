@@ -12,11 +12,8 @@ from hippie_website.models import (
     ExperimentType,
     Gene,
     Interaction,
-    Protein,
     Publication,
-    # ProteinEntrez,
-    # ProteinUniProt,
-    # UniProtAccession,
+    Protein,
 )
 
 from django.core.management.base import BaseCommand, CommandError
@@ -201,45 +198,23 @@ class Command(BaseCommand):
             )
         )
         new_names = all_gene_names - existing
-        entrez_data = {}
-        uniprot_data = {}
-        if new_names:
-            self.stdout.write(
-                f"Fetching external data for {len(new_names)} new proteins …"
-            )
-            names = list(new_names)
-            for i in range(0, len(names), BATCH_SIZE):
-                chunk = names[i : i + BATCH_SIZE]
-                entrez_data.update(_fetch_entrez_batch(chunk))
-                time.sleep(NCBI_RATE_LIMIT_SLEEP)
-                uniprot_data.update(_fetch_uniprot_batch(chunk))
         for name in new_names:
-            entrez = entrez_data.get(name)
-            if entrez is None:
-                gene, _ = Gene.objects.get_or_create(
-                    entrez_id=_fallback_entrez_id(name),
-                    defaults={"entrez_name": name},
-                )
-            else:
-                entrez_id, symbol = entrez
-                gene, _ = Gene.objects.get_or_create(
-                    entrez_id=entrez_id,
-                    defaults={"entrez_name": symbol or name},
-                )
-                if gene.entrez_name != (symbol or name):
-                    gene.entrez_name = symbol or name
-                    gene.save(update_fields=["entrez_name"])
-            accession, entry_id = uniprot_data.get(
-                name,
-                _fallback_uniprot_data(name),
+            gene, _ = Gene.objects.get_or_create(
+                entrez_name=name,
+                defaults={"entrez_id": 0},
             )
             Protein.objects.get_or_create(
                 name=name,
                 defaults={
                     "gene": gene,
-                    "uniprot_accession": accession,
-                    "uniprot_id": entry_id,
+                    "uniprot_accession": "",
+                    "uniprot_id": "",
                 },
+            )
+
+        if new_names:
+            self.stdout.write(
+                f"Fetching external data for {len(new_names)} new proteins …"
             )
 
         # Name → Protein cache so pass 3 makes no per-row DB lookups
@@ -287,11 +262,9 @@ class Command(BaseCommand):
                 interaction=interaction,
                 direction=direction,
             )
-            publication, _ = Publication.objects.get_or_create(pmid=row["pmid"])
-            interaction.publications.add(publication)
-            interaction.experiments.add(method)
+            pub, _ = Publication.objects.get_or_create(pmid=row["pmid"])
             bpt, _ = BaitPreyTest.objects.get_or_create(
-                publication=publication,
+                publication=pub,
                 method=method,
                 detection=row["detection"],
             )

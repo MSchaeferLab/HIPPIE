@@ -63,8 +63,20 @@ docker compose up -d
 ```
 
 Open `http://localhost:8080/`. To deploy under a sub-path, set
-`APACHE_PUBLISHED_PATH=/your-prefix` in `.env` before `up`; Apache will
+`APACHE_PUBLISHED_PATH=/hippie` in `.env` before `up`; Apache will
 mount `/static/` and `/media/` under that prefix via `Alias` directives.
+
+Add the following block to your /etc/apache2/apache2.conf:
+
+```apache
+# HIPPIE Django app
+RedirectMatch ^/hippie$ /hippie/
+ProxyPreserveHost On
+ProxyPass        /hippie/  http://localhost:8080/hippie/
+ProxyPassReverse /hippie/  http://localhost:8080/hippie/
+RequestHeader    set X-Forwarded-Proto "https"
+RequestHeader    set X-Forwarded-Port  "443"
+```
 
 Useful one-shots:
 

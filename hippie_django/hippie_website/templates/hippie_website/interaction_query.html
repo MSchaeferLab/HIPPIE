@@ -3,9 +3,8 @@
 {% block title %}Interaction Query{% endblock %}
 {% block nav_interaction_query %}active{% endblock %}
 
-{% csrf_token %}  {# renders a hidden input, which also sets the cookie #}
-
 {% block content %}
+{% csrf_token %}
 <script>
   window.HIPPIE_IQ_CONFIG = {
     apiUrl:    "{% url 'hippie_website:interaction_query_api' %}",
