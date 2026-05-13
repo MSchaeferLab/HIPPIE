@@ -157,7 +157,7 @@ DJANGO_VITE = {
     }
 }
 
-default_auto_field = "django.db.models.BigAutoField"
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ── Media files (split zips) ───────────────────────────────────────────────
 MEDIA_ROOT = BASE_DIR / "media"

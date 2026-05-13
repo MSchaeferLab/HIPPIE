@@ -269,11 +269,10 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         from hippie_website.models import (
+            Gene,
+            GeneSynonym,
             Protein,
             Isoform,
-            # ProteinUniProt,
-            # ProteinEntrez,
-            # UniProtAccession,
             Tissue,
             ProteinTissue,
             Source,
@@ -282,29 +281,29 @@ class Command(BaseCommand):
             Species,
             GOSlimTerm,
             MeSHTerm,
+            Publication,
             Interaction,
-            # InteractionPublication,
             InteractionCrossReference,
             SignalingEndpoint,
             OrthologInteraction,
             BaitPreyAssociation,
+            BaitPreyTest,
         )
 
         if options["flush"]:
             self.stdout.write("Flushing existing data…")
             for M in [
                 BaitPreyAssociation,
+                BaitPreyTest,
                 InteractionCrossReference,
-                # InteractionPublication,
                 OrthologInteraction,
                 Interaction,
                 SignalingEndpoint,
                 ProteinTissue,
                 Isoform,
-                # ProteinEntrez,
-                # ProteinUniProt,
-                # UniProtAccession,
                 Protein,
+                GeneSynonym,
+                Gene,
                 Tissue,
                 Source,
                 ExperimentType,
@@ -312,6 +311,7 @@ class Command(BaseCommand):
                 Species,
                 GOSlimTerm,
                 MeSHTerm,
+                Publication,
             ]:
                 M.objects.all().delete()
             self.stdout.write(self.style.SUCCESS("  Done."))
@@ -394,35 +394,33 @@ class Command(BaseCommand):
 
         proteins = {}
         for symbol in GENE_SYMBOLS:
-            p, _ = Protein.objects.get_or_create(name=symbol)
+            gene, _ = Gene.objects.get_or_create(
+                entrez_id=ENTREZ_IDS[symbol],
+                defaults={"entrez_name": symbol},
+            )
+            p, _ = Protein.objects.get_or_create(
+                name=symbol,
+                defaults={
+                    "gene": gene,
+                    "uniprot_accession": ACCESSIONS[symbol],
+                    "uniprot_id": UNIPROT_IDS[symbol],
+                },
+            )
             proteins[symbol] = p
-
-            # ProteinUniProt.objects.get_or_create(
-            #    protein=p,
-            #    uniprot_id=UNIPROT_IDS[symbol],
-            #    defaults={"version": 1},
-            # )
-
-            # ProteinEntrez.objects.get_or_create(
-            #    protein=p,
-            #    gene_id=ENTREZ_IDS[symbol],
-            #    defaults={"name": symbol},
-            # )
-
-            # UniProtAccession.objects.get_or_create(
-            #    accession=ACCESSIONS[symbol],
-            #    uniprot_id=UNIPROT_IDS[symbol],
-            # )
 
         # Isoforms for a few proteins (MTI — each Isoform IS a Protein row)
         isoforms = {}
         for symbol in ["BRCA1", "TP53", "EGFR"]:
+            gene = proteins[symbol].gene
             for iso_num in range(2, 4):
                 iso_uniprot = f"{ACCESSIONS[symbol]}-{iso_num}"
                 isoform, _ = Isoform.objects.get_or_create(
                     isoform_uniprot_id=iso_uniprot,
                     defaults={
-                        "name": f"{symbol} isoform {iso_num}",  # Protein.name
+                        "name": f"{symbol} isoform {iso_num}",
+                        "gene": gene,
+                        "uniprot_accession": ACCESSIONS[symbol],
+                        "uniprot_id": UNIPROT_IDS[symbol],
                     },
                 )
                 isoforms[iso_uniprot] = isoform
@@ -581,13 +579,11 @@ class Command(BaseCommand):
 
         self.stdout.write("Creating publications…")
 
-        # pmid_pool = list(range(20000000, 20000200))
-        # for inter in interaction_objs:
-        #    for pmid in random.sample(pmid_pool, k=random.randint(1, 4)):
-        #        InteractionPublication.objects.get_or_create(
-        #            interaction=inter,
-        #            pmid=pmid,
-        #        )
+        pmid_pool = list(range(20000000, 20000200))
+        for inter in interaction_objs:
+            for pmid in random.sample(pmid_pool, k=random.randint(1, 4)):
+                pub, _ = Publication.objects.get_or_create(pmid=pmid)
+                inter.publications.add(pub)
 
         # ---------------------------------------------------------------
         # 9. Cross-references  (some from HomoMINT, some from others)
@@ -668,11 +664,9 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS("Seed complete. Summary:"))
         counts = [
+            ("Gene", Gene),
             ("Protein", Protein),
             ("Isoform", Isoform),
-            # ("ProteinUniProt", ProteinUniProt),
-            # ("ProteinEntrez", ProteinEntrez),
-            # ("UniProtAccession", UniProtAccession),
             ("Tissue", Tissue),
             ("ProteinTissue", ProteinTissue),
             ("Source", Source),
@@ -681,8 +675,8 @@ class Command(BaseCommand):
             ("Species", Species),
             ("GOSlimTerm", GOSlimTerm),
             ("MeSHTerm", MeSHTerm),
+            ("Publication", Publication),
             ("Interaction", Interaction),
-            # ("InteractionPublication", InteractionPublication),
             ("InteractionCrossReference", InteractionCrossReference),
             ("SignalingEndpoint", SignalingEndpoint),
             ("OrthologInteraction", OrthologInteraction),

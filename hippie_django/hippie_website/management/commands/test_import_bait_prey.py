@@ -9,11 +9,10 @@ from hippie_website.models import (
     BaitPreyTest,
     BaitPreyAssociation,
     ExperimentType,
+    Gene,
     Interaction,
+    Publication,
     Protein,
-    # ProteinEntrez,
-    # ProteinUniProt,
-    # UniProtAccession,
 )
 
 from django.core.management.base import BaseCommand, CommandError
@@ -185,15 +184,23 @@ class Command(BaseCommand):
         )
         new_names = all_gene_names - existing
         for name in new_names:
-            Protein.objects.get_or_create(name=name)
+            gene, _ = Gene.objects.get_or_create(
+                entrez_name=name,
+                defaults={"entrez_id": 0},
+            )
+            Protein.objects.get_or_create(
+                name=name,
+                defaults={
+                    "gene": gene,
+                    "uniprot_accession": "",
+                    "uniprot_id": "",
+                },
+            )
 
         if new_names:
             self.stdout.write(
                 f"Fetching external data for {len(new_names)} new proteins …"
             )
-            # self._enrich_proteins(
-            #    new_names, ProteinEntrez, ProteinUniProt, UniProtAccession
-            # )
 
         # Name → Protein cache so pass 3 makes no per-row DB lookups
         proteins = {p.name: p for p in Protein.objects.filter(name__in=all_gene_names)}
@@ -240,8 +247,9 @@ class Command(BaseCommand):
                 interaction=interaction,
                 direction=direction,
             )
+            pub, _ = Publication.objects.get_or_create(pmid=row["pmid"])
             bpt, _ = BaitPreyTest.objects.get_or_create(
-                pmid=row["pmid"],
+                publication=pub,
                 method=method,
                 detection=row["detection"],
             )
