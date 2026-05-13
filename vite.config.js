@@ -5,7 +5,7 @@ import { resolve } from "path";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");  // "" = load all vars, not just VITE_*
 
-  const staticPath = env.DJANGO_STATIC_URL || env.APACHE_PUBLISHED_PATH || "";  // e.g. "/hippienew"
+  const staticPath = (env.DJANGO_STATIC_URL || env.APACHE_PUBLISHED_PATH || "").replace(/\/+$/, "");  // e.g. "/hippienew"
   const staticBase = staticPath
     ? `${staticPath}/static/`
     : "/static/";

@@ -33,6 +33,9 @@ services:
     build:
       context: .
       dockerfile: docker/web/Dockerfile
+      args:
+        APACHE_PUBLISHED_PATH: ${APACHE_PUBLISHED_PATH}
+        DJANGO_STATIC_URL: ${DJANGO_STATIC_URL}
     restart: unless-stopped
     env_file:
       - .env

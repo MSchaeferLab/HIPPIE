@@ -4,7 +4,12 @@
 FROM node:20-alpine AS frontend
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+ARG APACHE_PUBLISHED_PATH=""
+ENV APACHE_PUBLISHED_PATH=$APACHE_PUBLISHED_PATH
+ARG DJANGO_STATIC_URL=""
+ENV DJANGO_STATIC_URL=$DJANGO_STATIC_URL
+
+COPY package*.json ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY frontend ./frontend
