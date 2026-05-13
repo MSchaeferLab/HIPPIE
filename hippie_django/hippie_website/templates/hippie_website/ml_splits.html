@@ -3,6 +3,8 @@
 {% block title %}Generate ML Splits{% endblock %}
 {% block nav_browse %}active{% endblock %}
 
+{% csrf_token %}
+
 {% block content %}
 <script>
   window.SPLITS_CONFIG = {
