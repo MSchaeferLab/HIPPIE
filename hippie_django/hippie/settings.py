@@ -139,9 +139,8 @@ USE_TZ = True
 
 # Use DJANGO_STATIC_URL, if empty use APACHE_PUBLISHED_PATH, if empty use "" (no prefix)
 STATIC_URL = (
-    os.environ.get("DJANGO_STATIC_URL")
-    or os.environ.get("APACHE_PUBLISHED_PATH", "/static/")
-).rstrip("/") + "/"
+    os.environ.get("DJANGO_STATIC_URL") or os.environ.get("APACHE_PUBLISHED_PATH", "")
+).rstrip("/") + "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Use DJANGO_SCRIPT_NAME, if empty use APACHE_PUBLISHED_PATH, if empty use "" (no prefix)
