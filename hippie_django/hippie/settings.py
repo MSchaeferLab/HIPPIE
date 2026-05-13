@@ -35,6 +35,12 @@ ALLOWED_HOSTS = [
     if h.strip()
 ]
 
+CSRF_TRUSTED_ORIGINS = [
+    h.strip()
+    for h in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if h.strip()
+]
+
 
 # Application definition
 

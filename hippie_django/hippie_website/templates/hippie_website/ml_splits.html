@@ -3,9 +3,8 @@
 {% block title %}Generate ML Splits{% endblock %}
 {% block nav_browse %}active{% endblock %}
 
-{% csrf_token %}
-
 {% block content %}
+{% csrf_token %}
 <script>
   window.SPLITS_CONFIG = {
     createUrl:        "{% url 'hippie_website:browse_splits_create' %}",
