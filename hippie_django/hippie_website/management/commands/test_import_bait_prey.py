@@ -3,6 +3,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from pathlib import Path
 
 from hippie_website.models import (
@@ -26,6 +27,9 @@ UNIPROT_SEARCH = "https://rest.uniprot.org/uniprotkb/search"
 
 NCBI_RATE_LIMIT_SLEEP = 0.4  # stay within NCBI's 3 req/s limit (no API key)
 BATCH_SIZE = 100  # gene names per external API call
+MAX_UNIPROT_ACCESSION_LENGTH = 20
+MAX_UNIPROT_ID_LENGTH = 16
+FALLBACK_ENTREZ_ID_BASE = 2_000_000_000
 
 PSI_MI_CODE_MAP = {
     "MI-0006": "MI:0004",
@@ -130,6 +134,17 @@ def _fetch_uniprot_batch(gene_names):
                 mapping[original] = (accession, entry_id)
                 break
     return mapping
+
+
+def _fallback_entrez_id(gene_name: str) -> int:
+    """Use a deterministic synthetic ID when NCBI has no Entrez hit for a gene."""
+    return FALLBACK_ENTREZ_ID_BASE + (zlib.crc32(gene_name.encode("utf-8")) & 0xFFFFFFFF)
+
+
+def _fallback_uniprot_data(gene_name: str) -> tuple[str, str]:
+    accession = gene_name[:MAX_UNIPROT_ACCESSION_LENGTH]
+    entry_id = f"{gene_name.upper()}_HUMAN"[:MAX_UNIPROT_ID_LENGTH]
+    return accession, entry_id
 
 
 class Command(BaseCommand):

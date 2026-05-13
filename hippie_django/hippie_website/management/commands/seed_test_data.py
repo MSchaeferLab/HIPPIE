@@ -414,7 +414,8 @@ class Command(BaseCommand):
             gene = proteins[symbol].gene
             for iso_num in range(2, 4):
                 iso_uniprot = f"{ACCESSIONS[symbol]}-{iso_num}"
-                isoform, _ = Isoform.objects.get_or_create(
+                isoform_entry_id = f"{UNIPROT_IDS[symbol]}_{iso_num}"[:16]
+                isoform, created = Isoform.objects.get_or_create(
                     isoform_uniprot_id=iso_uniprot,
                     defaults={
                         "name": f"{symbol} isoform {iso_num}",
@@ -423,6 +424,22 @@ class Command(BaseCommand):
                         "uniprot_id": UNIPROT_IDS[symbol],
                     },
                 )
+                if not created:
+                    update_fields = []
+                    if isoform.name != f"{symbol} isoform {iso_num}":
+                        isoform.name = f"{symbol} isoform {iso_num}"
+                        update_fields.append("name")
+                    if isoform.gene_id != protein.gene_id:
+                        isoform.gene = protein.gene
+                        update_fields.append("gene")
+                    if isoform.uniprot_accession != iso_uniprot:
+                        isoform.uniprot_accession = iso_uniprot
+                        update_fields.append("uniprot_accession")
+                    if isoform.uniprot_id != isoform_entry_id:
+                        isoform.uniprot_id = isoform_entry_id
+                        update_fields.append("uniprot_id")
+                    if update_fields:
+                        isoform.save(update_fields=update_fields)
                 isoforms[iso_uniprot] = isoform
 
         # ---------------------------------------------------------------
