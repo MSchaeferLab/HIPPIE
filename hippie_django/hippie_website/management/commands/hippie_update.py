@@ -93,23 +93,34 @@ class _ParsedRow:
 # ---------------------------------------------------------------------------
 
 
-def _paren_name(field_val: str) -> str:
-    """Extract text in final parentheses: 'psi-mi:"MI:0045"(two hybrid)' → 'two hybrid'."""
-    try:
-        return field_val.split("(")[-1].rstrip(")")
-    except Exception:
-        return ""
 
-
-def _parse_pmid(field_val: str) -> int | None:
-    """Return integer PMID from pubmed:NNN or imex:IM-xxx|pubmed:NNN."""
+def _parse_pmid(field_val: str) -> tuple[int | None, bool]:
     for part in field_val.split("|"):
         if part.startswith("pubmed:"):
-            try:
-                return int(part.split(":")[1])
-            except (ValueError, IndexError):
-                pass
-    return None
+            return int(part.split(":")[1])
+        return None
+
+
+def _parse_interaction_type(field_val: str) -> int | None:
+    interaction_type = field_val.split("(")[-1].rstrip(")")
+    return interaction_type
+
+
+def _parse_tech(field_val: str) -> tuple[str | None, bool]:
+    tech = field_val.split("(")[-1].rstrip(")")
+    tech = _TECH_NORM.get(tech, tech) ## Check !
+    if tech in _SKIP_TECHS:
+        return None, True
+    else:
+        return tech, False
+
+
+def get_uniprot_acc_map() -> dict[str, str]:
+    from hippie_website.models import ProteinSynonym
+    acc_map: dict[str, str] = dict(
+        ProteinSynonym.objects.values_list("synonym", "protein__uniprot_accession")
+    )
+    return acc_map
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +130,6 @@ def _parse_pmid(field_val: str) -> int | None:
 
 def _parse_biogrid(
     path: str,
-    gene_map: dict[int, int],
 ) -> tuple[dict[tuple[int, int], _ParsedRow], int, int]:
     """Parse BioGRID MITAB file.
 
@@ -161,11 +171,7 @@ def _parse_biogrid(
                 skipped += 1
                 continue
 
-            tech = _paren_name(cols[6])
-            tech = _TECH_NORM.get(tech, tech)
-            if tech in _SKIP_TECHS:
-                skipped += 1
-                continue
+
 
             pmid = _parse_pmid(cols[8])
             if pmid is None:
@@ -206,65 +212,60 @@ def _parse_biogrid(
 
 def _parse_intact(
     path: str,
-    acc_map: dict[str, int],
 ) -> tuple[dict[tuple[int, int], _ParsedRow], int, int]:
-    """Parse IntAct MITAB file.
-
-    Returns (pair_map, total_rows, skipped_rows).
-    """
+    
     pair_map: dict[tuple[int, int], _ParsedRow] = {}
-    total = skipped = 0
-
+    total = 0
+    skipped = 0
+    acc_map = get_uniprot_acc_map()
+    gene_map = get_gene_map()
+    
+    
     with open(path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.rstrip("\n")
             if line.startswith("#") or not line:
                 continue
-            cols = line.split("\t")
-            if len(cols) < 14:
-                skipped += 1
-                continue
             total += 1
-
-            # Human-only filter
-            if not cols[9].startswith("taxid:9606") or not cols[10].startswith(
-                "taxid:9606"
-            ):
+            line = line.split("\t")
+            both_human = line[9].startswith("taxid:9606") or not line[10].startswith("taxid:9606")
+            if not both_human:
                 skipped += 1
                 continue
 
-            # UniProt accession IDs
-            if not cols[0].startswith("uniprotkb") or not cols[1].startswith(
-                "uniprotkb"
-            ):
+            has_uniprot_acc = line[0].startswith("uniprotkb") and line[1].startswith("uniprotkb")
+            if not has_uniprot_acc:
                 skipped += 1
                 continue
 
-            try:
-                acc1 = cols[0].split(":")[1].split("|")[0].split("-")[0]
-                acc2 = cols[1].split(":")[1].split("|")[0].split("-")[0]
-            except IndexError:
-                skipped += 1
-                continue
-
+            acc1 = line[0].split(":")[1].split("|")[0]
+            acc2 = line[1].split(":")[1].split("|")[0]
+            if "-" in acc1:
+                iso1 = acc1.split("-")[1]
+                acc1 = acc1.split("-")[0]
+            if "-" in acc2:
+                iso2 = acc2.split("-")[1]
+                acc2 = acc2.split("-")[0]
+            
+            
             p1 = acc_map.get(acc1)
             p2 = acc_map.get(acc2)
-            if p1 is None or p2 is None:
+            
+            # if p1 is None or p2 is None:
+            #     skipped += 1
+            #     continue
+
+            tech, skip = _parse_tech(line[6])
+            if skip:
                 skipped += 1
                 continue
 
-            tech = _paren_name(cols[6])
-            tech = _TECH_NORM.get(tech, tech)
-            if tech in _SKIP_TECHS:
+            pmid, skip = _parse_pmid(line[8])
+            if skip:
                 skipped += 1
                 continue
 
-            pmid = _parse_pmid(cols[8])
-            if pmid is None:
-                skipped += 1
-                continue
-
-            itype = _paren_name(cols[11])
+            itype = _parse_interaction_type(line[11])
             try:
                 link = cols[13].split(":")[1].split("|")[0]
             except IndexError:
