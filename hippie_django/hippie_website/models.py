@@ -59,7 +59,6 @@ class GeneSynonym(models.Model):
 class Protein(models.Model):
     """
     Central entity — one row per unique protein in HIPPIE.
-    The `name` field stores the primary gene symbol (e.g. "BRCA1").
     """
 
     gene = models.ForeignKey(Gene, on_delete=models.CASCADE, related_name="proteins")

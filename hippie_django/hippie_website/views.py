@@ -54,10 +54,10 @@ def _protein_display(protein: Protein, isoform_uid: str | None = None) -> dict:
     gene = protein.gene
     return {
         "id": protein.pk,
-        "name": protein.name,
+        "name": gene.entrez_name or protein.uniprot_name,
         "uniprot_id": protein.uniprot_accession,
         "gene_id": gene.entrez_id or None,
-        "symbol": gene.entrez_name or protein.name,
+        "symbol": gene.entrez_name or protein.uniprot_name,
         # isoform_uid is set when this protein is an isoform; None for canonical.
         "isoform_uniprot_id": isoform_uid
         if isoform_uid is not None
@@ -892,14 +892,14 @@ def _run_network_query(params) -> dict:
         interactions.append(
             {
                 "interaction_id": ix.pk,
-                "protein_a": p1.name,
+                "protein_a": p1.gene.entrez_name or p1.uniprot_name,
                 "uniprot_a": p1.uniprot_accession,
                 "entrez_a": p1.gene.entrez_id or "",
-                "gene_name_a": p1.gene.entrez_name or p1.name,
-                "protein_b": p2.name,
+                "gene_name_a": p1.gene.entrez_name or p1.uniprot_name,
+                "protein_b": p2.gene.entrez_name or p2.uniprot_name,
                 "uniprot_b": p2.uniprot_accession,
                 "entrez_b": p2.gene.entrez_id or "",
-                "gene_name_b": p2.gene.entrez_name or p2.name,
+                "gene_name_b": p2.gene.entrez_name or p2.uniprot_name,
                 "score": round(ix.score, 4),
                 "source_count": ix.sources.all().count(),
                 "experiment_count": ix.experiments.all().count(),
@@ -911,7 +911,7 @@ def _run_network_query(params) -> dict:
         )
 
     seed_names = set(
-        Protein.objects.filter(pk__in=protein_ids).values_list("name", flat=True)
+        Protein.objects.filter(pk__in=protein_ids).values_list("gene__entrez_name", flat=True)
     )
 
     return {
@@ -1099,7 +1099,7 @@ def browse_api(request):
         proteins.append(
             {
                 "id": pid,
-                "symbol": p.gene.entrez_name or p.name,
+                "symbol": p.gene.entrez_name or p.uniprot_name,
                 "uniprot_id": p.uniprot_accession,
                 "entrez_id": p.gene.entrez_id or None,
                 "degree": degree,
@@ -1239,13 +1239,13 @@ def interaction_detail_view(request, pk: int):
             "protein": p1,
             "uniprot_id": p1.uniprot_accession,
             "gene_id": p1.gene.entrez_id or None,
-            "symbol": p1.gene.entrez_name or p1.name,
+            "symbol": p1.gene.entrez_name or p1.uniprot_name,
         },
         "p2": {
             "protein": p2,
             "uniprot_id": p2.uniprot_accession,
             "gene_id": p2.gene.entrez_id or None,
-            "symbol": p2.gene.entrez_name or p2.name,
+            "symbol": p2.gene.entrez_name or p2.uniprot_name,
         },
         # All prefetched — .all() hits the cache.
         "sources": interaction.sources.all(),
@@ -1299,13 +1299,13 @@ def noninteraction_detail_view(request, pk: int):
             "protein": p1,
             "uniprot_id": p1.uniprot_accession,
             "gene_id": p1.gene.entrez_id or None,
-            "symbol": p1.gene.entrez_name or p1.name,
+            "symbol": p1.gene.entrez_name or p1.uniprot_name,
         },
         "p2": {
             "protein": p2,
             "uniprot_id": p2.uniprot_accession,
             "gene_id": p2.gene.entrez_id or None,
-            "symbol": p2.gene.entrez_name or p2.name,
+            "symbol": p2.gene.entrez_name or p2.uniprot_name,
         },
         "bait_prey_total_tested": bait_prey_total_tested,
         "bait_prey_times_observed": bait_prey_times_observed,
@@ -1343,7 +1343,7 @@ def protein_detail_view(request, pk: int):
         "protein": protein,
         "uniprot_id": protein.uniprot_accession,
         "gene_id": protein.gene.entrez_id or None,
-        "symbol": protein.gene.entrez_name or protein.name,
+        "symbol": protein.gene.entrez_name or protein.uniprot_name,
         "interaction_count": interaction_count,
     }
     return render(request, "hippie_website/protein_detail.html", context)

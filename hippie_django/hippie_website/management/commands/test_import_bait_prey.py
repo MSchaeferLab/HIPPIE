@@ -165,8 +165,8 @@ class Command(BaseCommand):
         # Pass 2: create Protein rows, batch-enrich only the new ones
         # ------------------------------------------------------------------
         existing = set(
-            Protein.objects.filter(name__in=all_gene_names).values_list(
-                "name", flat=True
+            Protein.objects.filter(gene__entrez_name__in=all_gene_names).values_list(
+                "gene__entrez_name", flat=True
             )
         )
         new_names = all_gene_names - existing
@@ -176,11 +176,10 @@ class Command(BaseCommand):
                 defaults={"entrez_id": 0},
             )
             Protein.objects.get_or_create(
-                name=name,
+                gene=gene,
                 defaults={
-                    "gene": gene,
-                    "uniprot_accession": "",
-                    "uniprot_id": "",
+                    "uniprot_accession": f"_stub_{name}"[:20],
+                    "uniprot_name": "",
                 },
             )
 
@@ -189,7 +188,12 @@ class Command(BaseCommand):
             self._enrich_proteins(new_names)
 
         # Name → Protein cache so pass 3 makes no per-row DB lookups
-        proteins = {p.name: p for p in Protein.objects.filter(name__in=all_gene_names)}
+        proteins = {
+            p.gene.entrez_name: p
+            for p in Protein.objects.select_related("gene").filter(
+                gene__entrez_name__in=all_gene_names
+            )
+        }
 
         # ------------------------------------------------------------------
         # Pass 3: create interactions and bait-prey records
@@ -252,7 +256,7 @@ class Command(BaseCommand):
         """
         Batch-fetch Entrez + UniProt data for newly created Gene/Protein stubs.
         Writes directly to Gene.entrez_id/entrez_name and
-        Protein.uniprot_accession/uniprot_id.
+        Protein.uniprot_accession/uniprot_name.
         """
         names = list(new_names)
         total_batches = (len(names) + BATCH_SIZE - 1) // BATCH_SIZE
@@ -273,8 +277,10 @@ class Command(BaseCommand):
             uniprot_data = _fetch_uniprot_batch(chunk)
 
             proteins = {
-                p.name: p
-                for p in Protein.objects.select_related("gene").filter(name__in=chunk)
+                p.gene.entrez_name: p
+                for p in Protein.objects.select_related("gene").filter(
+                    gene__entrez_name__in=chunk
+                )
             }
 
             for name in chunk:
@@ -304,9 +310,9 @@ class Command(BaseCommand):
                     if protein.uniprot_accession != accession:
                         protein.uniprot_accession = accession[:20]
                         protein_fields.append("uniprot_accession")
-                    if protein.uniprot_id != entry_id:
-                        protein.uniprot_id = entry_id[:16]
-                        protein_fields.append("uniprot_id")
+                    if protein.uniprot_name != entry_id:
+                        protein.uniprot_name = entry_id[:16]
+                        protein_fields.append("uniprot_name")
                     if protein_fields:
                         protein.save(update_fields=protein_fields)
                 else:

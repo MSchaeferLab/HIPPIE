@@ -44,9 +44,9 @@ class ProteinQuerySet(models.QuerySet):
             if qs.exists():
                 return qs
 
-        # 2) Contains underscore  (e.g. "BRCA1_HUMAN") → UniProt entry ID
+        # 2) Contains underscore  (e.g. "BRCA1_HUMAN") → UniProt entry name
         if "_" in identifier:
-            qs = self.filter(uniprot_id=identifier)
+            qs = self.filter(uniprot_name=identifier)
             if qs.exists():
                 return qs
 
@@ -56,24 +56,15 @@ class ProteinQuerySet(models.QuerySet):
 
         isoform_pk = None
         isoform_uid = None
-        if "isoform" in identifier:
+        if "-" in identifier:
             isoform = (
-                m.Isoform.objects.filter(name=identifier)
-                .values("protein_ptr_id", "isoform_uniprot_id")
+                m.Isoform.objects.filter(uniprot_accession=identifier)
+                .values("protein_ptr_id", "uniprot_accession")
                 .first()
             )
             if isoform:
                 isoform_pk = isoform["protein_ptr_id"]
-                isoform_uid = isoform["isoform_uniprot_id"]
-        elif "-" in identifier:
-            isoform = (
-                m.Isoform.objects.filter(isoform_uniprot_id=identifier)
-                .values("protein_ptr_id", "isoform_uniprot_id")
-                .first()
-            )
-            if isoform:
-                isoform_pk = isoform["protein_ptr_id"]
-                isoform_uid = isoform["isoform_uniprot_id"]
+                isoform_uid = isoform["uniprot_accession"]
         if isoform_pk is not None:
             qs = self.filter(pk=isoform_pk)
             if isoform_uid is not None:
@@ -88,9 +79,9 @@ class ProteinQuerySet(models.QuerySet):
         if qs.exists():
             return qs
 
-        # 5) Gene symbol
+        # 5) Gene symbol / UniProt entry name
         qs = self.filter(
-            Q(gene__entrez_name__iexact=identifier) | Q(name__iexact=identifier)
+            Q(gene__entrez_name__iexact=identifier) | Q(uniprot_name__iexact=identifier)
         )
         if qs.exists():
             return qs

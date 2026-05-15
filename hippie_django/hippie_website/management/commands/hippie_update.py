@@ -16,6 +16,7 @@ import math
 from dataclasses import dataclass, field
 
 from django.core.management.base import BaseCommand, CommandParser
+from django.db import transaction
 from django.db.models import Count, Q, Sum
 
 from hippie_website.models import (
@@ -63,6 +64,7 @@ _TECH_NORM: dict[str, str] = {
     "two hybrid": "Two-hybrid",
     "two hybrid prey pooling approach": "Two-hybrid",
     "imaging techniques": "imaging technique",
+    "bioid": "proximity labelling technology"
 }
 
 _SKIP_TECHS = {"genetic interference"}
@@ -344,114 +346,251 @@ def _parse_intact_or_biogrid(
 def _upsert(
     rows: list[_ParsedRow],
 ) -> tuple[set[int], int, int]:
-    touched: set[int] = set()
-    new_protein_entries = 0
-    new_interaction_created = 0
-    new_genes_created = 0
+    """
+    Bulk-insert for empty tables. Total DB round-trips: O(tables), not O(rows).
 
-    acc_human_map = get_human_gene_map()
-    total_rows = len(rows)
-    for i, row in enumerate(rows, 1):
-        if i % 100 == 0 or i == total_rows:
-            pct = i * 100 // total_rows
-            bar = "#" * (pct // 2) + "-" * (50 - pct // 2)
-            print(f"\r  [{bar}] {pct:3d}% ({i}/{total_rows})", end="", flush=True)
-        proteins: list[Protein | None] = [None, None]
-        for i, (p_acc, p_name, iso_bool, entrez, gene_name) in enumerate(
-            zip(
-                *[
-                    [row.p1_id, row.p2_id],
-                    row.uniprot_names,
-                    row.iso,
-                    row.entrez_ids,
-                    row.gene_names,
-                ]
+    - transaction.atomic() = one commit instead of one per statement (big on MariaDB)
+    - bulk_create without ignore_conflicts = Django sets PKs on returned objects,
+      so no re-query needed to build caches
+    - M2M through tables flushed in one bulk_create each at the end
+    """
+    BATCH = 10_000
+
+    with transaction.atomic():
+        print("  Collecting entities...", flush=True)
+
+        genes: dict[int, str] = {}                             # entrez_id -> gene_name
+        canonical_proteins: dict[str, tuple[int, str]] = {}    # acc -> (entrez_id, uniprot_name)
+        isoform_proteins: dict[str, tuple[int, str, str]] = {} # acc -> (entrez_id, name, canonical_acc)
+        exp_types: dict[str, str] = {}                         # name -> mi_code
+        sources: set[str] = set()
+        pmids: set[int] = set()
+        itypes: set[str] = set()
+
+        for row in rows:
+            for p_acc, p_name, iso_bool, entrez, gene_name in zip(
+                [row.p1_id, row.p2_id], row.uniprot_names, row.iso, row.entrez_ids, row.gene_names
+            ):
+                genes[entrez] = gene_name or ""
+                if iso_bool:
+                    can = p_acc.split("-")[0]
+                    canonical_proteins[can] = (entrez, p_name.split("-")[0])
+                    isoform_proteins[p_acc] = (entrez, p_name, can)
+                else:
+                    canonical_proteins[p_acc] = (entrez, p_name)
+            for s in row.source:
+                sources.add(s)
+            for p in row.pmids:
+                if p is not None:
+                    pmids.add(p)
+            for mi, tech in row.techs:
+                exp_types[tech] = mi
+            for t in row.types:
+                itypes.add(t)
+            for db, _ in row.link:
+                sources.add(db)
+
+        print("  Checking existing records...", flush=True)
+        existing_genes: dict[int, Gene] = {
+            g.entrez_id: g for g in Gene.objects.filter(entrez_id__in=genes)
+        }
+        
+        existing_proteins: dict[str, Protein] = {
+            p.uniprot_accession: p
+            for p in Protein.objects.filter(
+                uniprot_accession__in=list(canonical_proteins) + list(isoform_proteins)
             )
-        ):
-            if iso_bool:
-                g_p_name = p_name.split("-")[0]
-                gene_id, g_created = Gene.objects.get_or_create(
-                    entrez_id=entrez,
-                    defaults={"entrez_name": gene_name or ""},
-                )
-                if g_created:
-                    new_genes_created += 1
+        }
+        existing_sources: dict[str, Source] = {
+            s.name: s for s in Source.objects.filter(name__in=sources)
+        }
+        existing_pubs: dict[int, Publication] = {
+            p.pmid: p for p in Publication.objects.filter(pmid__in=pmids)
+        }
+        existing_exps: dict[str, ExperimentType] = {
+            e.name: e for e in ExperimentType.objects.filter(name__in=exp_types)
+        }
+        existing_itypes: dict[str, InteractionType] = {
+            it.name: it for it in InteractionType.objects.filter(name__in=itypes)
+        }
 
-                general_protein, created = Protein.objects.get_or_create(
-                    uniprot_accession=p_acc.split("-")[0],
-                    gene=gene_id,
-                    uniprot_name=g_p_name,
-                )
-                if created:
-                    new_protein_entries += 1
-                
-                
-                proteins[i], created = Isoform.objects.get_or_create(
-                    uniprot_accession=p_acc,
-                    general_protein=general_protein,
-                    gene=gene_id,
-                    uniprot_name=p_name,
-                )
-                if created:
-                    new_protein_entries += 1
-            else:
-                gene, g_created = Gene.objects.get_or_create(
-                    entrez_id=entrez,
-                    defaults={"entrez_name": gene_name or ""},
-                )
-                if g_created:
-                    new_genes_created += 1
-
-                proteins[i], created = Protein.objects.get_or_create(
-                    uniprot_accession=p_acc, gene=gene, uniprot_name=p_name
-                )
-                if created:
-                    new_protein_entries += 1
-
-        internal_protein_id = sorted([proteins[0].pk, proteins[1].pk])
-
-        interaction, created = Interaction.objects.get_or_create(
-            protein_1_id=internal_protein_id[0],
-            protein_2_id=internal_protein_id[1],
-            defaults={"score": 0.0},
+        # ---------------------------------------------------------- #
+        # Phase 2: bulk_create only missing rows; merge with existing
+        # ---------------------------------------------------------- #
+        print("  Inserting genes...", flush=True)
+        new_genes = Gene.objects.bulk_create(
+            [Gene(entrez_id=eid, entrez_name=name)
+             for eid, name in genes.items() if eid not in existing_genes],
+            batch_size=BATCH,
         )
-        if created:
-            new_interaction_created += 1
-        touched.add(interaction.pk)
+        gene_cache: dict[int, Gene] = {**existing_genes, **{g.entrez_id: g for g in new_genes}}
 
-        for source_name in row.source:
-            source, _ = Source.objects.get_or_create(name=source_name)
-            interaction.sources.add(source)
+        print("  Inserting canonical proteins...", flush=True)
+        new_proteins = Protein.objects.bulk_create(
+            [
+                Protein(uniprot_accession=acc, gene=gene_cache[eid], uniprot_name=name)
+                for acc, (eid, name) in canonical_proteins.items()
+                if acc not in existing_proteins and eid in gene_cache
+            ],
+            batch_size=BATCH,
+        )
+        protein_cache: dict[str, Protein] = {
+            **existing_proteins,
+            **{p.uniprot_accession: p for p in new_proteins},
+        }
 
-        for pmid in row.pmids:
-            pub, _ = Publication.objects.get_or_create(pmid=pmid)
-            interaction.publications.add(pub)
-
-        for mi_code, tech_name in row.techs:
-            et, _ = ExperimentType.objects.get_or_create(
-                name=tech_name,
-                defaults={"psi_mi_code": mi_code, "quality_score": 0.0},
+        print("  Inserting isoforms...", flush=True)
+        for acc, (eid, name, can) in isoform_proteins.items():
+            if acc in existing_proteins:
+                protein_cache[acc] = existing_proteins[acc]
+                continue
+            if can not in protein_cache or eid not in gene_cache:
+                continue
+            iso = Isoform.objects.create(
+                uniprot_accession=acc,
+                general_protein=protein_cache[can],
+                gene=gene_cache[eid],
+                uniprot_name=name,
             )
-            interaction.experiments.add(et)
+            protein_cache[acc] = iso
 
-        for itype in row.types:
-            it, _ = InteractionType.objects.get_or_create(
-                name=itype,
-                defaults={"psi_mi_code": ""},
+        print("  Inserting sources...", flush=True)
+        new_sources = Source.objects.bulk_create(
+            [Source(name=name) for name in sources if name not in existing_sources],
+            batch_size=BATCH,
+        )
+        source_cache: dict[str, Source] = {**existing_sources, **{s.name: s for s in new_sources}}
+
+        print("  Inserting publications...", flush=True)
+        new_pubs = Publication.objects.bulk_create(
+            [Publication(pmid=p) for p in pmids if p not in existing_pubs],
+            batch_size=BATCH,
+        )
+        pub_cache: dict[int, Publication] = {**existing_pubs, **{p.pmid: p for p in new_pubs}}
+
+
+        print("  Checking for overlapping PSI_MI codes...", flush=True)
+        for n, mi in exp_types.items():
+            if n not in existing_exps and mi != "":
+                if ExperimentType.objects.filter(psi_mi_code=mi).exists():
+                    print(f"    Warning: experiment type '{n}' has PSI-MI code '{mi}'", flush=True)
+                    existing = ExperimentType.objects.get(psi_mi_code=mi)
+                    print(f"    which overlaps with existing type '{existing.name}'", flush=True)
+                    #raise ValueError(f"Overlapping PSI-MI code '{mi}' for experiment type '{n}'")
+                    
+
+        print("  Inserting experiment types...", flush=True)
+        new_exps = ExperimentType.objects.bulk_create(
+            [ExperimentType(name=n, psi_mi_code=mi, quality_score=0.0)
+             for n, mi in exp_types.items() if n not in existing_exps],
+            batch_size=BATCH,
+        )
+        exp_cache: dict[str, ExperimentType] = {**existing_exps, **{e.name: e for e in new_exps}}
+
+        print("  Inserting interaction types...", flush=True)
+        new_itypes = InteractionType.objects.bulk_create(
+            [InteractionType(name=n, psi_mi_code="") for n in itypes if n not in existing_itypes],
+            batch_size=BATCH,
+        )
+        itype_cache: dict[str, InteractionType] = {**existing_itypes, **{it.name: it for it in new_itypes}}
+
+        # ---------------------------------------------------------- #
+        # Phase 3: resolve protein pairs, insert Interactions
+        # ---------------------------------------------------------- #
+        print("  Building interactions...", flush=True)
+
+        # Group rows by their sorted (pid1, pid2) so M2M data for the same
+        # interaction pair (from different input lines) is merged correctly.
+        pair_map: dict[tuple[int, int], list[_ParsedRow]] = {}
+        for row in rows:
+            p1 = protein_cache.get(row.p1_id)
+            p2 = protein_cache.get(row.p2_id)
+            if p1 is None or p2 is None:
+                continue
+            pair = (min(p1.pk, p2.pk), max(p1.pk, p2.pk))
+            pair_map.setdefault(pair, []).append(row)
+
+        print("  Inserting interactions...", flush=True)
+        existing_interactions: dict[tuple[int, int], Interaction] = {
+            (ia.protein_1_id, ia.protein_2_id): ia
+            for ia in Interaction.objects.filter(
+                protein_1_id__in={p for p, _ in pair_map},
+                protein_2_id__in={p for _, p in pair_map},
             )
-            interaction.interaction_types.add(it)
+            if (ia.protein_1_id, ia.protein_2_id) in pair_map
+        }
+        new_interaction_objs = Interaction.objects.bulk_create(
+            [Interaction(protein_1_id=pid1, protein_2_id=pid2, score=0.0)
+             for pid1, pid2 in pair_map if (pid1, pid2) not in existing_interactions],
+            batch_size=BATCH,
+        )
+        interaction_cache: dict[tuple[int, int], Interaction] = {
+            **existing_interactions,
+            **{(ia.protein_1_id, ia.protein_2_id): ia for ia in new_interaction_objs},
+        }
+        touched = {ia.pk for ia in interaction_cache.values()}
 
-        for db_name, link_id in row.link:
-            link_source, _ = Source.objects.get_or_create(name=db_name)
-            InteractionCrossReference.objects.get_or_create(
-                interaction=interaction,
-                link=link_id,
-                source=link_source,
-                defaults={"species": None},
-            )
+        # ---------------------------------------------------------- #
+        # Phase 4: collect M2M rows and flush in bulk
+        # ---------------------------------------------------------- #
+        print("  Building M2M relations...", flush=True)
 
-    print()
-    return touched, new_protein_entries, new_interaction_created
+        SourceThrough = Interaction.sources.through
+        PubThrough = Interaction.publications.through
+        ExpThrough = Interaction.experiments.through
+        ItypeThrough = Interaction.interaction_types.through
+
+        # Use sets to deduplicate within the same source file
+        seen_sources: set[tuple[int, int]] = set()
+        seen_pubs: set[tuple[int, int]] = set()
+        seen_exps: set[tuple[int, int]] = set()
+        seen_itypes: set[tuple[int, int]] = set()
+        seen_xrefs: set[tuple[int, str, int]] = set()
+
+        pending_sources: list = []
+        pending_pubs: list = []
+        pending_exps: list = []
+        pending_itypes: list = []
+        pending_xrefs: list[InteractionCrossReference] = []
+
+        for (pid1, pid2), pair_rows in pair_map.items():
+            ia = interaction_cache.get((pid1, pid2))
+            if ia is None:
+                continue
+            iid = ia.pk
+            for row in pair_rows:
+                for s in row.source:
+                    if s in source_cache and (iid, source_cache[s].pk) not in seen_sources:
+                        seen_sources.add((iid, source_cache[s].pk))
+                        pending_sources.append(SourceThrough(interaction_id=iid, source_id=source_cache[s].pk))
+                for p in row.pmids:
+                    if p in pub_cache and (iid, pub_cache[p].pk) not in seen_pubs:
+                        seen_pubs.add((iid, pub_cache[p].pk))
+                        pending_pubs.append(PubThrough(interaction_id=iid, publication_id=pub_cache[p].pk))
+                for mi, tech in row.techs:
+                    if tech in exp_cache and (iid, exp_cache[tech].pk) not in seen_exps:
+                        seen_exps.add((iid, exp_cache[tech].pk))
+                        pending_exps.append(ExpThrough(interaction_id=iid, experimenttype_id=exp_cache[tech].pk))
+                for t in row.types:
+                    if t in itype_cache and (iid, itype_cache[t].pk) not in seen_itypes:
+                        seen_itypes.add((iid, itype_cache[t].pk))
+                        pending_itypes.append(ItypeThrough(interaction_id=iid, interactiontype_id=itype_cache[t].pk))
+                for db, link_id in row.link:
+                    if db in source_cache and (iid, link_id, source_cache[db].pk) not in seen_xrefs:
+                        seen_xrefs.add((iid, link_id, source_cache[db].pk))
+                        pending_xrefs.append(InteractionCrossReference(
+                            interaction_id=iid, link=link_id, source=source_cache[db], species=None,
+                        ))
+
+        print("  Flushing M2M relations...", flush=True)
+        SourceThrough.objects.bulk_create(pending_sources, batch_size=BATCH, ignore_conflicts=True)
+        PubThrough.objects.bulk_create(pending_pubs, batch_size=BATCH, ignore_conflicts=True)
+        ExpThrough.objects.bulk_create(pending_exps, batch_size=BATCH, ignore_conflicts=True)
+        ItypeThrough.objects.bulk_create(pending_itypes, batch_size=BATCH, ignore_conflicts=True)
+        InteractionCrossReference.objects.bulk_create(pending_xrefs, batch_size=BATCH, ignore_conflicts=True)
+
+    new_protein_entries = len(canonical_proteins) + len(isoform_proteins)
+    return touched, new_protein_entries, len(pair_map)
 
 
 # ---------------------------------------------------------------------------
