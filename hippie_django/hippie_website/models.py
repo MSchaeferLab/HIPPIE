@@ -3,7 +3,6 @@ import uuid
 from django.db import models
 from .managers import InteractionManager, ProteinManager
 
-
 # =============================================================================
 # Protein entities
 # =============================================================================
@@ -64,9 +63,8 @@ class Protein(models.Model):
     """
 
     gene = models.ForeignKey(Gene, on_delete=models.CASCADE, related_name="proteins")
-    name = models.CharField(max_length=30, unique=True)
-    uniprot_accession = models.CharField(max_length=20, db_index=True)
-    uniprot_id = models.CharField(max_length=16, db_index=True)
+    uniprot_accession = models.CharField(max_length=20, db_index=True, unique=True)
+    uniprot_name = models.CharField(max_length=16, db_index=True)
     objects = ProteinManager()
 
     class Meta:
@@ -115,10 +113,11 @@ class Isoform(Protein):
     The canonical protein UniProt ID remains on the parent Protein row.
     """
 
-    isoform_uniprot_id = models.CharField(
-        max_length=20,
-        unique=True,
-        help_text='Isoform-specific UniProt accession e.g. "P38398-2"',
+    general_protein = models.ForeignKey(
+        Protein,
+        on_delete=models.CASCADE,
+        related_name="isoforms",
+        help_text='Isoform-specific UniProt accession e.g. "P38398-2"'
     )
 
     class Meta:
