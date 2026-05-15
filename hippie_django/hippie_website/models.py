@@ -64,7 +64,7 @@ class Protein(models.Model):
 
     gene = models.ForeignKey(Gene, on_delete=models.CASCADE, related_name="proteins")
     uniprot_accession = models.CharField(max_length=20, db_index=True, unique=True)
-    uniprot_name = models.CharField(max_length=16, db_index=True)
+    uniprot_name = models.CharField(max_length=16, db_index=True, default=None, blank=True)
     objects = ProteinManager()
 
     class Meta:
@@ -124,7 +124,7 @@ class Isoform(Protein):
         db_table = "isoform"
 
     def __str__(self):
-        return self.isoform_uniprot_id
+        return self.uniprot_accession
 
 
 # =============================================================================

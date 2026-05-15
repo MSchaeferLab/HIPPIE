@@ -42,9 +42,9 @@ class GeneSynonymAdmin(admin.ModelAdmin):
 
 @admin.register(Protein)
 class ProteinAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "uniprot_accession", "uniprot_id", "gene")
-    search_fields = ("name", "uniprot_accession", "uniprot_id", "gene__entrez_name")
-    ordering = ("name",)
+    list_display = ("id", "uniprot_accession", "uniprot_name", "gene")
+    search_fields = ("uniprot_accession", "uniprot_name", "gene__entrez_name")
+    ordering = ("uniprot_accession",)
     list_select_related = ("gene",)
     autocomplete_fields = ("gene",)
 
@@ -59,12 +59,13 @@ class ProteinSynonymAdmin(admin.ModelAdmin):
 
 @admin.register(Isoform)
 class IsoformAdmin(admin.ModelAdmin):
-    list_display = ("id", "isoform_uniprot_id", "name")
-    search_fields = ("isoform_uniprot_id", "name")
+    list_display = ("id", "uniprot_accession", "general_protein")
+    search_fields = ("uniprot_accession", "general_protein__uniprot_accession")
+    list_select_related = ("general_protein",)
 
     @admin.display(description="Parent protein")
     def parent_symbol(self, obj):
-        return obj.protein_ptr.name
+        return obj.general_protein.uniprot_accession
 
 
 @admin.register(Publication)
