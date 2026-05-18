@@ -67,7 +67,7 @@ def make_protein(name, uniprot_name=None, gene_id=None, accession=None):
     return Protein.objects.create(
         gene=gene,
         uniprot_name=uniprot_name or "",
-        uniprot_accession=accession or f"TEST_{name}",
+        uniprot_accession=accession if accession is not None else f"TEST_{name}",
     )
 
 
@@ -200,6 +200,7 @@ class ProteinQueryApiTest(HippieTestCase):
             gene=self.brca1.gene,
             uniprot_name="BRCA1_2_HUMAN",
             uniprot_accession="P38398-2",
+            general_protein=self.brca1,
         )
         data = self._get("P38398-2")
         self.assertIsNone(data["error"])
@@ -510,6 +511,7 @@ class ResolveTest(HippieTestCase):
             gene=self.brca1.gene,
             uniprot_name="BRCA1_2_HUMAN",
             uniprot_accession="P38398-2",
+            general_protein=self.brca1,
         )
         qs = Protein.objects.resolve("P38398-2")
         self.assertEqual(qs.first().pk, isoform.pk)
@@ -563,7 +565,7 @@ class ProteinDisplayTest(HippieTestCase):
 
     def test_protein_without_mappings(self):
         """Protein ohne gene-Symbol und ohne accession soll nicht crashen."""
-        bare = make_protein("BARE")
+        bare = make_protein("BARE", accession="")
         bare_fetched = Protein.objects.select_related("gene").get(pk=bare.pk)
         d = _protein_display(bare_fetched)
         self.assertEqual(d["uniprot_id"], "")
@@ -934,6 +936,7 @@ class GetIsoformsTest(HippieTestCase):
             gene=cls.brca1.gene,
             uniprot_name="",
             uniprot_accession="P38398-2",
+            general_protein=cls.brca1,
         )
 
     def test_canonical_protein_returns_its_isoforms(self):
