@@ -214,7 +214,7 @@ class ExperimentType(models.Model):
 
     name = models.CharField(max_length=100, unique=True)
     psi_mi_code = models.CharField(max_length=30, blank=True, default="")
-    quality_score = models.FloatField(help_text="Weight in HIPPIE confidence scoring")
+    quality_score = models.FloatField(help_text="Weight in HIPPIE confidence scoring", null=True, blank=True)
 
     class Meta:
         db_table = "experiment_type"
@@ -434,7 +434,7 @@ class Interaction(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.protein_1.name}–{self.protein_2.name} ({self.score})"
+        return f"{self.protein_1.uniprot_accession}–{self.protein_2.uniprot_accession} ({self.score})"
 
 
 class NonInteraction(models.Model):

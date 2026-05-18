@@ -12,12 +12,16 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import math
+from collections import defaultdict
+from datetime import datetime
 from dataclasses import dataclass, field
 
 from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
 from django.db.models import Count, Q, Sum
+
 
 from hippie_website.models import (
     ExperimentType,
@@ -29,6 +33,7 @@ from hippie_website.models import (
     Isoform,
     Source,
     Gene,
+    Species
 )
 
 # ---------------------------------------------------------------------------
@@ -64,7 +69,7 @@ _TECH_NORM: dict[str, str] = {
     "two hybrid": "Two-hybrid",
     "two hybrid prey pooling approach": "Two-hybrid",
     "imaging techniques": "imaging technique",
-    "bioid": "proximity labelling technology"
+    "bioid": "proximity labelling technology",
 }
 
 _SKIP_TECHS = {"genetic interference"}
@@ -158,39 +163,87 @@ def get_uniprot_acc_map() -> tuple[dict[str, str], dict[str, str]]:
                 acc_map[s_ac] = p_ac
 
     uniprot_name_map: dict[str, str] = {}
+    isoforms = set()
     with open("data/HUMAN_9606_idmapping.dat", "r") as f:
         for line in f:
             line = line.strip().split("\t")
             id = line[0]
+            if "-" in id:
+                isoforms.add(id)
             acc_map[id] = id
             if line[1] == "UniProtKB-ID":
                 uniprot_name_map[id] = line[2]
 
+    for iso_id in isoforms:
+        if iso_id not in uniprot_name_map:
+            can_id = iso_id.split("-")[0]
+            if can_id in uniprot_name_map:
+                uniprot_name_map[iso_id] = can_id
+
     return acc_map, uniprot_name_map
 
 
-def suppliment_missing_entrez_id(
-    entrez_map: dict[str, list[str | None, str | None]],
-) -> dict[str, list[str | None, str | None]]:
+def suppliment_missing_entrez_id(entrez_map: dict[str, list[str | None, str | None]]):
+    entrez_uniprot_conflict_genes = set()
     name_entrez_dict = dict()
+    synonyms_dict = dict()
     with open("data/Homo_sapiens.gene_info", "r") as f:
         for line in f:
             line = line.split("\t")
             name_entrez_dict[line[2]] = line[1]
+            for syn in line[4].split("|"):
+                synonyms_dict[syn] = [line[2], line[1]]
 
     acc_to_drop = set()
+    isoforms = set()
     for acc, (entrez, name) in entrez_map.items():
-        if entrez is None:
-            new_entrez = name_entrez_dict.get(name, False)
-            if new_entrez:
-                entrez_map[acc][0] = new_entrez
+        if "-" in acc:
+            isoforms.add(acc)
+            continue
+        elif entrez is None:
+            if name:
+                new_entrez = name_entrez_dict.get(name, False)
+                if new_entrez:
+                    entrez_map[acc][0] = new_entrez
+                else:
+                    gene_name, syn_entrez = synonyms_dict.get(name, [False, False])
+                    if syn_entrez:
+                        entrez_map[acc] = [syn_entrez, gene_name]
+                    else:
+                        entrez_uniprot_conflict_genes.add(name)
+                        acc_to_drop.add(acc)
             else:
                 acc_to_drop.add(acc)
+
+    for iso_acc in isoforms:
+        entrez, name = entrez_map[iso_acc]
+        if entrez is None:
+            canonical = iso_acc.split("-")[0]
+            canonical_entry = entrez_map.get(canonical, [False, False])
+            if canonical_entry:
+                new_entrez, new_name = canonical_entry
+                if new_entrez and new_name:
+                    entrez_map[iso_acc] = [new_entrez, new_name]
+                    continue
+            if name:
+                new_entrez = name_entrez_dict.get(name, False)
+                if new_entrez:
+                    entrez_map[iso_acc][0] = new_entrez
+
+                else:
+                    gene_name, syn_entrez = synonyms_dict.get(name, False)
+                    if syn_entrez:
+                        entrez_map[acc] = [syn_entrez, gene_name]
+                    else:
+                        entrez_uniprot_conflict_genes.add(name)
+                        acc_to_drop.add(acc)
+            else:
+                acc_to_drop.add(iso_acc)
 
     for acc in acc_to_drop:
         del entrez_map[acc]
 
-    return entrez_map
+    return entrez_map, acc_to_drop, entrez_uniprot_conflict_genes
 
 
 def get_human_gene_map():
@@ -200,16 +253,18 @@ def get_human_gene_map():
             line = line.strip().split("\t")
             id = line[0]
             if id not in human_gene_map:
-                human_gene_map[id] =[None, None]
+                human_gene_map[id] = [None, None]
 
             if line[1] == "GeneID":
                 human_gene_map[id][0] = line[2]
             if line[1] == "Gene_Name":
                 human_gene_map[id][1] = line[2]
 
-    human_gene_map = suppliment_missing_entrez_id(human_gene_map)
+    human_gene_map, dropped_acc, conflict_genes = suppliment_missing_entrez_id(
+        human_gene_map
+    )
 
-    return human_gene_map
+    return human_gene_map, dropped_acc, conflict_genes
 
 
 # ---------------------------------------------------------------------------
@@ -218,14 +273,21 @@ def get_human_gene_map():
 
 
 def _parse_intact_or_biogrid(
-    path: str,
-    source_file: ["biogrid", "inact"],
-) -> tuple[dict[tuple[str, str], _ParsedRow], int, int, set[str], int]:
+    path: str, source_file: ["biogrid", "inact"], log_file: str, problem_gene_file: str
+):
+    log_file = open(log_file, "a+")
+    gene_file = open(problem_gene_file, "a+")
     pair_map: dict[tuple[str, str], _ParsedRow] = {}
     total = 0
-    skipped = 0
+    non_human_skipped = 0
+    unmapped_uniprot_skipped = 0
+    deleted_uniprot_skipped = 0
+    method_skipped = 0
+    pimd_skipped = 0
+    no_gene_map_skipped = 0
+
     acc_map, uniprot_name_map = get_uniprot_acc_map()
-    gene_map = get_human_gene_map()
+    gene_map, non_gene_accs, conflict_genes = get_human_gene_map()
     n_deleted = 0
     deleted: set[str] = set()
 
@@ -248,15 +310,21 @@ def _parse_intact_or_biogrid(
                 "taxid:9606"
             )
             if not both_human:
-                skipped += 1
+                non_human_skipped += 1
                 continue
 
-            acc1 = _parse_uniprot_acc(line[id_idx_1])
-            acc2 = _parse_uniprot_acc(line[id_idx_2])
+            id_values = [line[id_idx_1], line[id_idx_2]]
+            acc2 = _parse_uniprot_acc(id_values[1])
+            acc1 = _parse_uniprot_acc(id_values[0])
             has_uniprot_acc = all([acc1, acc2])
 
             if not has_uniprot_acc:
-                skipped += 1
+                mapped_str = ", ".join(
+                    [id_values[i] for i, a in enumerate([acc1, acc2]) if a == None]
+                )
+                msg = f"{acc1} - {acc2} was dropped as {mapped_str} isn't valid UNIPROT acc, File: {path}\n"
+                log_file.write(msg)
+                unmapped_uniprot_skipped += 1
                 continue
 
             iso1 = "-" in acc1
@@ -270,12 +338,18 @@ def _parse_intact_or_biogrid(
 
             tech, skip = _parse_tech(line[6])
             if skip:
-                skipped += 1
+                msg = f"{acc1} - {acc2} was dropped as due to detection method,\t File: {path}\n"
+                log_file.write(msg)
+                method_skipped += 1
                 continue
 
             if p1 is None or p2 is None:
-                skipped += 1
-                n_deleted += 1
+                deleted_str = ", ".join(
+                    [a for a, p in zip([acc1, acc2], [p1, p2]) if p is None]
+                )
+                msg = f"{acc1} - {acc2} was dropped as {deleted_str} was dropped from UNIPROT,\t File: {path}\n"
+                log_file.write(msg)
+                deleted_uniprot_skipped += 1
                 if p1 is None:
                     deleted.add(acc1)
                 elif p2 is None:
@@ -284,7 +358,9 @@ def _parse_intact_or_biogrid(
 
             pmid, skip = _parse_pmid(line[8])
             if skip:
-                skipped += 1
+                msg = f"{acc1}-{acc2} was dropped as {line[8]} could not be mapped to PMID,\t File: {path}\n"
+                log_file.write(msg)
+                pimd_skipped += 1
                 continue
 
             itype = _parse_interaction_type(line[11])
@@ -294,19 +370,21 @@ def _parse_intact_or_biogrid(
             entrez = []
             gene_names = []
 
-            skip=False
+            skip = False
+            no_gene_map = []
             for protein in [p1, p2]:
                 try:
                     gene_id, gene_name = gene_map[protein]
                     entrez.append(gene_id)
                     gene_names.append(gene_name)
                 except KeyError:
-                    n_deleted += 1
+                    no_gene_map.append(protein)
                     deleted.add(protein)
-                    skip=True
+                    skip = True
                     break
             if skip:
-                skipped += 1
+                msg = f"{acc1}-{acc2} were dropped as {", ".join(no_gene_map)} didn't map to any Entrez gene \n"
+                no_gene_map_skipped += 1
                 continue
 
             key = tuple(sorted([p1, p2]))
@@ -334,8 +412,45 @@ def _parse_intact_or_biogrid(
                     types={itype} if itype else set(),
                     link=link,
                 )
+    total_skipped = (
+        non_human_skipped
+        + unmapped_uniprot_skipped
+        + deleted_uniprot_skipped
+        + method_skipped
+        + pimd_skipped
+        + no_gene_map_skipped
+    )
 
-    return pair_map, total, skipped, deleted, n_deleted
+    def _row(label: str, n: int) -> str:
+        return "\t".join([label, str(n), f"{round(n / total * 100, 2)}%"]) + "\n"
+
+    agg_skipped_msg = (
+        "Reason\tN-PPI\tpercent\n"
+        + _row("Non-human-protein", non_human_skipped)
+        + _row("Unmapped-in-uniprot", unmapped_uniprot_skipped)
+        + _row("Deleted-from-uniprot", deleted_uniprot_skipped)
+        + _row("Skipped-method", method_skipped)
+        + _row("No-pubmed-id", pimd_skipped)
+        + _row("No-gene-mapped", no_gene_map_skipped)
+    )
+    log_file.write(agg_skipped_msg + f"File: {path} \n")
+    log_file.write(
+        f"A total of {len(non_gene_accs)} uniprot accessions didn't map to a gene\n"
+    )
+    log_file.write(f"A total of {len(conflict_genes)} conflict genes Uniprot/Entrez")
+
+    problem_gene_dict = {
+        source_file: {
+            "conflict_genes": list(conflict_genes),
+            "non_mapped_genes": list(non_gene_accs),
+        }
+    }
+    json.dump(problem_gene_dict, gene_file, indent=2)
+    gene_file.write("\n")
+    gene_file.close()
+    log_file.close()
+
+    return pair_map, total, total_skipped, deleted, n_deleted
 
 
 # ---------------------------------------------------------------------------
@@ -359,17 +474,25 @@ def _upsert(
     with transaction.atomic():
         print("  Collecting entities...", flush=True)
 
-        genes: dict[int, str] = {}                             # entrez_id -> gene_name
-        canonical_proteins: dict[str, tuple[int, str]] = {}    # acc -> (entrez_id, uniprot_name)
-        isoform_proteins: dict[str, tuple[int, str, str]] = {} # acc -> (entrez_id, name, canonical_acc)
-        exp_types: dict[str, str] = {}                         # name -> mi_code
+        genes: dict[int, str] = {}  # entrez_id -> gene_name
+        canonical_proteins: dict[str, tuple[int, str]] = (
+            {}
+        )  # acc -> (entrez_id, uniprot_name)
+        isoform_proteins: dict[str, tuple[int, str, str]] = (
+            {}
+        )  # acc -> (entrez_id, name, canonical_acc)
+        exp_types: dict[str, str] = {}  # name -> mi_code
         sources: set[str] = set()
         pmids: set[int] = set()
         itypes: set[str] = set()
 
         for row in rows:
             for p_acc, p_name, iso_bool, entrez, gene_name in zip(
-                [row.p1_id, row.p2_id], row.uniprot_names, row.iso, row.entrez_ids, row.gene_names
+                [row.p1_id, row.p2_id],
+                row.uniprot_names,
+                row.iso,
+                row.entrez_ids,
+                row.gene_names,
             ):
                 genes[entrez] = gene_name or ""
                 if iso_bool:
@@ -394,7 +517,7 @@ def _upsert(
         existing_genes: dict[int, Gene] = {
             g.entrez_id: g for g in Gene.objects.filter(entrez_id__in=genes)
         }
-        
+
         existing_proteins: dict[str, Protein] = {
             p.uniprot_accession: p
             for p in Protein.objects.filter(
@@ -419,11 +542,17 @@ def _upsert(
         # ---------------------------------------------------------- #
         print("  Inserting genes...", flush=True)
         new_genes = Gene.objects.bulk_create(
-            [Gene(entrez_id=eid, entrez_name=name)
-             for eid, name in genes.items() if eid not in existing_genes],
+            [
+                Gene(entrez_id=eid, entrez_name=name)
+                for eid, name in genes.items()
+                if eid not in existing_genes
+            ],
             batch_size=BATCH,
         )
-        gene_cache: dict[int, Gene] = {**existing_genes, **{g.entrez_id: g for g in new_genes}}
+        gene_cache: dict[int, Gene] = {
+            **existing_genes,
+            **{g.entrez_id: g for g in new_genes},
+        }
 
         print("  Inserting canonical proteins...", flush=True)
         new_proteins = Protein.objects.bulk_create(
@@ -459,40 +588,63 @@ def _upsert(
             [Source(name=name) for name in sources if name not in existing_sources],
             batch_size=BATCH,
         )
-        source_cache: dict[str, Source] = {**existing_sources, **{s.name: s for s in new_sources}}
+        source_cache: dict[str, Source] = {
+            **existing_sources,
+            **{s.name: s for s in new_sources},
+        }
 
         print("  Inserting publications...", flush=True)
         new_pubs = Publication.objects.bulk_create(
             [Publication(pmid=p) for p in pmids if p not in existing_pubs],
             batch_size=BATCH,
         )
-        pub_cache: dict[int, Publication] = {**existing_pubs, **{p.pmid: p for p in new_pubs}}
-
+        pub_cache: dict[int, Publication] = {
+            **existing_pubs,
+            **{p.pmid: p for p in new_pubs},
+        }
 
         print("  Checking for overlapping PSI_MI codes...", flush=True)
         for n, mi in exp_types.items():
             if n not in existing_exps and mi != "":
                 if ExperimentType.objects.filter(psi_mi_code=mi).exists():
-                    print(f"    Warning: experiment type '{n}' has PSI-MI code '{mi}'", flush=True)
+                    print(
+                        f"    Warning: experiment type '{n}' has PSI-MI code '{mi}'",
+                        flush=True,
+                    )
                     existing = ExperimentType.objects.get(psi_mi_code=mi)
-                    print(f"    which overlaps with existing type '{existing.name}'", flush=True)
-                    #raise ValueError(f"Overlapping PSI-MI code '{mi}' for experiment type '{n}'")
-                    
+                    print(
+                        f"    which overlaps with existing type '{existing.name}'",
+                        flush=True,
+                    )
+                    # raise ValueError(f"Overlapping PSI-MI code '{mi}' for experiment type '{n}'")
 
         print("  Inserting experiment types...", flush=True)
         new_exps = ExperimentType.objects.bulk_create(
-            [ExperimentType(name=n, psi_mi_code=mi, quality_score=0.0)
-             for n, mi in exp_types.items() if n not in existing_exps],
+            [
+                ExperimentType(name=n, psi_mi_code=mi, quality_score=0.0)
+                for n, mi in exp_types.items()
+                if n not in existing_exps
+            ],
             batch_size=BATCH,
         )
-        exp_cache: dict[str, ExperimentType] = {**existing_exps, **{e.name: e for e in new_exps}}
+        exp_cache: dict[str, ExperimentType] = {
+            **existing_exps,
+            **{e.name: e for e in new_exps},
+        }
 
         print("  Inserting interaction types...", flush=True)
         new_itypes = InteractionType.objects.bulk_create(
-            [InteractionType(name=n, psi_mi_code="") for n in itypes if n not in existing_itypes],
+            [
+                InteractionType(name=n, psi_mi_code="")
+                for n in itypes
+                if n not in existing_itypes
+            ],
             batch_size=BATCH,
         )
-        itype_cache: dict[str, InteractionType] = {**existing_itypes, **{it.name: it for it in new_itypes}}
+        itype_cache: dict[str, InteractionType] = {
+            **existing_itypes,
+            **{it.name: it for it in new_itypes},
+        }
 
         # ---------------------------------------------------------- #
         # Phase 3: resolve protein pairs, insert Interactions
@@ -520,8 +672,11 @@ def _upsert(
             if (ia.protein_1_id, ia.protein_2_id) in pair_map
         }
         new_interaction_objs = Interaction.objects.bulk_create(
-            [Interaction(protein_1_id=pid1, protein_2_id=pid2, score=0.0)
-             for pid1, pid2 in pair_map if (pid1, pid2) not in existing_interactions],
+            [
+                Interaction(protein_1_id=pid1, protein_2_id=pid2, score=0.0)
+                for pid1, pid2 in pair_map
+                if (pid1, pid2) not in existing_interactions
+            ],
             batch_size=BATCH,
         )
         interaction_cache: dict[tuple[int, int], Interaction] = {
@@ -560,34 +715,71 @@ def _upsert(
             iid = ia.pk
             for row in pair_rows:
                 for s in row.source:
-                    if s in source_cache and (iid, source_cache[s].pk) not in seen_sources:
+                    if (
+                        s in source_cache
+                        and (iid, source_cache[s].pk) not in seen_sources
+                    ):
                         seen_sources.add((iid, source_cache[s].pk))
-                        pending_sources.append(SourceThrough(interaction_id=iid, source_id=source_cache[s].pk))
+                        pending_sources.append(
+                            SourceThrough(
+                                interaction_id=iid, source_id=source_cache[s].pk
+                            )
+                        )
                 for p in row.pmids:
                     if p in pub_cache and (iid, pub_cache[p].pk) not in seen_pubs:
                         seen_pubs.add((iid, pub_cache[p].pk))
-                        pending_pubs.append(PubThrough(interaction_id=iid, publication_id=pub_cache[p].pk))
+                        pending_pubs.append(
+                            PubThrough(
+                                interaction_id=iid, publication_id=pub_cache[p].pk
+                            )
+                        )
                 for mi, tech in row.techs:
                     if tech in exp_cache and (iid, exp_cache[tech].pk) not in seen_exps:
                         seen_exps.add((iid, exp_cache[tech].pk))
-                        pending_exps.append(ExpThrough(interaction_id=iid, experimenttype_id=exp_cache[tech].pk))
+                        pending_exps.append(
+                            ExpThrough(
+                                interaction_id=iid, experimenttype_id=exp_cache[tech].pk
+                            )
+                        )
                 for t in row.types:
                     if t in itype_cache and (iid, itype_cache[t].pk) not in seen_itypes:
                         seen_itypes.add((iid, itype_cache[t].pk))
-                        pending_itypes.append(ItypeThrough(interaction_id=iid, interactiontype_id=itype_cache[t].pk))
+                        pending_itypes.append(
+                            ItypeThrough(
+                                interaction_id=iid, interactiontype_id=itype_cache[t].pk
+                            )
+                        )
                 for db, link_id in row.link:
-                    if db in source_cache and (iid, link_id, source_cache[db].pk) not in seen_xrefs:
+                    if (
+                        db in source_cache
+                        and (iid, link_id, source_cache[db].pk) not in seen_xrefs
+                    ):
                         seen_xrefs.add((iid, link_id, source_cache[db].pk))
-                        pending_xrefs.append(InteractionCrossReference(
-                            interaction_id=iid, link=link_id, source=source_cache[db], species=None,
-                        ))
+                        pending_xrefs.append(
+                            InteractionCrossReference(
+                                interaction_id=iid,
+                                link=link_id,
+                                source=source_cache[db],
+                                species=None,
+                            )
+                        )
 
         print("  Flushing M2M relations...", flush=True)
-        SourceThrough.objects.bulk_create(pending_sources, batch_size=BATCH, ignore_conflicts=True)
-        PubThrough.objects.bulk_create(pending_pubs, batch_size=BATCH, ignore_conflicts=True)
-        ExpThrough.objects.bulk_create(pending_exps, batch_size=BATCH, ignore_conflicts=True)
-        ItypeThrough.objects.bulk_create(pending_itypes, batch_size=BATCH, ignore_conflicts=True)
-        InteractionCrossReference.objects.bulk_create(pending_xrefs, batch_size=BATCH, ignore_conflicts=True)
+        SourceThrough.objects.bulk_create(
+            pending_sources, batch_size=BATCH, ignore_conflicts=True
+        )
+        PubThrough.objects.bulk_create(
+            pending_pubs, batch_size=BATCH, ignore_conflicts=True
+        )
+        ExpThrough.objects.bulk_create(
+            pending_exps, batch_size=BATCH, ignore_conflicts=True
+        )
+        ItypeThrough.objects.bulk_create(
+            pending_itypes, batch_size=BATCH, ignore_conflicts=True
+        )
+        InteractionCrossReference.objects.bulk_create(
+            pending_xrefs, batch_size=BATCH, ignore_conflicts=True
+        )
 
     new_protein_entries = len(canonical_proteins) + len(isoform_proteins)
     return touched, new_protein_entries, len(pair_map)
@@ -598,49 +790,57 @@ def _upsert(
 # ---------------------------------------------------------------------------
 
 
-def _rescore(
-    ids: list[int],
-    batch_size: int,
-    human_species_ids: list[int],
-) -> None:
-    """Recompute and persist scores for the given Interaction PKs."""
-    if not ids:
-        return
-
-    pub_counts: dict[int, int] = dict(
-        Interaction.objects.filter(pk__in=ids)
-        .annotate(n=Count("publications", distinct=True))
-        .values_list("pk", "n")
-    )
-
-    orth_counts: dict[int, int] = dict(
-        Interaction.objects.filter(pk__in=ids)
-        .annotate(
-            n=Count(
-                "conserved_species",
-                filter=~Q(conserved_species__pk__in=human_species_ids),
-                distinct=True,
-            )
+def _rescore_all() -> None:
+    """Recompute and persist scores for all Interactions in the DB."""
+    # Query 1: interaction pk → (gene_pk_1, gene_pk_2) — two joins, no Python objects
+    ipk_to_gene: dict[int, tuple[int, int]] = {
+        ipk: (g1, g2)
+        for ipk, g1, g2 in Interaction.objects.values_list(
+            "pk", "protein_1__gene_id", "protein_2__gene_id"
         )
-        .values_list("pk", "n")
-    )
+    }
 
-    exp_sums: dict[int, float | None] = dict(
-        Interaction.objects.filter(pk__in=ids)
-        .annotate(s=Sum("experiments__quality_score"))
-        .values_list("pk", "s")
-    )
+    # Accumulators: gene pair → sets of distinct FK pks
+    gene_pubs: dict[tuple[int, int], set[int]] = defaultdict(set)
+    gene_species: dict[tuple[int, int], set[int]] = defaultdict(set)
+    gene_exptypes: dict[tuple[int, int], set[int]] = defaultdict(set)
 
-    objs: list[Interaction] = []
-    for iid in ids:
-        raw_score = _compute_score(
-            pub_counts.get(iid, 0),
-            orth_counts.get(iid, 0),
-            exp_sums.get(iid) or 0.0,
-        )
-        objs.append(Interaction(pk=iid, score=min(1.0, max(0.0, raw_score))))
+    # Query 2: bulk-load interaction → publication join table
+    for ia_pk, pub_pk in Interaction.publications.through.objects.values_list(
+        "interaction_id", "publication_id"
+    ):
+        if (gp := ipk_to_gene.get(ia_pk)):
+            gene_pubs[gp].add(pub_pk)
 
-    Interaction.objects.bulk_update(objs, ["score"], batch_size=batch_size)
+    # Query 3: bulk-load interaction → species join table
+    for ia_pk, sp_pk in Interaction.conserved_species.through.objects.values_list(
+        "interaction_id", "species_id"
+    ):
+        if (gp := ipk_to_gene.get(ia_pk)):
+            gene_species[gp].add(sp_pk)
+
+    # Query 4: bulk-load interaction → experiment type join table
+    for ia_pk, et_pk in Interaction.experiments.through.objects.values_list(
+        "interaction_id", "experimenttype_id"
+    ):
+        if (gp := ipk_to_gene.get(ia_pk)):
+            gene_exptypes[gp].add(et_pk)
+
+    # Query 5: experiment type quality scores
+    et_quality: dict[int, float] = {
+        pk: (score or 0.0)
+        for pk, score in ExperimentType.objects.values_list("pk", "quality_score")
+    }
+
+    # Score each interaction in Python — no further DB queries
+    objs = []
+    for ipk, gp in ipk_to_gene.items():
+        pub_n = len(gene_pubs.get(gp, ()))
+        orth_n = len(gene_species.get(gp, ()))
+        exp_sum = sum(et_quality.get(et_pk, 0.0) for et_pk in gene_exptypes.get(gp, ()))
+        objs.append(Interaction(pk=ipk, score=_compute_score(pub_n, orth_n, exp_sum)))
+
+    Interaction.objects.bulk_update(objs, ["score"], batch_size=10000)
 
 
 # ---------------------------------------------------------------------------
@@ -663,63 +863,54 @@ class Command(BaseCommand):
             action="store_true",
             help="Rescore every Interaction in the DB (not just touched ones)",
         )
-        parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Parse and report stats without writing to the database",
-        )
 
     def handle(self, *_args: object, **options: object) -> None:
         biogrid_path: str | None = options["biogrid"]  # type: ignore[assignment]
         intact_path: str | None = options["intact"]  # type: ignore[assignment]
         rescore_all: bool = options["rescore_all"]  # type: ignore[assignment]
 
-        if not biogrid_path and not intact_path:
-            self.stderr.write("Provide at least one of --biogrid or --intact.")
-            return
-
-        touched_ids: set[int] = set()
-
-        if biogrid_path:
-            self.stdout.write(f"Parsing BioGRID: {biogrid_path}")
-            pair_map, total, skipped, _, _ = _parse_intact_or_biogrid(
-                biogrid_path, "biogrid"
-            )
-            rows = list(pair_map.values())
-            self.stdout.write(
-                f"  {total} rows read → {len(rows)} unique pairs, "
-                f"{skipped} skipped (no protein / no PMID / non-human / excluded tech)"
-            )
-            ids, new_c, upd_c = _upsert(rows)
-            touched_ids |= ids
-            self.stdout.write(
-                f"  Upserted: {new_c} new proteins, {upd_c} new interactions"
+        if  biogrid_path or intact_path:
+                
+            touched_ids: set[int] = set()
+            log_file_path = f"logs/update_hippie_{datetime.now().date()}.log"
+            problem_gene_file_path = (
+                f"logs/update_hippie_problem_genes_{datetime.now().date()}.json"
             )
 
-        if intact_path:
-            self.stdout.write(f"Parsing IntAct: {intact_path}")
-            pair_map, total, skipped, _, _ = _parse_intact_or_biogrid(
-                intact_path, "inact"
-            )
-            rows = list(pair_map.values())
-            self.stdout.write(
-                f"  {total} rows read → {len(rows)} unique pairs, "
-                f"{skipped} skipped (no protein / no PMID / non-human / non-uniprot / excluded tech)"
-            )
-            ids, new_c, upd_c = _upsert(rows)
-            touched_ids |= ids
-            self.stdout.write(
-                f"  Upserted: {new_c} new proteins, {upd_c} new interactions"
-            )
+            if biogrid_path:
+                self.stdout.write(f"Parsing BioGRID: {biogrid_path}")
+                pair_map, total, skipped, _, _ = _parse_intact_or_biogrid(
+                    biogrid_path, "biogrid", log_file_path, problem_gene_file_path
+                )
+                rows = list(pair_map.values())
+                self.stdout.write(
+                    f"  {total} rows read → {len(rows)} unique pairs, "
+                    f"{skipped} skipped (no protein / no PMID / non-human / excluded tech)"
+                )
+                ids, new_c, upd_c = _upsert(rows)
+                touched_ids |= ids
+                self.stdout.write(
+                    f"  Upserted: {new_c} new proteins, {upd_c} new interactions"
+                )
+
+            if intact_path:
+                self.stdout.write(f"Parsing IntAct: {intact_path}")
+                pair_map, total, skipped, _, _ = _parse_intact_or_biogrid(
+                    intact_path, "inact", log_file_path, problem_gene_file_path
+                )
+                rows = list(pair_map.values())
+                self.stdout.write(
+                    f"  {total} rows read → {len(rows)} unique pairs, "
+                    f"{skipped} skipped (no protein / no PMID / non-human / non-uniprot / excluded tech)"
+                )
+                ids, new_c, upd_c = _upsert(rows)
+                touched_ids |= ids
+                self.stdout.write(
+                    f"  Upserted: {new_c} new proteins, {upd_c} new interactions"
+                )
 
         # Rescore (wired up once human_species_ids is available)
-        # if rescore_all:
-        #     score_ids = list(Interaction.objects.values_list("pk", flat=True))
-        # else:
-        #     score_ids = list(touched_ids - {0})
-        # if score_ids:
-        #     self.stdout.write(f"Rescoring {len(score_ids)} interactions...")
-        #     _rescore(score_ids, batch_size, human_species_ids)
-        # else:
-        #     self.stdout.write("No interactions to rescore.")
-        # self.stdout.write("Done.")
+        if rescore_all:
+            self.stdout.write("Rescoring interactions.")
+            _rescore_all()
+        self.stdout.write("Done.")

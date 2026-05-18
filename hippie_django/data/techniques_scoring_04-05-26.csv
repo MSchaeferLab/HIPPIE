@@ -1,0 +1,147 @@
+		PPIs	score_old	score_new	reason
+MI:0410	 3D electron microscopy	26		10	like x-ray crystalography (10), in twcie 9/10?
+MI:0889	 acetylase assay	1		7.5	like acetylation assay (7.5), methytransferase assay (7.5) kinase assay (7.5)
+MI:2215	 barcode fusion genetics two hybrid	35		5	like two hybrid fragment pooling approach (5)
+MI:2170	bimolecular luminiscence complementation	3		6	bioluminescent version of bimolecular fluorescence complementation (6)
+MI:0969	 bio-layer interferometry	2		10	as good as surface plasmon resonance (10) or isothermal titration calorimetry (10)
+MI:0013	 biophysical	1		10	assuming it means measuring a direct physical interaction with quantitative data (e.g. Kd)
+MI:0949	 gdp/gtp exchange assay	1		7.5	like acetylation assay (7.5), methytransferase assay (7.5) kinase assay (7.5)
+MI:1007	 glycosylase assay	1		7.5	like acetylation assay (7.5), methytransferase assay (7.5) kinase assay (7.5)
+MI:0729	 luminescence based mammalian interactome mapping	2		5	like affinity capture-luminescence (5)
+MI:2413	 mammalian membrane two hybrid	31		6	like Mammalian protein protein interaction trap (6) - better than two-hybrid (5)
+MI:1247	 microscale thermophoresis	2		10	similar to isothermal titration calorimetry (10) and surface plasmon resonance (10) - like Biophysical (new - 10)
+MI:0813	 proximity ligation assay	32		6	similar to Bimolecular fluorescence complementation (6) or BRET (6)
+MI:1314	 proximity-dependent biotin identification	29414		3	not direct - worse than affinity capture ms (5) but in vivo
+MI:1203	 split luciferase complementation	125		6	similar to Bimolecular fluorescence complementation (6) or BRET (6)
+MI:1235	 thermal shift binding	3		10	similar to isothermal titration calorimetry (10)
+MI:0437	protein three hybrid	2		5	like protein tri hybrid (5)
+MI:0397	 two hybrid array	71		5	like two hybrid fragment pooling approach (5)
+MI:0398	 two hybrid pooling approach	69		5	like two hybrid fragment pooling approach (5)
+MI:0997	 ubiquitinase assay	1		7.5	like acetylation assay (7.5), methytransferase assay (7.5) kinase assay (7.5)
+MI:0966	 ultraviolet-visible spectroscopy	1		9	similar to circular dichroism (9)
+MI:0686	 unspecified method	1957		0	
+MI:1356	 validated two hybrid	72		5	like two hybrid fragment pooling approach (5)
+MI:2289	 virotrap	1520		5	similar to affinity capture ms (5)
+MI:0369	lex-a dimerization assay                         	16	5	5	
+MI:0054	fluorescence-activated cell sorting              	95	1	1	
+MI:0045	experimental interaction detection               	261	1	1	
+MI:0428	imaging technique                                	5051	1	1	
+MI:0091	chromatography technology                        	98	1	1	
+MI:0051	fluorescence technology                          	109	1	1	
+MI:0008	array technology                                 	44	3	3	
+MI:0892	solid phase assay                                	643	1	1	
+MI:0426	light microscopy                                 	8	1	1	
+MI:0090	protein complementation assay                    	1556	5	5	
+MI:0114	x-ray crystallography	2556	10	10	
+MI:0065	isothermal titration calorimetry                 	461	10	10	
+MI:0067	light scattering                                 	115	10	10	
+MI:0077	nuclear magnetic resonance                       	398	10	10	
+MI:0107	surface plasmon resonance                        	1023	10	10	
+MI:0826	x ray scattering                                 	122	9	9	
+MI:0011	beta lactamase complementation                   	19	5	5	
+MI:0010	beta galactosidase complementation               	23	5	5	
+MI:0440	saturation binding                               	24	7.5	7.5	
+MI:0809	bimolecular fluorescence complementation         	1093	6	6	
+MI:0012	bioluminescence resonance energy transfer        	3607	6	6	
+MI:0016	circular dichroism                               	58	9	9	
+MI:0111	dihydrofolate reductase reconstruction           	6	6	6	
+MI:0370	tox-r dimerization assay                         	42	5	5	
+MI:0728	gal4 vp16 complementation                        	35	5	5	
+MI:0399	two hybrid fragment pooling approach             	4155	5	5	
+MI:0510	homogeneous time resolved fluorescence           	6	7	7	
+MI:0420	kinase homogeneous time resolved fluorescence    	2	7.5	7.5	
+MI:0017	classical fluorescence spectroscopy              	91	7.5	7.5	
+MI:0053	fluorescence polarization spectroscopy           	722	10	10	
+MI:0055	fluorescent resonance energy transfer            	2336	6	6	
+MI:0231	mammalian protein protein interaction trap       	414	6	6	
+MI:0099	scintillation proximity assay                    	34	7.5	7.5	
+MI:0232	transcriptional complementation assay            	8	5	5	
+MI:0112	ubiquitin reconstruction                         	2084	5	5	
+MI:0052	fluorescence correlation spectroscopy            	37	10	10	
+MI:0030	cross-linking study                              	26463	5	5	
+MI:0031	protein cross-linking with a bifunctional reagent	15	5	5	
+MI:0084	phage display                                    	801	6	6	
+MI:0048	filamentous phage display                        	6	6	6	
+MI:0108	t7 phage display                                 	3	6	6	
+MI:0066	lambda phage display                             	3	6	6	
+MI:0115	yeast display                                    	3	5	5	
+MI:0404	comigration in non denaturing gel electrophoresis	167	3	3	
+MI:0808	comigration in sds page                          	101	3	3	
+MI:0807	comigration in gel electrophoresis               	48	3	3	
+MI:0417	footprinting                                     	8	3	3	
+MI:0089	protein array                                    	1034	5	5	
+MI:0424	protein kinase assay                             	1464	7.5	7.5	
+MI:0434	phosphatase assay                                	292	7.5	7.5	
+MI:0415	enzymatic study                                  	10433	1	1	
+MI:0411	enzyme linked immunosorbent assay                	439	5	5	
+MI:0515	methyltransferase assay                          	33	7.5	7.5	
+MI:0516	methyltransferase radiometric assay              	8	7.5	7.5	
+MI:0406	deacetylase assay                                	37	7.5	7.5	
+MI:0419	gtpase assay                                     	6	7.5	7.5	
+MI:0870	demethylase assay                                	8	7.5	7.5	
+       	phosphotransfer assay                            	1	7.5	7.5	
+       	acetylation assay                                	6	7.5	7.5	
+MI:0020	transmission electron microscopy                 	154	5	5	
+MI:0953	polymerization                                   	4	5	5	
+MI:0588	hybrid method	8	5	5	
+MI:0405	competition binding                              	119	5	5	
+MI:0038	dynamic light scattering                         	62	9	9	
+MI:0040	electron microscopy                              	177	5	5	
+MI:0423	in-gel kinase assay                              	11	7.5	7.5	
+MI:0726	reverse two hybrid                               	2	5	5	
+MI:0081	peptide array                                    	1341	5	5	
+MI:0006	anti bait coimmunoprecipitation                  	31525	5	5	
+MI:0007	anti tag coimmunoprecipitation                   	295016	5	5	
+MI:0096	pull down                                        	48770	2.5	2.5	
+MI:0676	tandem affinity purification                     	20620	5	5	
+MI:0019	coimmunoprecipitation                            	1562	5	5	
+MI:0059	gst pull down                                    	516	5	5	
+MI:0004	affinity chromatography technology               	604974	5	5	
+MI:0071	molecular sieving                                	1773	2	2	
+MI:0049	filter binding                                   	204	5	5	
+MI:0029	cosedimentation through density gradient         	848	2	2	
+MI:0226	ion exchange chromatography                      	204	3	3	
+MI:0028	cosedimentation in solution                      	319	2	2	
+MI:0027	cosedimentation                                  	153	2	2	
+MI:0435	protease assay                                   	195	7.5	7.5	
+MI:0061	his pull down                                    	14	5	5	
+MI:0025	copurification                                   	749	2	2	
+MI:0276	blue native page                                 	362	3	3	
+MI:0069	mass spectrometry studies of complexes           	98	5	5	
+MI:0400	affinity technology                              	37	5	5	
+MI:0227	reverse phase chromatography                     	4	1	1	
+MI:0678	antibody array                                   	61	5	5	
+MI:0416	fluorescence microscopy                          	1311	1	1	
+MI:0663	confocal microscopy                              	1266	1	1	
+MI:0022	colocalization by immunostaining                 	156	1	1	
+MI:0021	colocalization by fluorescent probes cloning     	16	1	1	
+MI:0413	electrophoretic mobility shift assay             	18	2	2	
+MI:0412	electrophoretic mobility supershift assay        	3	2	2	
+MI:0402	chromatin immunoprecipitation assay              	88	2	2	
+MI:0254	genetic interference                             	16	0	0	
+MI:0920	ribonuclease assay                               	6	7.5	7.5	
+MI:0047	far western blotting                             	974	5	5	
+MI:0364	inferred by curator                              	229	1	1	
+MI:0493	in vivo                                          	18171	1	1	
+MI:0492	in vitro                                         	19981	1	1	
+MI:0018	two hybrid	112869	5	5	
+       	Affinity Capture-Western                         	9318	5	5	
+       	Reconstituted Complex                            	7929	10	10	
+       	FRET                                             	77	6	6	
+       	Protein-peptide                                  	191	5	5	
+       	Co-localization                                  	166	1	1	
+       	Affinity Capture-MS                              	5761	5	5	
+       	Biochemical Activity                             	1043	5	5	
+       	Affinity Capture-RNA                             	8	2	2	
+       	Co-crystal Structure                             	360	10	10	
+       	Co-fractionation                                 	287	1	1	
+       	Protein-RNA                                      	8	0	0	
+       	Affinity Capture-Luminescence                    	4	5	5	
+       	pull-down/mass spectrometry                      	121	5	5	
+MI:0825	x-ray fiber diffraction                          	7	9	9	
+MI:0042	electron paramagnetic resonance                  	3	9	9	
+MI:0872	atomic force microscopy                          	41	9	9	
+MI:0023	colocalization/visualisation technologies        	13	1	1	
+MI:1313	proximity labelling technology	147616	5	5	
+MI:0401	biochemical                                      	66823	5	5	
+		12957	0	0	

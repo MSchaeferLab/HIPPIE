@@ -32,6 +32,8 @@ cd ..
 python manage.py hippie_update \
     --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt \
     --intact data/human.txt
+python manage.py load_experiment_types --csv_path data/techniques_scoring_04-05-26.csv
+python manage.py hippie_update --rescore-all
 
 # If you want to import the real current data 
 python manage.py import_hippie_sql data/mschaefer_hippie_v2_v2-4.sql --log-file data/import.log
