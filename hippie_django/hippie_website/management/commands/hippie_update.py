@@ -176,9 +176,9 @@ def get_uniprot_acc_map() -> tuple[dict[str, str], dict[str, str]]:
 
     for iso_id in isoforms:
         if iso_id not in uniprot_name_map:
-            can_id = iso_id.split("-")[0]
+            can_id, iso_n = iso_id.split("-")
             if can_id in uniprot_name_map:
-                uniprot_name_map[iso_id] = can_id
+                uniprot_name_map[iso_id] = uniprot_name_map[can_id] + f"_{iso_n}"
 
     return acc_map, uniprot_name_map
 
