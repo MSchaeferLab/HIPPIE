@@ -307,6 +307,14 @@ hippie_django/staticfiles/
 .mcp.json
 .pre-commit-config.yaml
 
-# Data loading
+# Data loading — large reference/download files, never commit these
 hippie_django/data/*.sql
+hippie_django/data/*.txt
+hippie_django/data/*.dat
+hippie_django/data/*.gz
+hippie_django/data/*.zip
+hippie_django/data/BIOGRID-*
+hippie_django/data/human*
+hippie_django/logs/*.log
+hippie_django/logs/*.json
 hippie_django/media

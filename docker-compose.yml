@@ -42,6 +42,8 @@ services:
     volumes:
       - static_volume:/code/hippie_django/staticfiles
       - media_volume:/code/hippie_django/media
+      - ./hippie_django/data:/code/hippie_django/data
+      - ./hippie_django/logs:/code/hippie_django/logs
     networks:
       - hippie_net
     depends_on:

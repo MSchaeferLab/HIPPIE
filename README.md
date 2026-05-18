@@ -35,7 +35,7 @@ python manage.py hippie_update \
 python manage.py load_experiment_types --csv_path data/techniques_scoring_04-05-26.csv
 python manage.py hippie_update --rescore-all
 
-# If you want to import the real current data 
+# If you want to import the real current data
 python manage.py import_hippie_sql data/mschaefer_hippie_v2_v2-4.sql --log-file data/import.log
 
 python manage.py createsuperuser
@@ -98,6 +98,31 @@ docker compose exec web python manage.py test_import_bait_prey
 docker compose logs -f web worker apache
 docker compose down              # stop; volumes preserved
 docker compose down -v           # stop + wipe DB / static / media volumes
+```
+
+### Loading real data in Docker
+
+`hippie_django/data/` and `hippie_django/logs/` are bind-mounted into the `web`
+container, so files downloaded on the host are immediately visible inside and log
+files written inside are visible on the host.
+
+```bash
+# 1. Download reference files onto the host (into hippie_django/data/)
+mkdir -p hippie_django/data hippie_django/logs
+cd hippie_django && sh data/download_update_data.sh && cd ..
+
+# — or download inside the running container —
+docker compose exec web sh data/download_update_data.sh
+
+# 2. Run the update (paths are relative to the container's WORKDIR)
+docker compose exec web python manage.py hippie_update \
+    --biogrid data/BIOGRID-ALL-LATEST.mitab.zip \
+    --intact  data/human.txt
+
+# 3. Load experiment scoring table, then rescore
+docker compose exec web python manage.py load_experiment_types \
+    --csv_path data/techniques_scoring_04-05-26.csv
+docker compose exec web python manage.py hippie_update --rescore-all
 ```
 
 Migrations and `collectstatic` run automatically on each `web` boot. The
