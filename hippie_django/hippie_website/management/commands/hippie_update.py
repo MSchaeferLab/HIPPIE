@@ -231,12 +231,12 @@ def suppliment_missing_entrez_id(entrez_map: dict[str, list[str | None, str | No
                     entrez_map[iso_acc][0] = new_entrez
 
                 else:
-                    gene_name, syn_entrez = synonyms_dict.get(name, False)
+                    gene_name, syn_entrez = synonyms_dict.get(name, [False, False])
                     if syn_entrez:
-                        entrez_map[acc] = [syn_entrez, gene_name]
+                        entrez_map[iso_acc] = [syn_entrez, gene_name]
                     else:
                         entrez_uniprot_conflict_genes.add(name)
-                        acc_to_drop.add(acc)
+                        acc_to_drop.add(iso_acc)
             else:
                 acc_to_drop.add(iso_acc)
 
@@ -383,7 +383,8 @@ def _parse_intact_or_biogrid(
                     skip = True
                     break
             if skip:
-                msg = f"{acc1}-{acc2} were dropped as {", ".join(no_gene_map)} didn't map to any Entrez gene \n"
+                missing_gene_map = ", ".join(no_gene_map)
+                msg = f"{acc1}-{acc2} were dropped as {missing_gene_map} didn't map to any Entrez gene \n"
                 no_gene_map_skipped += 1
                 continue
 
@@ -494,13 +495,14 @@ def _upsert(
                 row.entrez_ids,
                 row.gene_names,
             ):
-                genes[entrez] = gene_name or ""
+                eid = int(entrez)
+                genes[eid] = gene_name or ""
                 if iso_bool:
                     can = p_acc.split("-")[0]
-                    canonical_proteins[can] = (entrez, p_name.split("-")[0])
-                    isoform_proteins[p_acc] = (entrez, p_name, can)
+                    canonical_proteins[can] = (eid, p_name.split("-")[0])
+                    isoform_proteins[p_acc] = (eid, p_name, can)
                 else:
-                    canonical_proteins[p_acc] = (entrez, p_name)
+                    canonical_proteins[p_acc] = (eid, p_name)
             for s in row.source:
                 sources.add(s)
             for p in row.pmids:
