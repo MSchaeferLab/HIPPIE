@@ -95,7 +95,7 @@ def _get_isoforms(protein_pk: int) -> list:
 
     Resolution path:
         protein_pk → Protein.uniprot_accession (e.g. "P38398")
-                   → Isoform.isoform_uniprot_id startswith accession + "-"
+                   → Isoform.uniprot_accession startswith accession + "-"
     """
     # If this protein IS itself an isoform, don't expand.
     if Isoform.objects.filter(protein_ptr_id=protein_pk).exists():
@@ -113,7 +113,7 @@ def _get_isoforms(protein_pk: int) -> list:
 
     return list(
         Isoform.objects.filter(
-            isoform_uniprot_id__startswith=accession + "-"
+            uniprot_accession__startswith=accession + "-"
         ).select_related("gene")
     )
 
@@ -203,9 +203,9 @@ def protein_query_api(request):
         isoforms = _get_isoforms(protein.pk)
         protein_pks.extend(iso.pk for iso in isoforms)
 
-    # Map PK → isoform_uniprot_id for every expanded isoform (used in display).
+    # Map PK → isoform accession for every expanded isoform (used in display).
     isoform_uid_map: dict[int, str] = {
-        iso.pk: iso.isoform_uniprot_id for iso in isoforms
+        iso.pk: iso.uniprot_accession for iso in isoforms
     }
     protein_pks_set = set(protein_pks)
 
@@ -599,7 +599,7 @@ def _resolve_interaction_pair_with_isoforms(
 
     # Build isoform UID map (pk → isoform-specific accession) ----------------
     isoform_uid_map: dict[int, str] = {
-        iso.protein_ptr_id: iso.isoform_uniprot_id
+        iso.protein_ptr_id: iso.uniprot_accession
         for iso in Isoform.objects.filter(protein_ptr_id__in=all_pks)
     }
 

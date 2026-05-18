@@ -56,7 +56,7 @@ from .views import (
 # ---------------------------------------------------------------------------
 
 
-def make_protein(name, uniprot_id=None, gene_id=None, accession=None):
+def make_protein(name, uniprot_name=None, gene_id=None, accession=None):
     """Erstellt ein Protein mit optionalen Identifier-Mappings."""
     if gene_id is not None:
         gene, _ = Gene.objects.get_or_create(
@@ -65,10 +65,9 @@ def make_protein(name, uniprot_id=None, gene_id=None, accession=None):
     else:
         gene = Gene.objects.create(entrez_id=0, entrez_name=name)
     return Protein.objects.create(
-        name=name,
         gene=gene,
-        uniprot_id=uniprot_id or "",
-        uniprot_accession=accession or "",
+        uniprot_name=uniprot_name or "",
+        uniprot_accession=accession or f"TEST_{name}",
     )
 
 
@@ -93,13 +92,13 @@ class HippieTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.brca1 = make_protein(
-            "BRCA1", uniprot_id="BRCA1_HUMAN", gene_id=672, accession="P38398"
+            "BRCA1", uniprot_name="BRCA1_HUMAN", gene_id=672, accession="P38398"
         )
         cls.tp53 = make_protein(
-            "TP53", uniprot_id="P53_HUMAN", gene_id=7157, accession="P04637"
+            "TP53", uniprot_name="P53_HUMAN", gene_id=7157, accession="P04637"
         )
         cls.egfr = make_protein(
-            "EGFR", uniprot_id="EGFR_HUMAN", gene_id=1956, accession="P00533"
+            "EGFR", uniprot_name="EGFR_HUMAN", gene_id=1956, accession="P00533"
         )
         cls.ix = make_interaction(cls.brca1, cls.tp53, score=0.85)
         cls.src = Source.objects.create(name="BioGRID", url="https://thebiogrid.org/")
@@ -198,10 +197,8 @@ class ProteinQueryApiTest(HippieTestCase):
 
     def test_resolve_isoform_query_exposes_isoform_uid(self):
         Isoform.objects.create(
-            name="BRCA1_ISO2",
-            isoform_uniprot_id="P38398-2",
             gene=self.brca1.gene,
-            uniprot_id="BRCA1_2_HUMAN",
+            uniprot_name="BRCA1_2_HUMAN",
             uniprot_accession="P38398-2",
         )
         data = self._get("P38398-2")
@@ -490,7 +487,7 @@ class ResolveTest(HippieTestCase):
     def test_resolve_by_symbol(self):
         qs = Protein.objects.resolve("BRCA1")
         self.assertEqual(qs.count(), 1)
-        self.assertEqual(qs.first().name, "BRCA1")
+        self.assertEqual(qs.first().gene.entrez_name, "BRCA1")
 
     def test_resolve_by_symbol_case_insensitive(self):
         qs = Protein.objects.resolve("brca1")
@@ -498,27 +495,25 @@ class ResolveTest(HippieTestCase):
 
     def test_resolve_by_entrez_id(self):
         qs = Protein.objects.resolve("672")
-        self.assertEqual(qs.first().name, "BRCA1")
+        self.assertEqual(qs.first().gene.entrez_name, "BRCA1")
 
     def test_resolve_by_uniprot_id(self):
         qs = Protein.objects.resolve("BRCA1_HUMAN")
-        self.assertEqual(qs.first().name, "BRCA1")
+        self.assertEqual(qs.first().gene.entrez_name, "BRCA1")
 
     def test_resolve_by_accession(self):
         qs = Protein.objects.resolve("P38398")
-        self.assertEqual(qs.first().name, "BRCA1")
+        self.assertEqual(qs.first().gene.entrez_name, "BRCA1")
 
     def test_resolve_isoform_keeps_isoform_uid(self):
         isoform = Isoform.objects.create(
-            name="BRCA1_ISO2",
-            isoform_uniprot_id="P38398-2",
             gene=self.brca1.gene,
-            uniprot_id="BRCA1_2_HUMAN",
+            uniprot_name="BRCA1_2_HUMAN",
             uniprot_accession="P38398-2",
         )
         qs = Protein.objects.resolve("P38398-2")
         self.assertEqual(qs.first().pk, isoform.pk)
-        self.assertEqual(qs.first().isoform_uniprot_id, "P38398-2")
+        self.assertEqual(qs.first().uniprot_accession, "P38398-2")
 
     def test_resolve_unknown_returns_none_queryset(self):
         qs = Protein.objects.resolve("XXXXXXX")
@@ -890,7 +885,7 @@ class InteractionQueryApiShowNoninteractionTest(HippieTestCase):
         self.assertIn(True, flags)
 
     def test_show_both_only_interaction_when_no_noninteraction(self):
-        new_p = make_protein("SHOW_BOTH_P", uniprot_id="SHOW_BOTH_H", gene_id=88001)
+        new_p = make_protein("SHOW_BOTH_P", uniprot_name="SHOW_BOTH_H", gene_id=88001)
         make_interaction(self.brca1, new_p, score=0.5)
         pairs = [{"a": "BRCA1", "b": "SHOW_BOTH_P", "input_order": 0}]
         data = self._post(pairs, {"show": "both"})
@@ -934,18 +929,16 @@ class GetIsoformsTest(HippieTestCase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        # Isoform of BRCA1: accession P38398 → isoform_uniprot_id starts with "P38398-"
+        # Isoform of BRCA1: accession P38398 → uniprot_accession starts with "P38398-"
         cls.isoform = Isoform.objects.create(
-            name="BRCA1_ISO2",
-            isoform_uniprot_id="P38398-2",
             gene=cls.brca1.gene,
-            uniprot_id="",
+            uniprot_name="",
             uniprot_accession="P38398-2",
         )
 
     def test_canonical_protein_returns_its_isoforms(self):
         isoforms = _get_isoforms(self.brca1.pk)
-        iso_ids = [iso.isoform_uniprot_id for iso in isoforms]
+        iso_ids = [iso.uniprot_accession for iso in isoforms]
         self.assertIn("P38398-2", iso_ids)
 
     def test_isoform_itself_not_expanded_further(self):
@@ -958,7 +951,7 @@ class GetIsoformsTest(HippieTestCase):
 
     def test_protein_without_accession_returns_empty(self):
         # Has UniProt entry ID but no accession mapping
-        p = make_protein("NO_ACCESSION_P", uniprot_id="NOACC_HUMAN")
+        p = make_protein("NO_ACCESSION_P", uniprot_name="NOACC_HUMAN")
         self.assertEqual(_get_isoforms(p.pk), [])
 
 

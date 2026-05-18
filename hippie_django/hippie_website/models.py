@@ -108,15 +108,16 @@ class Isoform(Protein):
     """
     Protein isoform — MTI subclass of Protein.
     Every Isoform IS a Protein row (shares the same pk).
-    The isoform-specific UniProt ID (e.g. "P38398-2") is stored here.
-    The canonical protein UniProt ID remains on the parent Protein row.
+    The isoform-specific UniProt accession (e.g. "P38398-2") is stored on
+    this model's inherited `uniprot_accession` field.
+    `general_protein` points to the canonical parent protein entry.
     """
 
     general_protein = models.ForeignKey(
         Protein,
         on_delete=models.CASCADE,
         related_name="isoforms",
-        help_text='Isoform-specific UniProt accession e.g. "P38398-2"'
+        help_text='Canonical parent protein for this isoform'
     )
 
     class Meta:
@@ -171,7 +172,7 @@ class ProteinTissue(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.protein.name} expressed in {self.tissue.name}"
+        return f"{self.protein.gene} expressed in {self.tissue.name}"
 
 
 # =============================================================================
@@ -482,7 +483,7 @@ class NonInteraction(models.Model):
 
     def __str__(self):
         return (
-            f"NonInteraction {self.protein_1.name}–{self.protein_2.name} ({self.score})"
+            f"NonInteraction {self.protein_1.gene}–{self.protein_2.gene} ({self.score})"
         )
 
 
@@ -611,7 +612,7 @@ class OrthologInteraction(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.protein_1.name}–{self.protein_2.name} ({self.source})"
+        return f"{self.protein_1.gene}–{self.protein_2.gene} ({self.source})"
 
 
 class BaitPreyTest(models.Model):

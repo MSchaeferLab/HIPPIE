@@ -52,7 +52,7 @@ class ProteinAdmin(admin.ModelAdmin):
 @admin.register(ProteinSynonym)
 class ProteinSynonymAdmin(admin.ModelAdmin):
     list_display = ("id", "protein", "synonym")
-    search_fields = ("synonym", "protein__name")
+    search_fields = ("synonym", "protein__gene__entrez_name")
     list_select_related = ("protein",)
     autocomplete_fields = ("protein",)
 
@@ -85,7 +85,7 @@ class TissueAdmin(admin.ModelAdmin):
 @admin.register(ProteinTissue)
 class ProteinTissueAdmin(admin.ModelAdmin):
     list_display = ("id", "protein", "tissue")
-    search_fields = ("protein__name", "tissue__name")
+    search_fields = ("protein__gene__entrez_name", "tissue__name")
     list_filter = ("tissue",)
     list_select_related = ("protein", "tissue")
     autocomplete_fields = ("protein", "tissue")
@@ -148,7 +148,7 @@ class InteractionAdmin(admin.ModelAdmin):
         "effect_type",
         "effect_source",
     )
-    search_fields = ("=id", "protein_1__name", "protein_2__name")
+    search_fields = ("=id", "protein_1__gene__entrez_name", "protein_2__gene__entrez_name")
     list_filter = ("kegg_direction", "effect_type", "effect_source")
     ordering = ("-score", "id")
     list_select_related = ("protein_1", "protein_2")
@@ -172,8 +172,8 @@ class InteractionCrossReferenceAdmin(admin.ModelAdmin):
         "=interaction__id",
         "source__name",
         "species__name",
-        "interaction__protein_1__name",
-        "interaction__protein_2__name",
+        "interaction__protein_1__gene__entrez_name",
+        "interaction__protein_2__gene__entrez_name",
     )
     list_filter = ("source", "species")
     list_select_related = (
@@ -197,7 +197,7 @@ class SignalingEndpointAdmin(admin.ModelAdmin):
 @admin.register(OrthologInteraction)
 class OrthologInteractionAdmin(admin.ModelAdmin):
     list_display = ("id", "protein_1", "protein_2", "source")
-    search_fields = ("=id", "protein_1__name", "protein_2__name")
+    search_fields = ("=id", "protein_1__gene__entrez_name", "protein_2__gene__entrez_name")
     list_filter = ("source",)
     list_select_related = ("protein_1", "protein_2")
     autocomplete_fields = ("protein_1", "protein_2", "ortholog_species")
@@ -208,8 +208,8 @@ class BaitPreyAssociationAdmin(admin.ModelAdmin):
     list_display = ("id", "interaction", "direction")
     search_fields = (
         "=interaction__id",
-        "interaction__protein_1__name",
-        "interaction__protein_2__name",
+        "interaction__protein_1__gene__entrez_name",
+        "interaction__protein_2__gene__entrez_name",
         "=tests_performed__publication__pmid",
     )
     list_filter = ("direction",)
@@ -224,7 +224,7 @@ class BaitPreyAssociationAdmin(admin.ModelAdmin):
 @admin.register(NonInteraction)
 class NonInteractionAdmin(admin.ModelAdmin):
     list_display = ("id", "protein_1", "protein_2", "score")
-    search_fields = ("=id", "protein_1__name", "protein_2__name")
+    search_fields = ("=id", "protein_1__gene__entrez_name", "protein_2__gene__entrez_name")
     ordering = ("-score", "id")
     list_select_related = ("protein_1", "protein_2")
     autocomplete_fields = ("protein_1", "protein_2")

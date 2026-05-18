@@ -7,7 +7,6 @@ Usage:
     python manage.py hippie_update --biogrid path/to/biogrid.mitab
     python manage.py hippie_update --intact path/to/intact.txt
     python manage.py hippie_update --biogrid b.mitab --intact i.txt --rescore-all
-    python manage.py hippie_update --biogrid b.mitab --dry-run
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ import math
 from collections import defaultdict
 from datetime import datetime
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
@@ -870,12 +870,12 @@ class Command(BaseCommand):
         rescore_all: bool = options["rescore_all"]  # type: ignore[assignment]
 
         if  biogrid_path or intact_path:
-                
             touched_ids: set[int] = set()
             log_file_path = f"logs/update_hippie_{datetime.now().date()}.log"
             problem_gene_file_path = (
                 f"logs/update_hippie_problem_genes_{datetime.now().date()}.json"
             )
+            Path(log_file_path).parent.mkdir(parents=True, exist_ok=True)
 
             if biogrid_path:
                 self.stdout.write(f"Parsing BioGRID: {biogrid_path}")

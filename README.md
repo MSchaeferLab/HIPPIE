@@ -30,7 +30,7 @@ cd data
 sh download_update_data.sh
 cd ..
 python manage.py hippie_update \
-    --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt \
+    --biogrid data/BIOGRID-ALL-LATEST.mitab.zio \
     --intact data/human.txt
 python manage.py load_experiment_types --csv_path data/techniques_scoring_04-05-26.csv
 python manage.py hippie_update --rescore-all
