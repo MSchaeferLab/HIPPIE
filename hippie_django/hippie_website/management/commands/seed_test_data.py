@@ -399,11 +399,10 @@ class Command(BaseCommand):
                 defaults={"entrez_name": symbol},
             )
             p, _ = Protein.objects.get_or_create(
-                name=symbol,
+                uniprot_accession=ACCESSIONS[symbol],
                 defaults={
                     "gene": gene,
-                    "uniprot_accession": ACCESSIONS[symbol],
-                    "uniprot_id": UNIPROT_IDS[symbol],
+                    "uniprot_name": UNIPROT_IDS[symbol],
                 },
             )
             proteins[symbol] = p
@@ -416,28 +415,21 @@ class Command(BaseCommand):
                 iso_uniprot = f"{ACCESSIONS[symbol]}-{iso_num}"
                 isoform_entry_id = f"{UNIPROT_IDS[symbol]}_{iso_num}"[:16]
                 isoform, created = Isoform.objects.get_or_create(
-                    isoform_uniprot_id=iso_uniprot,
+                    uniprot_accession=iso_uniprot,
                     defaults={
-                        "name": f"{symbol} isoform {iso_num}",
                         "gene": gene,
-                        "uniprot_accession": ACCESSIONS[symbol],
-                        "uniprot_id": UNIPROT_IDS[symbol],
+                        "uniprot_name": isoform_entry_id,
+                        "general_protein": proteins[symbol],
                     },
                 )
                 if not created:
                     update_fields = []
-                    if isoform.name != f"{symbol} isoform {iso_num}":
-                        isoform.name = f"{symbol} isoform {iso_num}"
-                        update_fields.append("name")
                     if isoform.gene_id != proteins[symbol].gene_id:
                         isoform.gene = proteins[symbol].gene
                         update_fields.append("gene")
-                    if isoform.uniprot_accession != iso_uniprot:
-                        isoform.uniprot_accession = iso_uniprot
-                        update_fields.append("uniprot_accession")
-                    if isoform.uniprot_id != isoform_entry_id:
-                        isoform.uniprot_id = isoform_entry_id
-                        update_fields.append("uniprot_id")
+                    if isoform.uniprot_name != isoform_entry_id:
+                        isoform.uniprot_name = isoform_entry_id
+                        update_fields.append("uniprot_name")
                     if update_fields:
                         isoform.save(update_fields=update_fields)
                 isoforms[iso_uniprot] = isoform

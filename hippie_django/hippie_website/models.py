@@ -3,7 +3,6 @@ import uuid
 from django.db import models
 from .managers import InteractionManager, ProteinManager
 
-
 # =============================================================================
 # Protein entities
 # =============================================================================
@@ -60,13 +59,11 @@ class GeneSynonym(models.Model):
 class Protein(models.Model):
     """
     Central entity — one row per unique protein in HIPPIE.
-    The `name` field stores the primary gene symbol (e.g. "BRCA1").
     """
 
     gene = models.ForeignKey(Gene, on_delete=models.CASCADE, related_name="proteins")
-    name = models.CharField(max_length=30, unique=True)
-    uniprot_accession = models.CharField(max_length=20, db_index=True)
-    uniprot_id = models.CharField(max_length=16, db_index=True)
+    uniprot_accession = models.CharField(max_length=20, db_index=True, unique=True)
+    uniprot_name = models.CharField(max_length=16, db_index=True, default="", blank=True)
     objects = ProteinManager()
 
     class Meta:
@@ -111,21 +108,23 @@ class Isoform(Protein):
     """
     Protein isoform — MTI subclass of Protein.
     Every Isoform IS a Protein row (shares the same pk).
-    The isoform-specific UniProt ID (e.g. "P38398-2") is stored here.
-    The canonical protein UniProt ID remains on the parent Protein row.
+    The isoform-specific UniProt accession (e.g. "P38398-2") is stored on
+    this model's inherited `uniprot_accession` field.
+    `general_protein` points to the canonical parent protein entry.
     """
 
-    isoform_uniprot_id = models.CharField(
-        max_length=20,
-        unique=True,
-        help_text='Isoform-specific UniProt accession e.g. "P38398-2"',
+    general_protein = models.ForeignKey(
+        Protein,
+        on_delete=models.CASCADE,
+        related_name="isoforms",
+        help_text='Canonical parent protein for this isoform'
     )
 
     class Meta:
         db_table = "isoform"
 
     def __str__(self):
-        return self.isoform_uniprot_id
+        return self.uniprot_accession
 
 
 # =============================================================================
@@ -173,7 +172,7 @@ class ProteinTissue(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.protein.name} expressed in {self.tissue.name}"
+        return f"{self.protein.gene} expressed in {self.tissue.name}"
 
 
 # =============================================================================
@@ -216,7 +215,7 @@ class ExperimentType(models.Model):
 
     name = models.CharField(max_length=100, unique=True)
     psi_mi_code = models.CharField(max_length=30, blank=True, default="")
-    quality_score = models.FloatField(help_text="Weight in HIPPIE confidence scoring")
+    quality_score = models.FloatField(help_text="Weight in HIPPIE confidence scoring", null=True, blank=True)
 
     class Meta:
         db_table = "experiment_type"
@@ -436,7 +435,7 @@ class Interaction(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.protein_1.name}–{self.protein_2.name} ({self.score})"
+        return f"{self.protein_1.uniprot_accession}–{self.protein_2.uniprot_accession} ({self.score})"
 
 
 class NonInteraction(models.Model):
@@ -484,7 +483,7 @@ class NonInteraction(models.Model):
 
     def __str__(self):
         return (
-            f"NonInteraction {self.protein_1.name}–{self.protein_2.name} ({self.score})"
+            f"NonInteraction {self.protein_1.gene}–{self.protein_2.gene} ({self.score})"
         )
 
 
@@ -613,7 +612,7 @@ class OrthologInteraction(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.protein_1.name}–{self.protein_2.name} ({self.source})"
+        return f"{self.protein_1.gene}–{self.protein_2.gene} ({self.source})"
 
 
 class BaitPreyTest(models.Model):

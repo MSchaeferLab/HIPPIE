@@ -24,7 +24,18 @@ python manage.py migrate
 # If you want example data
 python manage.py seed_test_data
 python manage.py test_import_bait_prey
-# If you want to import the real data
+
+# If you want real data from Intact and BioGrid
+cd data
+sh download_update_data.sh
+cd ..
+python manage.py hippie_update \
+    --biogrid data/BIOGRID-ALL-LATEST.mitab.zio \
+    --intact data/human.txt
+python manage.py load_experiment_types --csv_path data/techniques_scoring_04-05-26.csv
+python manage.py hippie_update --rescore-all
+
+# If you want to import the real current data 
 python manage.py import_hippie_sql data/mschaefer_hippie_v2_v2-4.sql --log-file data/import.log
 
 python manage.py createsuperuser
