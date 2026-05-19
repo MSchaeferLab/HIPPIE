@@ -507,7 +507,7 @@ def _upsert(
                 else:
                     canonical_proteins[p_acc] = (eid, p_name)
             for s in row.source:
-                sources.add(s)
+                sources.add(s.lower().strip())
             for p in row.pmids:
                 if p is not None:
                     pmids.add(p)
@@ -516,7 +516,7 @@ def _upsert(
             for t in row.types:
                 itypes.add(t)
             for db, _ in row.link:
-                sources.add(db)
+                sources.add(db.lower().strip())
 
         print("  Checking existing records...", flush=True)
         existing_genes: dict[int, Gene] = {
