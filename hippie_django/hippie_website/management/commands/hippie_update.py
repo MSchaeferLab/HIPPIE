@@ -20,7 +20,6 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
-from django.db.models import Count, Q, Sum
 
 
 from hippie_website.models import (
@@ -33,7 +32,6 @@ from hippie_website.models import (
     Isoform,
     Source,
     Gene,
-    Species
 )
 
 # ---------------------------------------------------------------------------
@@ -87,7 +85,7 @@ class _ParsedRow:
     uniprot_names: list[str] = field(default_factory=list)
     gene_names: list[str] = field(default_factory=list)
     entrez_ids: list[str] = field(default_factory=list)
-    iso: list[bool] = field(default_factory=[False, False])
+    iso: list[bool] = field(default_factory=lambda: [False, False])
     pmids: set[int] = field(default_factory=set)
     techs: set[tuple[str, str]] = field(default_factory=set)
     types: set[str] = field(default_factory=set)
@@ -273,8 +271,12 @@ def get_human_gene_map():
 
 
 def _parse_intact_or_biogrid(
-    path: str, source_file: ["biogrid", "inact"], log_file: str, problem_gene_file: str
+    path: str, source_file: str, log_file: str, problem_gene_file: str
 ):
+    if source_file not in ["biogrid", "intact"]:
+        raise ValueError(
+            f'{source_file} is not a valid source file. Please use "biogid" or "intact"'
+        )
     log_file = open(log_file, "a+")
     gene_file = open(problem_gene_file, "a+")
     pair_map: dict[tuple[str, str], _ParsedRow] = {}
@@ -291,7 +293,7 @@ def _parse_intact_or_biogrid(
     n_deleted = 0
     deleted: set[str] = set()
 
-    if source_file == "inact":
+    if source_file == "intact":
         id_idx_1 = 0
         id_idx_2 = 1
 
@@ -320,7 +322,7 @@ def _parse_intact_or_biogrid(
 
             if not has_uniprot_acc:
                 mapped_str = ", ".join(
-                    [id_values[i] for i, a in enumerate([acc1, acc2]) if a == None]
+                    [id_values[i] for i, a in enumerate([acc1, acc2]) if a is None]
                 )
                 msg = f"{acc1} - {acc2} was dropped as {mapped_str} isn't valid UNIPROT acc, File: {path}\n"
                 log_file.write(msg)
@@ -385,6 +387,7 @@ def _parse_intact_or_biogrid(
             if skip:
                 missing_gene_map = ", ".join(no_gene_map)
                 msg = f"{acc1}-{acc2} were dropped as {missing_gene_map} didn't map to any Entrez gene \n"
+                log_file.write(msg)
                 no_gene_map_skipped += 1
                 continue
 
@@ -476,12 +479,12 @@ def _upsert(
         print("  Collecting entities...", flush=True)
 
         genes: dict[int, str] = {}  # entrez_id -> gene_name
-        canonical_proteins: dict[str, tuple[int, str]] = (
-            {}
-        )  # acc -> (entrez_id, uniprot_name)
-        isoform_proteins: dict[str, tuple[int, str, str]] = (
-            {}
-        )  # acc -> (entrez_id, name, canonical_acc)
+        canonical_proteins: dict[
+            str, tuple[int, str]
+        ] = {}  # acc -> (entrez_id, uniprot_name)
+        isoform_proteins: dict[
+            str, tuple[int, str, str]
+        ] = {}  # acc -> (entrez_id, name, canonical_acc)
         exp_types: dict[str, str] = {}  # name -> mi_code
         sources: set[str] = set()
         pmids: set[int] = set()
@@ -499,8 +502,8 @@ def _upsert(
                 genes[eid] = gene_name or ""
                 if iso_bool:
                     can = p_acc.split("-")[0]
-                    canonical_proteins[can] = (eid, p_name.split("-")[0])
-                    isoform_proteins[p_acc] = (eid, p_name, can)
+                    canonical_proteins[can] = (eid, p_name or "")
+                    isoform_proteins[p_acc] = (eid, p_name or "", can)
                 else:
                     canonical_proteins[p_acc] = (eid, p_name)
             for s in row.source:
@@ -811,21 +814,21 @@ def _rescore_all() -> None:
     for ia_pk, pub_pk in Interaction.publications.through.objects.values_list(
         "interaction_id", "publication_id"
     ):
-        if (gp := ipk_to_gene.get(ia_pk)):
+        if gp := ipk_to_gene.get(ia_pk):
             gene_pubs[gp].add(pub_pk)
 
     # Query 3: bulk-load interaction → species join table
     for ia_pk, sp_pk in Interaction.conserved_species.through.objects.values_list(
         "interaction_id", "species_id"
     ):
-        if (gp := ipk_to_gene.get(ia_pk)):
+        if gp := ipk_to_gene.get(ia_pk):
             gene_species[gp].add(sp_pk)
 
     # Query 4: bulk-load interaction → experiment type join table
     for ia_pk, et_pk in Interaction.experiments.through.objects.values_list(
         "interaction_id", "experimenttype_id"
     ):
-        if (gp := ipk_to_gene.get(ia_pk)):
+        if gp := ipk_to_gene.get(ia_pk):
             gene_exptypes[gp].add(et_pk)
 
     # Query 5: experiment type quality scores
@@ -871,7 +874,7 @@ class Command(BaseCommand):
         intact_path: str | None = options["intact"]  # type: ignore[assignment]
         rescore_all: bool = options["rescore_all"]  # type: ignore[assignment]
 
-        if  biogrid_path or intact_path:
+        if biogrid_path or intact_path:
             touched_ids: set[int] = set()
             log_file_path = f"logs/update_hippie_{datetime.now().date()}.log"
             problem_gene_file_path = (
@@ -898,7 +901,7 @@ class Command(BaseCommand):
             if intact_path:
                 self.stdout.write(f"Parsing IntAct: {intact_path}")
                 pair_map, total, skipped, _, _ = _parse_intact_or_biogrid(
-                    intact_path, "inact", log_file_path, problem_gene_file_path
+                    intact_path, "intact", log_file_path, problem_gene_file_path
                 )
                 rows = list(pair_map.values())
                 self.stdout.write(

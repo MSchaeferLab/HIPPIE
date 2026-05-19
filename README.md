@@ -116,7 +116,7 @@ docker compose exec web sh data/download_update_data.sh
 
 # 2. Run the update (paths are relative to the container's WORKDIR)
 docker compose exec web python manage.py hippie_update \
-    --biogrid data/BIOGRID-ALL-LATEST.mitab.zip \
+    --biogrid data/BIOGRID-ALL-LATEST.mitab.txt \
     --intact  data/human.txt
 
 # 3. Load experiment scoring table, then rescore

@@ -63,7 +63,9 @@ class Protein(models.Model):
 
     gene = models.ForeignKey(Gene, on_delete=models.CASCADE, related_name="proteins")
     uniprot_accession = models.CharField(max_length=20, db_index=True, unique=True)
-    uniprot_name = models.CharField(max_length=16, db_index=True, default="", blank=True)
+    uniprot_name = models.CharField(
+        max_length=16, db_index=True, default="", blank=True
+    )
     objects = ProteinManager()
 
     class Meta:
@@ -117,7 +119,7 @@ class Isoform(Protein):
         Protein,
         on_delete=models.CASCADE,
         related_name="isoforms",
-        help_text='Canonical parent protein for this isoform'
+        help_text="Canonical parent protein for this isoform",
     )
 
     class Meta:
@@ -185,7 +187,7 @@ class Publication(models.Model):
     Publications that are connected to any of the other classes..
     """
 
-    pmid = models.PositiveIntegerField(unique=True, db_index=True)
+    pmid = models.PositiveBigIntegerField(unique=True, db_index=True)
 
     def __str__(self):
         return str(self.pmid)
@@ -215,7 +217,9 @@ class ExperimentType(models.Model):
 
     name = models.CharField(max_length=100, unique=True)
     psi_mi_code = models.CharField(max_length=30, blank=True, default="")
-    quality_score = models.FloatField(help_text="Weight in HIPPIE confidence scoring", null=True, blank=True)
+    quality_score = models.FloatField(
+        help_text="Weight in HIPPIE confidence scoring", null=True, blank=True
+    )
 
     class Meta:
         db_table = "experiment_type"
