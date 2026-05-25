@@ -30,7 +30,7 @@ cd data
 sh download_update_data.sh
 cd ..
 python manage.py hippie_update \
-    --biogrid data/BIOGRID-ALL-LATEST.mitab.zio \
+    --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt # Versions change, check what version BIOGRID extracts into \
     --intact data/human.txt
 python manage.py load_experiment_types --csv_path data/techniques_scoring_04-05-26.csv
 python manage.py hippie_update --rescore-all
@@ -116,7 +116,7 @@ docker compose exec web sh data/download_update_data.sh
 
 # 2. Run the update (paths are relative to the container's WORKDIR)
 docker compose exec web python manage.py hippie_update \
-    --biogrid data/BIOGRID-ALL-LATEST.mitab.txt \
+    --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt # Versions change, check what version BIOGRID extracts into \
     --intact  data/human.txt
 
 # 3. Load experiment scoring table, then rescore

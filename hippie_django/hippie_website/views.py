@@ -901,8 +901,8 @@ def _run_network_query(params) -> dict:
                 "entrez_b": p2.gene.entrez_id or "",
                 "gene_name_b": p2.gene.entrez_name or p2.uniprot_name,
                 "score": round(ix.score, 4),
-                "source_count": ix.sources.all().count(),
-                "experiment_count": ix.experiments.all().count(),
+                "source_count": len(ix.sources.all()),
+                "experiment_count": len(ix.experiments.all()),
                 "uploaded_interaction": ix.protein_1_id in seen
                 and ix.protein_2_id in seen,
                 "kegg_direction": ix.kegg_direction,
