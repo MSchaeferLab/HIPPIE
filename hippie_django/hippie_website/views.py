@@ -730,6 +730,7 @@ class NetworkQueryView(FormView):
         params = {
             "proteins": raw_proteins,
             "expand": expand,
+            "include_isoforms": cd.get("include_isoforms", False),
             "score_min": cd.get("score_min") or 0.0,
             "directionality": {
                 "none": "any",
@@ -812,6 +813,12 @@ def _run_network_query(params) -> dict:
     protein_ids, unresolved = _protein_ids_from_raw(raw)
     seen = set(protein_ids)
 
+    if params.get("include_isoforms", False):
+        isoform_pks: list[int] = []
+        for pk in list(protein_ids):
+            isoform_pks.extend(iso.pk for iso in _get_isoforms(pk))
+        protein_ids = list(dict.fromkeys(protein_ids + isoform_pks))
+
     if not protein_ids:
         return {
             "node_count": 0,
@@ -849,6 +856,12 @@ def _run_network_query(params) -> dict:
         score_threshold=score_min,
         tissue_ids=tissue_ids,
     ).prefetch_related("sources", "experiments")
+
+    if not params.get("include_isoforms", False):
+        isoform_pks = Isoform.objects.values_list("protein_ptr_id", flat=True)
+        qs = qs.exclude(protein_1_id__in=isoform_pks).exclude(
+            protein_2_id__in=isoform_pks
+        )
 
     # -- 6. Directionality filter -----------------------------------------
     directionality = params.get("directionality", "any")

@@ -101,6 +101,15 @@
               Layer 1 — set vs. HIPPIE
             </label>
           </div>
+          <div class="form-check mt-1">
+            <input class="form-check-input" type="checkbox"
+                   id="{{ form.include_isoforms.id_for_label }}"
+                   name="{{ form.include_isoforms.html_name }}"
+                   {% if form.include_isoforms.value %}checked{% endif %} />
+            <label class="form-check-label" for="{{ form.include_isoforms.id_for_label }}">
+              Include isoforms
+            </label>
+          </div>
         </div>
 
         <div class="mb-0">
@@ -536,8 +545,16 @@
   const allEdges = {{ cy_edges_json|safe }};
 
   const VIS_LIMIT = 300;
-  const edges = allEdges.length > VIS_LIMIT ? allEdges.slice(0, VIS_LIMIT) : allEdges;
+  let edges;
   const truncated = allEdges.length > VIS_LIMIT;
+  if (!truncated) {
+    edges = allEdges;
+  } else {
+    const uploadedEdges = allEdges.filter(e => e.uploaded_interaction);
+    const otherEdges    = allEdges.filter(e => !e.uploaded_interaction);
+    const remaining     = Math.max(0, VIS_LIMIT - uploadedEdges.length);
+    edges = [...uploadedEdges, ...otherEdges.slice(0, remaining)];
+  }
 
   /* Build deduplicated node + edge element lists */
   const nodesSeen = new Set();
@@ -577,11 +594,14 @@
     container: document.getElementById('cy'),
     elements,
     layout: {
-      name:             'cose',
-      animate:          false,
-      padding:          28,
-      nodeRepulsion:    6000,
-      idealEdgeLength:  80,
+      name:              'cose',
+      animate:           true,
+      animationDuration: 800,
+      animationEasing:   'ease-out',
+      padding:           28,
+      nodeRepulsion:     6000,
+      idealEdgeLength:   80,
+      randomize:         true,
     },
     style: [
       /* ── default node ── */
