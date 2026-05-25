@@ -101,6 +101,15 @@
               Layer 1 — set vs. HIPPIE
             </label>
           </div>
+          <div class="form-check mt-1">
+            <input class="form-check-input" type="checkbox"
+                   id="{{ form.include_isoforms.id_for_label }}"
+                   name="{{ form.include_isoforms.html_name }}"
+                   {% if form.include_isoforms.value %}checked{% endif %} />
+            <label class="form-check-label" for="{{ form.include_isoforms.id_for_label }}">
+              Include isoforms
+            </label>
+          </div>
         </div>
 
         <div class="mb-0">
@@ -155,16 +164,29 @@
       {# ── 4. Interaction types ── #}
       <div class="hippie-card p-3 mb-3">
         <div class="form-section-label">Interaction Types</div>
-        {% for choice in form.interaction_types %}
-          <div class="form-check">
-            {{ choice.tag }}
-            <label class="form-check-label" for="{{ choice.id_for_label }}">
-              {{ choice.choice_label }}
-            </label>
+        <div class="dropdown" id="int-type-dropdown">
+          <button type="button"
+                  class="btn btn-outline-secondary w-100 d-flex justify-content-between align-items-center"
+                  style="font-size:.85rem;"
+                  data-bs-toggle="dropdown"
+                  data-bs-auto-close="outside"
+                  aria-expanded="false">
+            <span id="int-type-label">All types</span>
+            <i class="bi bi-chevron-down ms-2"></i>
+          </button>
+          <div class="dropdown-menu p-2 w-100" style="max-height:220px; overflow-y:auto;">
+            {% for choice in form.interaction_types %}
+              <div class="form-check">
+                {{ choice.tag }}
+                <label class="form-check-label" for="{{ choice.id_for_label }}">
+                  {{ choice.choice_label }}
+                </label>
+              </div>
+            {% empty %}
+              <span class="text-muted-sm px-2">No types in database.</span>
+            {% endfor %}
           </div>
-        {% empty %}
-          <span class="text-muted-sm">No types in database.</span>
-        {% endfor %}
+        </div>
         <div class="form-text mt-1">{{ form.interaction_types.help_text }}</div>
       </div>
 
@@ -343,7 +365,7 @@
                     background:var(--hippie-surface); margin:.75rem 0 1rem;">
           <strong style="font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--hippie-ink);">Edge legend</strong>
           <span style="display:flex; align-items:center; gap:.4rem;">
-            <span style="display:inline-block; width:32px; height:3px; border-radius:2px; background:#b87c1a;"></span>
+            <span style="display:inline-block; width:32px; height:3px; border-radius:2px; background:#c0392b;"></span>
             Seed interaction
           </span>
           <span style="display:flex; align-items:center; gap:.4rem;">
@@ -373,7 +395,7 @@
         </div>
         <div class="hippie-card p-0 overflow-hidden">
           <div style="overflow-x:auto;">
-            <table class="table table-hover mb-0" style="font-size:.8rem; white-space:nowrap;">
+            <table id="nq-table" class="table table-hover mb-0" style="font-size:.8rem; white-space:nowrap;">
               <thead class="table-light">
                 <tr>
                   <th>Gene A</th>
@@ -427,6 +449,14 @@
             </table>
           </div>
         </div>
+        <nav id="nq-pagination" class="d-flex justify-content-between align-items-center px-3 py-2"
+             style="font-size:.8rem; border-top:1px solid var(--hippie-border);">
+          <span id="nq-page-info" class="text-muted-sm"></span>
+          <ul class="pagination pagination-sm mb-0">
+            <li class="page-item" id="nq-prev"><a class="page-link" href="#">&laquo;</a></li>
+            <li class="page-item" id="nq-next"><a class="page-link" href="#">&raquo;</a></li>
+          </ul>
+        </nav>
 
       {% elif not network_result.error %}
         <div class="nq-results-placeholder">
@@ -454,6 +484,46 @@
 
 {% block scripts %}
 <script>
+  /* ── Table pagination ── */
+  (function () {
+    const table = document.getElementById('nq-table');
+    if (!table) return;
+    const rows     = Array.from(table.tBodies[0].rows);
+    const pageSize = 25;
+    let page       = 0;
+    const total    = rows.length;
+    const pages    = Math.ceil(total / pageSize);
+
+    function render() {
+      rows.forEach((r, i) => { r.style.display = (i >= page * pageSize && i < (page + 1) * pageSize) ? '' : 'none'; });
+      const from = page * pageSize + 1;
+      const to   = Math.min((page + 1) * pageSize, total);
+      document.getElementById('nq-page-info').textContent = `${from}–${to} of ${total}`;
+      document.getElementById('nq-prev').classList.toggle('disabled', page === 0);
+      document.getElementById('nq-next').classList.toggle('disabled', page >= pages - 1);
+    }
+
+    document.getElementById('nq-prev').addEventListener('click', e => { e.preventDefault(); if (page > 0) { page--; render(); } });
+    document.getElementById('nq-next').addEventListener('click', e => { e.preventDefault(); if (page < pages - 1) { page++; render(); } });
+
+    if (pages <= 1) document.getElementById('nq-pagination').style.display = 'none';
+    render();
+  })();
+
+  /* ── Interaction type dropdown label ── */
+  (function () {
+    const dropdown = document.getElementById('int-type-dropdown');
+    if (!dropdown) return;
+    const label = document.getElementById('int-type-label');
+    const boxes  = dropdown.querySelectorAll('input[type=checkbox]');
+    function updateLabel() {
+      const checked = [...boxes].filter(b => b.checked).map(b => b.closest('label') ? b.closest('.form-check').querySelector('label').textContent.trim() : b.value);
+      label.textContent = checked.length === 0 ? 'All types' : checked.join(', ');
+    }
+    boxes.forEach(b => b.addEventListener('change', updateLabel));
+    updateLabel();
+  })();
+
   /* ── Score preset buttons ── */
   document.querySelectorAll('.score-preset').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -472,7 +542,19 @@
 <script>
 (function () {
   const seeds  = new Set({{ cy_seeds_json|safe }});
-  const edges  = {{ cy_edges_json|safe }};
+  const allEdges = {{ cy_edges_json|safe }};
+
+  const VIS_LIMIT = 300;
+  let edges;
+  const truncated = allEdges.length > VIS_LIMIT;
+  if (!truncated) {
+    edges = allEdges;
+  } else {
+    const uploadedEdges = allEdges.filter(e => e.uploaded_interaction);
+    const otherEdges    = allEdges.filter(e => !e.uploaded_interaction);
+    const remaining     = Math.max(0, VIS_LIMIT - uploadedEdges.length);
+    edges = [...uploadedEdges, ...otherEdges.slice(0, remaining)];
+  }
 
   /* Build deduplicated node + edge element lists */
   const nodesSeen = new Set();
@@ -500,15 +582,26 @@
     }});
   });
 
+  if (truncated) {
+    const banner = document.createElement('div');
+    banner.className = 'alert alert-info py-1 px-2 mb-2';
+    banner.style.fontSize = '.78rem';
+    banner.textContent = `Showing top ${VIS_LIMIT} of ${allEdges.length} edges by score. Full set available in the table and download.`;
+    document.getElementById('cy').insertAdjacentElement('beforebegin', banner);
+  }
+
   const cy = cytoscape({
     container: document.getElementById('cy'),
     elements,
     layout: {
-      name:             'cose',
-      animate:          false,
-      padding:          28,
-      nodeRepulsion:    6000,
-      idealEdgeLength:  80,
+      name:              'cose',
+      animate:           true,
+      animationDuration: 800,
+      animationEasing:   'ease-out',
+      padding:           28,
+      nodeRepulsion:     6000,
+      idealEdgeLength:   80,
+      randomize:         true,
     },
     style: [
       /* ── default node ── */

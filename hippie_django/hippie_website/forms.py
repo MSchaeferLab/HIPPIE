@@ -84,6 +84,12 @@ class NetworkQueryForm(forms.Form):
         required=False,
         initial=True,
     )
+    include_isoforms = forms.BooleanField(
+        label="Include isoforms",
+        required=False,
+        initial=False,
+        help_text="Expand canonical proteins to all known isoforms.",
+    )
     min_ppi = forms.IntegerField(
         label="Minimum PPIs to query set",
         min_value=1,
