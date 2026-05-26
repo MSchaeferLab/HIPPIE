@@ -390,8 +390,41 @@ def _parse_intact_or_biogrid(
                 log_file.write(msg)
                 no_gene_map_skipped += 1
                 continue
-
+            
             key = tuple(sorted([p1, p2]))
+
+            if iso1 or iso2: # make sure to update the generic interaction as well
+                can_p1 = p1.split("-")[0] if iso1 else p1
+                can_p2 = p2.split("-")[0] if iso2 else p2
+                can_key = tuple(sorted([can_p1, can_p2]))
+                if can_key in pair_map:
+                    cr = pair_map[can_key]
+                    cr.pmids.add(pmid)
+                    cr.source.add(source)
+                    if tech:
+                        cr.techs.add(tech)
+                    if itype:
+                        cr.types.add(itype)
+                    if link:
+                        cr.link |= link
+                else:
+                    pair_map[can_key] = _ParsedRow(
+                        p1_id=can_p1,
+                        p2_id=can_p2,
+                        iso=[False, False],
+                        gene_names=gene_names,
+                        entrez_ids=entrez,
+                        uniprot_names=[
+                            uniprot_name_map[can_p1],
+                            uniprot_name_map[can_p2],
+                        ],
+                        pmids={pmid},
+                        source={source},
+                        techs={tech} if tech else set(),
+                        types={itype} if itype else set(),
+                        link=link,
+                    )
+
             try:
                 row = pair_map[key]
                 row.pmids.add(pmid)
@@ -798,12 +831,19 @@ def _upsert(
 def _rescore_all() -> None:
     """Recompute and persist scores for all Interactions in the DB."""
     # Query 1: interaction pk → (gene_pk_1, gene_pk_2) — two joins, no Python objects
-    ipk_to_gene: dict[int, tuple[int, int]] = {
-        ipk: (g1, g2)
-        for ipk, g1, g2 in Interaction.objects.values_list(
-            "pk", "protein_1__gene_id", "protein_2__gene_id"
-        )
-    }
+    # Pre-load isoform pk → canonical gene pk so the main loop stays O(1) per row.
+    isoform_to_gene: dict[int, int] = dict(
+        Isoform.objects.values_list("protein_ptr_id", "general_protein__gene_id")
+    )
+    ipk_to_gene: dict[int, tuple[int, int]] = {}
+    for ix in Interaction.objects.select_related("protein_1__gene", "protein_2__gene"):
+        g: list[int | None] = [None, None]
+        for i, p in enumerate([ix.protein_1, ix.protein_2]):
+            if p.pk in isoform_to_gene:
+                g[i] = isoform_to_gene[p.pk]
+            else:
+                g[i] = p.gene_id
+        ipk_to_gene[ix.pk] = (min(g[0], g[1]), max(g[0], g[1])) # Make sure it maps to the same
 
     # Accumulators: gene pair → sets of distinct FK pks
     gene_pubs: dict[tuple[int, int], set[int]] = defaultdict(set)
