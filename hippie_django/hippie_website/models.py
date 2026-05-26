@@ -149,7 +149,7 @@ class Tissue(models.Model):
         return self.name
 
 
-class ProteinTissue(models.Model):
+class GeneTissue(models.Model):
     """
     Binary protein-tissue expression flag (protein is expressed in tissue).
 
@@ -157,24 +157,25 @@ class ProteinTissue(models.Model):
     RPKM/TPM quantitative expression.
     """
 
-    protein = models.ForeignKey(
-        Protein, on_delete=models.CASCADE, related_name="tissue_expression"
+    gene = models.ForeignKey(
+        Gene, on_delete=models.CASCADE, related_name="tissue_expression"
     )
     tissue = models.ForeignKey(
-        Tissue, on_delete=models.CASCADE, related_name="expressed_proteins"
+        Tissue, on_delete=models.CASCADE, related_name="expressed_genes"
     )
+    median_rpkm = models.FloatField(related_name="RPKM")
 
     class Meta:
-        db_table = "protein2tissue"
+        db_table = "gene2tissue"
         constraints = [
             models.UniqueConstraint(
-                fields=["protein", "tissue"],
-                name="protein_tissue_unique",
+                fields=["gene", "tissue"],
+                name="gene_tissue_unique",
             ),
         ]
 
     def __str__(self):
-        return f"{self.protein.gene} expressed in {self.tissue.name}"
+        return f"{self.gene.entrez_name} expressed in {self.tissue.name}"
 
 
 # =============================================================================
