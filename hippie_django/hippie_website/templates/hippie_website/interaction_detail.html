@@ -159,10 +159,14 @@
 {% block scripts %}
 <script>
 (function () {
-  document.querySelectorAll('.evidence-list[data-collapsible]').forEach(function (ul) {
+  document.querySelectorAll('.evidence-list[data-collapsible]').forEach(function (ul, idx) {
     const limit = parseInt(ul.dataset.collapsible, 10);
     const items = Array.from(ul.children);
     if (items.length <= limit) return;
+
+    if (!ul.id) {
+      ul.id = 'evidence-list-' + idx;
+    }
 
     const hidden = items.slice(limit);
     hidden.forEach(function (li) { li.hidden = true; });
@@ -171,11 +175,14 @@
     btn.type = 'button';
     btn.className = 'btn btn-link btn-sm px-0 mt-1';
     btn.style.cssText = 'font-size:.78rem; color:var(--hippie-teal); text-decoration:none;';
+    btn.setAttribute('aria-controls', ul.id);
+    btn.setAttribute('aria-expanded', 'false');
     let expanded = false;
 
     function toggle() {
       expanded = !expanded;
       hidden.forEach(function (li) { li.hidden = !expanded; });
+      btn.setAttribute('aria-expanded', String(expanded));
       btn.textContent = expanded ? 'Show less' : '+' + hidden.length + ' more';
     }
 

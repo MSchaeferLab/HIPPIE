@@ -20,7 +20,6 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
-from django.db.models import F
 
 
 from hippie_website.models import (
@@ -416,8 +415,8 @@ def _parse_intact_or_biogrid(
                         gene_names=gene_names,
                         entrez_ids=entrez,
                         uniprot_names=[
-                            uniprot_name1 if not iso1 else "",
-                            uniprot_name2 if not iso2 else "",
+                            uniprot_name_map[can_p1],
+                            uniprot_name_map[can_p2],
                         ],
                         pmids={pmid},
                         source={source},
