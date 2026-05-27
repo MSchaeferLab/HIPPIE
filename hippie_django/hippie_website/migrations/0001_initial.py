@@ -23,7 +23,7 @@ class Migration(migrations.Migration):
                         verbose_name="ID",
                     ),
                 ),
-                ("entrez_id", models.PositiveIntegerField(db_index=True)),
+                ("entrez_id", models.PositiveIntegerField(db_index=True, unique=True)),
                 (
                     "entrez_name",
                     models.CharField(
@@ -715,7 +715,7 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.CreateModel(
-            name="ProteinTissue",
+            name="GeneTissue",
             fields=[
                 (
                     "id",
@@ -727,24 +727,25 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 (
-                    "protein",
+                    "gene",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="tissue_expression",
-                        to="hippie_website.protein",
+                        to="hippie_website.gene",
                     ),
                 ),
                 (
                     "tissue",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
-                        related_name="expressed_proteins",
+                        related_name="expressed_genes",
                         to="hippie_website.tissue",
                     ),
                 ),
+                ("median_rpkm", models.FloatField(verbose_name="rpkm")),
             ],
             options={
-                "db_table": "protein2tissue",
+                "db_table": "gene2tissue",
             },
         ),
         migrations.CreateModel(
@@ -936,9 +937,9 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.AddConstraint(
-            model_name="proteintissue",
+            model_name="genetissue",
             constraint=models.UniqueConstraint(
-                fields=("protein", "tissue"), name="protein_tissue_unique"
+                fields=("gene", "tissue"), name="gene_tissue_unique"
             ),
         ),
     ]

@@ -5,9 +5,9 @@ Abdeckung:
   - Alle URL-Endpunkte (HTTP-Status)
   - protein_query_api: Auflösung nach Symbol, UniProt-ID, Accession, Entrez-ID
   - interaction_query_api: bekanntes Pair, unbekanntes Pair, fehlendes Protein, zu großer Batch
-  - browse_api: Grundstruktur, Tissue-Filter, Source-Filter, Min-Degree-Filter, Min-Score-Filter
+  - browse_api: Grundstruktur, Tissue-Filter, Source-Filter, Min-Degree-Filter, Min-Score-Filter, Min-RPKM-Filter
   - browse_filter_meta: Struktur der Antwort
-  - network_query_view: POST mit Seeds, Score-Filter, Layer-0-Filter
+  - network_query_view: POST mit Seeds, Score-Filter, Layer-0-Filter, Min-RPKM-Filter
   - protein_detail_view / interaction_detail_view / noninteraction_detail_view: 200 und 404
   - ProteinQuerySet.resolve(): alle vier Identifier-Typen
   - Canonical ordering in Interaction und NonInteraction
@@ -23,6 +23,10 @@ Abdeckung:
 """
 
 import json
+import tempfile
+from pathlib import Path
+
+from django.core.management import CommandError, call_command
 from django.test import TestCase, Client
 from django.urls import reverse
 
@@ -38,7 +42,7 @@ from .models import (
     Source,
     ExperimentType,
     Tissue,
-    ProteinTissue,
+    GeneTissue,
 )
 from .views import (
     _protein_display,
@@ -63,10 +67,12 @@ def make_protein(name, uniprot_name=None, gene_id=None, accession=None):
             entrez_id=gene_id, defaults={"entrez_name": name}
         )
     else:
-        gene = Gene.objects.create(entrez_id=0, entrez_name=name)
+        gene, _ = Gene.objects.get_or_create(
+            entrez_id=0, defaults={"entrez_name": ""}
+        )
     return Protein.objects.create(
         gene=gene,
-        uniprot_name=uniprot_name or "",
+        uniprot_name=uniprot_name or (name if gene_id is None else ""),
         uniprot_accession=accession if accession is not None else f"TEST_{name}",
     )
 
@@ -343,7 +349,7 @@ class BrowseApiTest(HippieTestCase):
     def setUpTestData(cls):
         super().setUpTestData()
         cls.tissue = Tissue.objects.create(name="Brain")
-        ProteinTissue.objects.create(protein=cls.brca1, tissue=cls.tissue)
+        GeneTissue.objects.create(gene=cls.brca1.gene, tissue=cls.tissue, median_rpkm=1.0)
 
     def _get(self, **params):
         r = self.client.get(reverse("hippie_website:browse_api"), params)
@@ -372,6 +378,14 @@ class BrowseApiTest(HippieTestCase):
         filt_data = self._get(tissue=self.tissue.pk)
         self.assertLess(filt_data["total"], all_data["total"])
         self.assertEqual(filt_data["total"], 1)
+
+    def test_min_rpkm_filter(self):
+        # brca1 has median_rpkm=1.0; threshold below → included
+        data_low = self._get(tissue=self.tissue.pk, min_rpkm=0.5)
+        self.assertEqual(data_low["total"], 1)
+        # threshold above → excluded
+        data_high = self._get(tissue=self.tissue.pk, min_rpkm=2.0)
+        self.assertEqual(data_high["total"], 0)
 
     def test_source_filter(self):
         data = self._get(source=self.src.pk)
@@ -425,6 +439,13 @@ class BrowseFilterMetaTest(HippieTestCase):
 
 
 class NetworkQueryTest(HippieTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.tissue = Tissue.objects.create(name="NetworkTestTissue")
+        GeneTissue.objects.create(gene=cls.brca1.gene, tissue=cls.tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(gene=cls.tp53.gene, tissue=cls.tissue, median_rpkm=1.0)
+
     def test_get_renders_form(self):
         r = self.client.get(reverse("hippie_website:network_query"))
         self.assertEqual(r.status_code, 200)
@@ -447,6 +468,24 @@ class NetworkQueryTest(HippieTestCase):
         ctx = r.context
         self.assertIsNotNone(ctx["network_result"])
         self.assertGreater(ctx["network_result"]["edge_count"], 0)
+
+    def test_min_rpkm_filter(self):
+        base = {
+            "proteins": "BRCA1\nTP53",
+            "output_type": "browser_vis",
+            "layer_0": "on",
+            "score_min": "0.0",
+            "direction": "none",
+            "effect": "none",
+            "negatome_edges": "none",
+            "tissue": self.tissue.pk,
+        }
+        # both proteins have rpkm=1.0; threshold below → edge survives
+        r_low = self.client.post(reverse("hippie_website:network_query"), {**base, "min_rpkm": "0.5"})
+        self.assertGreater(r_low.context["network_result"]["edge_count"], 0)
+        # threshold above → edge filtered out
+        r_high = self.client.post(reverse("hippie_website:network_query"), {**base, "min_rpkm": "2.0"})
+        self.assertEqual(r_high.context["network_result"]["edge_count"], 0)
 
     def test_post_with_unknown_seed(self):
         r = self.client.post(
@@ -984,15 +1023,15 @@ class InteractionQuerySetMethodsTest(HippieTestCase):
 
     def test_in_tissues_includes_when_both_expressed(self):
         tissue = Tissue.objects.create(name="Lung_test")
-        ProteinTissue.objects.create(protein=self.brca1, tissue=tissue)
-        ProteinTissue.objects.create(protein=self.tp53, tissue=tissue)
+        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_rpkm=1.0)
         qs = Interaction.objects.for_protein(self.brca1.pk).in_tissues([tissue.pk])
         self.assertEqual(qs.count(), 1)
 
     def test_in_tissues_excludes_when_one_side_not_expressed(self):
         tissue = Tissue.objects.create(name="Heart_test")
         # Only BRCA1 expressed; TP53 not
-        ProteinTissue.objects.create(protein=self.brca1, tissue=tissue)
+        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_rpkm=1.0)
         qs = Interaction.objects.for_protein(self.brca1.pk).in_tissues([tissue.pk])
         self.assertEqual(qs.count(), 0)
 
@@ -1175,3 +1214,61 @@ class SafeConversionTest(TestCase):
 
     def test_safe_float_valid_float(self):
         self.assertAlmostEqual(_safe_float(0.5), 0.5)
+
+
+class UpdateTissueDataCommandTest(TestCase):
+    def test_required_args_are_enforced(self):
+        with self.assertRaises(CommandError):
+            call_command("update_tissue_data")
+
+    def test_existing_gene_tissue_median_is_updated(self):
+        gene = Gene.objects.create(entrez_id=101, entrez_name="GENE1")
+        tissue = Tissue.objects.create(name="Liver")
+        gene_tissue = GeneTissue.objects.create(gene=gene, tissue=tissue, median_rpkm=2.0)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            gct_path = tmp_path / "test.gct"
+            gct_path.write_text(
+                "\n".join(
+                    [
+                        "#1.2",
+                        "1\t1",
+                        "Name\tDescription\tS1",
+                        "ENSG000001.1\tGENE1\t5",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            annotation_path = tmp_path / "samples.txt"
+            annotation_path.write_text(
+                "\n".join(
+                    [
+                        "sample\tcol1\tcol2\tcol3\tcol4\tcol5\ttissue",
+                        "S1\t-\t-\t-\t-\t-\tLiver",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            entrez_path = tmp_path / "Homo_sapiens.gene_info"
+            entrez_path.write_text(
+                "\n".join(
+                    [
+                        "tax_id\tGeneID\tSymbol\tLocusTag\tSynonyms\tdbXrefs",
+                        "9606\t101\tGENE1\t-\t-\tEnsembl:ENSG000001",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            call_command(
+                "update_tissue_data",
+                gct_path=str(gct_path),
+                annotation_sample_path=str(annotation_path),
+                entrez_homo_path=str(entrez_path),
+            )
+
+        gene_tissue.refresh_from_db()
+        self.assertEqual(gene_tissue.median_rpkm, 5.0)

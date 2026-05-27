@@ -743,6 +743,7 @@ class NetworkQueryView(FormView):
                 "kegg": ["activation", "inhibition"],
             }.get(cd.get("effect", "none"), []),
             "tissues": [cd["tissue"].name] if cd.get("tissue") else [],
+            "min_rpkm": cd.get("min_rpkm", None),
             "go_terms": cd.get("go_terms", ""),
             "mesh_terms": cd.get("mesh_terms", ""),
         }
@@ -849,12 +850,19 @@ def _run_network_query(params) -> dict:
             Tissue.objects.filter(name__in=tissue_names).values_list("pk", flat=True)
         )
 
+    min_rpkm = params.get("min_rpkm")
+    try:
+        min_rpkm_val: float | None = float(min_rpkm) if min_rpkm else None
+    except (TypeError, ValueError):
+        min_rpkm_val = None
+
     # -- 5. Core queryset -------------------------------------------------
     qs = Interaction.objects.network_query(
         protein_ids,
         layer=layer,
         score_threshold=score_min,
         tissue_ids=tissue_ids,
+        min_rpkm=min_rpkm_val,
     ).prefetch_related("sources", "experiments")
 
     if not params.get("include_isoforms", False):
@@ -1011,6 +1019,7 @@ def browse_api(request):
     source_id = request.GET.get("source")
     min_degree = request.GET.get("min_degree")
     min_score = request.GET.get("min_score")
+    min_rpkm = request.GET.get("min_rpkm")
 
     # ── Build a lean queryset (no annotations) ─────────────────────────
     base_qs = Protein.objects.all()
@@ -1018,7 +1027,8 @@ def browse_api(request):
 
     if tissue_id:
         try:
-            base_qs = base_qs.expressed_in([int(tissue_id)])
+            min_rpkm_val = _safe_float(min_rpkm)
+            base_qs = base_qs.expressed_in([int(tissue_id)], min_rpkm=min_rpkm_val)
             has_scope_filter = True
         except (TypeError, ValueError):
             pass

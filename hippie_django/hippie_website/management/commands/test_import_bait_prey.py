@@ -170,11 +170,18 @@ class Command(BaseCommand):
             )
         )
         new_names = all_gene_names - existing
+        next_placeholder_entrez_id = max(
+            10_000_000,
+            (Gene.objects.order_by("-entrez_id").values_list("entrez_id", flat=True).first() or 0)
+            + 1,
+        )
         for name in new_names:
             gene, _ = Gene.objects.get_or_create(
                 entrez_name=name,
-                defaults={"entrez_id": 0},
+                defaults={"entrez_id": next_placeholder_entrez_id},
             )
+            if gene.entrez_id == next_placeholder_entrez_id:
+                next_placeholder_entrez_id += 1
             Protein.objects.get_or_create(
                 gene=gene,
                 defaults={

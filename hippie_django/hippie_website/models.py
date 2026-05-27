@@ -13,7 +13,7 @@ class Gene(models.Model):
     To map proteins that link to the same gene, we added a gene class that is defined by the entrez id.
     """
 
-    entrez_id = models.PositiveIntegerField(db_index=True)
+    entrez_id = models.PositiveIntegerField(db_index=True, unique=True)
     entrez_name = models.CharField(max_length=40, blank=True, default="", db_index=True)
 
     class Meta:
@@ -149,32 +149,32 @@ class Tissue(models.Model):
         return self.name
 
 
-class ProteinTissue(models.Model):
+class GeneTissue(models.Model):
     """
-    Binary protein-tissue expression flag (protein is expressed in tissue).
+    Quantitative gene-tissue expression record from GTEx.
 
-    Could later be extended with an `expression_value` FloatField for
-    RPKM/TPM quantitative expression.
+    Stores the median RPKM measured for one gene in one tissue.
     """
 
-    protein = models.ForeignKey(
-        Protein, on_delete=models.CASCADE, related_name="tissue_expression"
+    gene = models.ForeignKey(
+        Gene, on_delete=models.CASCADE, related_name="tissue_expression"
     )
     tissue = models.ForeignKey(
-        Tissue, on_delete=models.CASCADE, related_name="expressed_proteins"
+        Tissue, on_delete=models.CASCADE, related_name="expressed_genes"
     )
+    median_rpkm = models.FloatField(verbose_name="rpkm")
 
     class Meta:
-        db_table = "protein2tissue"
+        db_table = "gene2tissue"
         constraints = [
             models.UniqueConstraint(
-                fields=["protein", "tissue"],
-                name="protein_tissue_unique",
+                fields=["gene", "tissue"],
+                name="gene_tissue_unique",
             ),
         ]
 
     def __str__(self):
-        return f"{self.protein.gene} expressed in {self.tissue.name}"
+        return f"{self.gene.entrez_name} expressed in {self.tissue.name}"
 
 
 # =============================================================================

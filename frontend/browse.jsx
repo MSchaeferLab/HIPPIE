@@ -22,10 +22,22 @@ function FilterPanel({ filters, onChange, meta }) {
           <div className="filter-section-label">Tissue Expression</div>
           <label className="form-label">Expressed in tissue</label>
           <select className="form-select" value={filters.tissue}
-                  onChange={e => onChange({ ...filters, tissue: e.target.value })}>
+                  onChange={e => onChange({
+                    ...filters,
+                    tissue: e.target.value,
+                    minRpkm: e.target.value ? filters.minRpkm : 0,
+                  })}>
             <option value="">Any tissue</option>
             {tissues.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
+          {filters.tissue && (
+            <>
+              <label className="form-label mt-2">Min. median RPKM ≥</label>
+              <input type="number" className="form-control" min="0" step="1" placeholder="0"
+                     value={filters.minRpkm || ""}
+                     onChange={e => onChange({ ...filters, minRpkm: parseFloat(e.target.value) || 0 })} />
+            </>
+          )}
         </div>
         <div className="col-md-4">
           <div className="filter-section-label">Source Database</div>
@@ -68,6 +80,7 @@ function ActiveFilterBadges({ filters, meta, onRemove }) {
   }
   if (filters.minDegree > 0) badges.push({ key: "minDegree", label: `Degree ≥ ${filters.minDegree}` });
   if (filters.minScore  > 0) badges.push({ key: "minScore",  label: `Avg score ≥ ${filters.minScore.toFixed(2)}` });
+  if (filters.tissue && filters.minRpkm > 0) badges.push({ key: "minRpkm", label: `Min RPKM ≥ ${filters.minRpkm}` });
   if (badges.length === 0) return null;
   return (
     <div className="d-flex gap-2 flex-wrap align-items-center mb-2">
@@ -91,7 +104,7 @@ function App() {
   const [meta,       setMeta]       = useState({ tissues: [], sources: [] });
   const [search,       setSearch]       = useState("");
   const [filtersOpen,  setFiltersOpen]  = useState(false);
-  const [filters,      setFilters]      = useState({ tissue: "", source: "", minDegree: 0, minScore: 0 });
+  const [filters,      setFilters]      = useState({ tissue: "", source: "", minDegree: 0, minScore: 0, minRpkm: 0 });
   const [sortKey,      setSortKey]      = useState("symbol");
   const [sortDir,      setSortDir]      = useState("asc");
   const [page,         setPage]         = useState(1);
@@ -113,6 +126,7 @@ function App() {
     if (filters.source)        params.set("source",     filters.source);
     if (filters.minDegree > 0) params.set("min_degree", filters.minDegree);
     if (filters.minScore  > 0) params.set("min_score",  filters.minScore);
+    if (filters.tissue && filters.minRpkm > 0) params.set("min_rpkm", filters.minRpkm);
 
     let offset = 0, total = null;
     const accumulated = [];
@@ -137,7 +151,7 @@ function App() {
     }
     fetchNextChunk();
     return () => ctrl.abort();
-  }, [filters.tissue, filters.source, filters.minDegree, filters.minScore]);
+  }, [filters.tissue, filters.source, filters.minDegree, filters.minScore, filters.minRpkm]);
 
   const filtered = useMemo(() => {
     let rows = allRows;
@@ -174,16 +188,21 @@ function App() {
   const thCls = (k) => sortKey === k ? `sorted-${sortDir}` : "";
 
   const removeFilter = (key) => {
-    const defaults = { tissue: "", source: "", minDegree: 0, minScore: 0 };
-    setFilters(f => ({ ...f, [key]: defaults[key] }));
+    const defaults = { tissue: "", source: "", minDegree: 0, minScore: 0, minRpkm: 0 };
+    setFilters(f => ({
+      ...f,
+      [key]: defaults[key],
+      ...(key === "tissue" ? { minRpkm: 0 } : {}),
+    }));
   };
-  const hasActiveFilters = filters.tissue || filters.source || filters.minDegree > 0 || filters.minScore > 0;
+  const hasActiveFilters = filters.tissue || filters.source || filters.minDegree > 0 || filters.minScore > 0 || (filters.tissue && filters.minRpkm > 0);
 
   function handleGenerateSplits() {
     const params = new URLSearchParams();
     if (filters.tissue)       params.set("tissue",    filters.tissue);
     if (filters.source)       params.set("source",    filters.source);
     if (filters.minScore > 0) params.set("min_score", filters.minScore);
+    if (filters.tissue && filters.minRpkm > 0) params.set("min_rpkm", filters.minRpkm);
     const qs = params.toString();
     window.location.href = mlSplitsUrl + (qs ? "?" + qs : "");
   }
@@ -209,7 +228,7 @@ function App() {
             {hasActiveFilters && (
               <span style={{background:"var(--hippie-teal)",color:"#fff",borderRadius:"100px",
                             fontSize:".65rem",padding:".05rem .4rem",marginLeft:".2rem"}}>
-                {[filters.tissue, filters.source, filters.minDegree > 0, filters.minScore > 0].filter(Boolean).length}
+                {[filters.tissue, filters.source, filters.minDegree > 0, filters.minScore > 0, filters.tissue && filters.minRpkm > 0].filter(Boolean).length}
               </span>
             )}
           </button>
