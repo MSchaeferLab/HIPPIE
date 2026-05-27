@@ -35,9 +35,16 @@ python manage.py hippie_update \
     --intact data/human.txt
 python manage.py load_experiment_types --csv_path data/techniques_scoring_04-05-26.csv
 python manage.py hippie_update --rescore-all
+python manage.py update_tissue_data \
+    --gct-path              data/GTEx_Analysis_*_gene_reads.gct \
+    --annotation-sample-path data/GTEx_Analysis_*_SampleAttributesDS.txt \
+    --entrez-homo-path      data/Homo_sapiens.gene_info
+```
 
 # If you want to import the real current data
 python manage.py import_hippie_sql data/mschaefer_hippie_v2_v2-4.sql --log-file data/import.log
+
+
 
 python manage.py createsuperuser
 npm run build
