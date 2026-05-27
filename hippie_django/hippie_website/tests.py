@@ -53,7 +53,6 @@ from .views import (
     _safe_int,
     _safe_float,
 )
-from .management.commands.update_tissue_data import Command as UpdateTissueDataCommand
 
 
 # ---------------------------------------------------------------------------
@@ -1219,9 +1218,8 @@ class SafeConversionTest(TestCase):
 
 class UpdateTissueDataCommandTest(TestCase):
     def test_required_args_are_enforced(self):
-        parser = UpdateTissueDataCommand().create_parser("manage.py", "update_tissue_data")
         with self.assertRaises(CommandError):
-            parser.parse_args([])
+            call_command("update_tissue_data")
 
     def test_existing_gene_tissue_median_is_updated(self):
         gene = Gene.objects.create(entrez_id=101, entrez_name="GENE1")
