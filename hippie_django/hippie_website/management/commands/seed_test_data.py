@@ -274,7 +274,7 @@ class Command(BaseCommand):
             Protein,
             Isoform,
             Tissue,
-            ProteinTissue,
+            GeneTissue,
             Source,
             ExperimentType,
             InteractionType,
@@ -299,7 +299,7 @@ class Command(BaseCommand):
                 OrthologInteraction,
                 Interaction,
                 SignalingEndpoint,
-                ProteinTissue,
+                GeneTissue,
                 Isoform,
                 Protein,
                 GeneSynonym,
@@ -443,7 +443,7 @@ class Command(BaseCommand):
         tissue_list = list(tissues.values())
         for p in proteins.values():
             for t in random.sample(tissue_list, k=random.randint(3, 8)):
-                ProteinTissue.objects.get_or_create(protein=p, tissue=t)
+                GeneTissue.objects.get_or_create(gene=p.gene, tissue=t, defaults={"median_rpkm": 1.0})
 
         # ---------------------------------------------------------------
         # 6. Interactions  (~80 interactions, canonical order enforced)
@@ -677,7 +677,7 @@ class Command(BaseCommand):
             ("Protein", Protein),
             ("Isoform", Isoform),
             ("Tissue", Tissue),
-            ("ProteinTissue", ProteinTissue),
+            ("GeneTissue", GeneTissue),
             ("Source", Source),
             ("ExperimentType", ExperimentType),
             ("InteractionType", InteractionType),

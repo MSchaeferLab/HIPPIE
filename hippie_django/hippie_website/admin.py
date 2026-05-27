@@ -15,7 +15,7 @@ from .models import (
     OrthologInteraction,
     Protein,
     ProteinSynonym,
-    ProteinTissue,
+    GeneTissue,
     Publication,
     SignalingEndpoint,
     Source,
@@ -82,13 +82,13 @@ class TissueAdmin(admin.ModelAdmin):
     ordering = ("name",)
 
 
-@admin.register(ProteinTissue)
-class ProteinTissueAdmin(admin.ModelAdmin):
-    list_display = ("id", "protein", "tissue")
-    search_fields = ("protein__gene__entrez_name", "tissue__name")
+@admin.register(GeneTissue)
+class GeneTissueAdmin(admin.ModelAdmin):
+    list_display = ("id", "gene", "tissue", "median_rpkm")
+    search_fields = ("gene__entrez_name", "tissue__name")
     list_filter = ("tissue",)
-    list_select_related = ("protein", "tissue")
-    autocomplete_fields = ("protein", "tissue")
+    list_select_related = ("gene", "tissue")
+    autocomplete_fields = ("gene", "tissue")
 
 
 @admin.register(Source)

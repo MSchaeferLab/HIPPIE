@@ -13,7 +13,7 @@ class Gene(models.Model):
     To map proteins that link to the same gene, we added a gene class that is defined by the entrez id.
     """
 
-    entrez_id = models.PositiveIntegerField(db_index=True)
+    entrez_id = models.PositiveIntegerField(db_index=True, unique=True)
     entrez_name = models.CharField(max_length=40, blank=True, default="", db_index=True)
 
     class Meta:
@@ -163,7 +163,7 @@ class GeneTissue(models.Model):
     tissue = models.ForeignKey(
         Tissue, on_delete=models.CASCADE, related_name="expressed_genes"
     )
-    median_rpkm = models.FloatField(related_name="RPKM")
+    median_rpkm = models.FloatField(verbose_name="rpkm")
 
     class Meta:
         db_table = "gene2tissue"

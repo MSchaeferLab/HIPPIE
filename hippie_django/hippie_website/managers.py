@@ -114,9 +114,14 @@ class ProteinQuerySet(models.QuerySet):
     # Tissue filtering
     # ------------------------------------------------------------------
 
-    def expressed_in(self, tissue_ids: list[int]) -> "ProteinQuerySet":
+    def expressed_in(self, tissue_ids: list[int], min_rpkm: float | None = None) -> "ProteinQuerySet":
         """Filter to proteins expressed in *any* of the given tissues."""
-        return self.filter(tissue_expression__tissue_id__in=tissue_ids).distinct()
+        if min_rpkm is not None:
+            return self.filter(
+                gene__tissue_expression__tissue_id__in=tissue_ids,
+                gene__tissue_expression__median_rpkm__gte=min_rpkm,
+            ).distinct()
+        return self.filter(gene__tissue_expression__tissue_id__in=tissue_ids).distinct()
 
 
 class ProteinManager(models.Manager):
@@ -129,8 +134,8 @@ class ProteinManager(models.Manager):
     def with_browse_annotations(self):
         return self.get_queryset().with_browse_annotations()
 
-    def expressed_in(self, tissue_ids):
-        return self.get_queryset().expressed_in(tissue_ids)
+    def expressed_in(self, tissue_ids, min_rpkm = None):
+        return self.get_queryset().expressed_in(tissue_ids, min_rpkm)
 
 
 # ============================================================================
@@ -221,16 +226,17 @@ class InteractionQuerySet(models.QuerySet):
     # Tissue filtering  (both interactors must be expressed)
     # ------------------------------------------------------------------
 
-    def in_tissues(self, tissue_ids: list[int]) -> "InteractionQuerySet":
+    def in_tissues(self, tissue_ids: list[int], min_rpkm: float | None = None) -> "InteractionQuerySet":
         """
         Keep interactions where *both* proteins are expressed in at least
         one of the given tissues.
         """
         from . import models as m
 
-        expressed = m.ProteinTissue.objects.filter(
-            tissue_id__in=tissue_ids
-        ).values_list("protein_id", flat=True)
+        gt_qs = m.GeneTissue.objects.filter(tissue_id__in=tissue_ids)
+        if min_rpkm is not None:
+            gt_qs = gt_qs.filter(median_rpkm__gte=min_rpkm)
+        expressed = gt_qs.values_list("gene__proteins__id", flat=True)
 
         return self.filter(
             protein_1_id__in=expressed,
@@ -271,6 +277,7 @@ class InteractionQuerySet(models.QuerySet):
         layer: int = 1,
         score_threshold: float = 0.0,
         tissue_ids: list[int] | None = None,
+        min_rpkm: float | None = None,
         type_ids: list[int] | None = None,
         load_annotations: bool = False,
     ) -> "InteractionQuerySet":
@@ -295,7 +302,7 @@ class InteractionQuerySet(models.QuerySet):
             qs = qs.above_score(score_threshold)
 
         if tissue_ids:
-            qs = qs.in_tissues(tissue_ids)
+            qs = qs.in_tissues(tissue_ids, min_rpkm=min_rpkm)
 
         if type_ids:
             qs = qs.of_types(type_ids)

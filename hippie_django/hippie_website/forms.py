@@ -124,6 +124,12 @@ class NetworkQueryForm(forms.Form):
         empty_label="Any tissues",
         required=False,
     )
+    min_rpkm = forms.FloatField(
+        label="Min. median RPKM",
+        required=False,
+        min_value=0,
+        widget=forms.NumberInput(attrs={"placeholder": "0", "step": "1"}),
+    )
     tissue_file = forms.FileField(
         label="…or upload a custom tissue filter",
         required=False,

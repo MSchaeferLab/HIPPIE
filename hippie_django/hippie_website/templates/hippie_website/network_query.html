@@ -212,7 +212,28 @@
             {% endfor %}
           </select>
         </div>
+
+        <div class="mt-2" id="min-rpkm-row" style="display:none">
+          <label class="form-label" for="{{ form.min_rpkm.id_for_label }}">
+            {{ form.min_rpkm.label }}
+          </label>
+          <input type="number" class="form-control"
+                 id="{{ form.min_rpkm.id_for_label }}"
+                 name="{{ form.min_rpkm.html_name }}"
+                 min="0" step="1" placeholder="0"
+                 value="{{ form.min_rpkm.value|default:'' }}">
+        </div>
       </div>
+
+      <script>
+        (function () {
+          var sel = document.getElementById("{{ form.tissue.id_for_label }}");
+          var row = document.getElementById("min-rpkm-row");
+          function toggle() { row.style.display = sel.value ? "" : "none"; }
+          sel.addEventListener("change", toggle);
+          toggle();
+        })();
+      </script>
 
       {# ── 6. Annotation filters ── #}
       <div class="hippie-card p-3 mb-3">

@@ -312,7 +312,7 @@ def _deduplicate_tissue_mapping(
     """
     Drop duplicate (protein_id, tissue_id) pairs in protein2tissue.
 
-    The ProteinTissue model has a unique constraint on (protein, tissue).
+    The GeneTissue model has a unique constraint on (gene, tissue).
     After protein dedup, two rows can collapse onto the same canonical pair
     and would crash bulk_create.
 
