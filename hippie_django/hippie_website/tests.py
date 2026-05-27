@@ -23,6 +23,10 @@ Abdeckung:
 """
 
 import json
+import tempfile
+from pathlib import Path
+
+from django.core.management import CommandError, call_command
 from django.test import TestCase, Client
 from django.urls import reverse
 
@@ -49,6 +53,7 @@ from .views import (
     _safe_int,
     _safe_float,
 )
+from .management.commands.update_tissue_data import Command as UpdateTissueDataCommand
 
 
 # ---------------------------------------------------------------------------
@@ -63,10 +68,12 @@ def make_protein(name, uniprot_name=None, gene_id=None, accession=None):
             entrez_id=gene_id, defaults={"entrez_name": name}
         )
     else:
-        gene = Gene.objects.create(entrez_id=0, entrez_name=name)
+        gene, _ = Gene.objects.get_or_create(
+            entrez_id=0, defaults={"entrez_name": ""}
+        )
     return Protein.objects.create(
         gene=gene,
-        uniprot_name=uniprot_name or "",
+        uniprot_name=uniprot_name or (name if gene_id is None else ""),
         uniprot_accession=accession if accession is not None else f"TEST_{name}",
     )
 
@@ -1208,3 +1215,62 @@ class SafeConversionTest(TestCase):
 
     def test_safe_float_valid_float(self):
         self.assertAlmostEqual(_safe_float(0.5), 0.5)
+
+
+class UpdateTissueDataCommandTest(TestCase):
+    def test_required_args_are_enforced(self):
+        parser = UpdateTissueDataCommand().create_parser("manage.py", "update_tissue_data")
+        with self.assertRaises(CommandError):
+            parser.parse_args([])
+
+    def test_existing_gene_tissue_median_is_updated(self):
+        gene = Gene.objects.create(entrez_id=101, entrez_name="GENE1")
+        tissue = Tissue.objects.create(name="Liver")
+        gene_tissue = GeneTissue.objects.create(gene=gene, tissue=tissue, median_rpkm=2.0)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            gct_path = tmp_path / "test.gct"
+            gct_path.write_text(
+                "\n".join(
+                    [
+                        "#1.2",
+                        "1\t1",
+                        "Name\tDescription\tS1",
+                        "ENSG000001.1\tGENE1\t5",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            annotation_path = tmp_path / "samples.txt"
+            annotation_path.write_text(
+                "\n".join(
+                    [
+                        "sample\tcol1\tcol2\tcol3\tcol4\tcol5\ttissue",
+                        "S1\t-\t-\t-\t-\t-\tLiver",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            entrez_path = tmp_path / "Homo_sapiens.gene_info"
+            entrez_path.write_text(
+                "\n".join(
+                    [
+                        "tax_id\tGeneID\tSymbol\tLocusTag\tSynonyms\tdbXrefs",
+                        "9606\t101\tGENE1\t-\t-\tEnsembl:ENSG000001",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            call_command(
+                "update_tissue_data",
+                gct_path=str(gct_path),
+                annotation_sample_path=str(annotation_path),
+                entrez_homo_path=str(entrez_path),
+            )
+
+        gene_tissue.refresh_from_db()
+        self.assertEqual(gene_tissue.median_rpkm, 5.0)

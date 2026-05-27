@@ -1005,9 +1005,9 @@ class Command(BaseCommand):
             InteractionType,
             MeSHTerm,
             OrthologInteraction,
+            GeneTissue,
             Protein,
             ProteinEntrez,
-            ProteinTissue,
             ProteinUniProt,
             SignalingEndpoint,
             Source,
@@ -1069,7 +1069,7 @@ class Command(BaseCommand):
                 Protein,
                 ProteinUniProt,
                 ProteinEntrez,
-                ProteinTissue,
+                GeneTissue,
                 UniProtAccession,
             )
             self._import_signaling(data, bs, SignalingEndpoint)
@@ -1207,7 +1207,7 @@ class Command(BaseCommand):
         Protein: Any,
         ProteinUniProt: Any,
         ProteinEntrez: Any,
-        ProteinTissue: Any,
+        GeneTissue: Any,
         UniProtAccession: Any,
     ) -> None:
         self._say("Importing proteins …")
@@ -1270,13 +1270,23 @@ class Command(BaseCommand):
         self._say(f"  protein2entrez:   {len(data['protein2entrez']):>8,}")
 
         pt_rows = []
-        # skipped = 0
+        protein_to_gene_id = {
+            int(protein_id): int(gene_id) for protein_id, gene_id, *_ in data["protein2entrez"]
+        }
+        seen_gene_tissues: set[tuple[int, int]] = set()
         for r in data["protein2tissue"]:
-            # if r[1] == 0:
-            #    skipped += 1
-            #    continue
-            pt_rows.append(ProteinTissue(protein_id=r[0], tissue_id=r[1]))
-        _bulk(ProteinTissue, pt_rows, bs, ignore_conflicts=False)
+            gene_id = protein_to_gene_id.get(int(r[0]))
+            tissue_id = int(r[1])
+            if gene_id is None or tissue_id == 0:
+                continue
+            key = (gene_id, tissue_id)
+            if key in seen_gene_tissues:
+                continue
+            seen_gene_tissues.add(key)
+            pt_rows.append(
+                GeneTissue(gene_id=gene_id, tissue_id=tissue_id, median_rpkm=1.0)
+            )
+        _bulk(GeneTissue, pt_rows, bs, ignore_conflicts=False)
         self._say(
             f"  protein2tissue:   {len(pt_rows):>8,}"  #  (skipped {skipped} with tissue_id=0)"
         )

@@ -151,10 +151,9 @@ class Tissue(models.Model):
 
 class GeneTissue(models.Model):
     """
-    Binary protein-tissue expression flag (protein is expressed in tissue).
+    Quantitative gene-tissue expression record from GTEx.
 
-    Could later be extended with an `expression_value` FloatField for
-    RPKM/TPM quantitative expression.
+    Stores the median RPKM measured for one gene in one tissue.
     """
 
     gene = models.ForeignKey(

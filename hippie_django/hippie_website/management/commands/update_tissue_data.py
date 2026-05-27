@@ -49,6 +49,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--gct-path",
             help="Path to the GTEx gct file",
+            required=True,
         )
         parser.add_argument(
             "--entrez-homo-path",
@@ -60,6 +61,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--annotation-sample-path",
             help="Path to the GTEx sample annotation-file",
+            required=True,
         )
 
     def handle(self, **options) -> None:
@@ -160,23 +162,27 @@ class Command(BaseCommand):
             f"          Tissues — {len(existing_tissues):,} existing, {len(new_tissues):,} created."
         )
 
-        # --- Step 5: insert GeneTissue expression rows ---
-        self.stdout.write("Step 5/5  Inserting GeneTissue expression rows...")
+        # --- Step 5: sync GeneTissue expression rows ---
+        self.stdout.write("Step 5/5  Syncing GeneTissue expression rows...")
         created = 0
+        updated = 0
         total_tissues = len(tissue_dict)
         for i, (tissue_name, gene_medians) in enumerate(tissue_dict.items(), 1):
             gene_tissues_to_create = []
-            existing_gene_tissues = set(
-                GeneTissue.objects.filter(tissue=tissue_cache[tissue_name]).values_list(
-                    "gene_id", flat=True
-                )
-            )
+            gene_tissues_to_update = []
+            existing_gene_tissues = {
+                gt.gene_id: gt
+                for gt in GeneTissue.objects.filter(tissue=tissue_cache[tissue_name])
+            }
             for rid, median in gene_medians.items():
                 if rid == "idx" or rid not in map_dict or median < 1:
                     continue
                 eid, _ = map_dict[rid]
                 gene = gene_cache.get(eid)
-                if gene and gene.pk not in existing_gene_tissues:
+                if not gene:
+                    continue
+                existing_gene_tissue = existing_gene_tissues.get(gene.pk)
+                if existing_gene_tissue is None:
                     gene_tissues_to_create.append(
                         GeneTissue(
                             gene=gene,
@@ -184,9 +190,15 @@ class Command(BaseCommand):
                             median_rpkm=median,
                         )
                     )
+                    continue
+                if existing_gene_tissue.median_rpkm != median:
+                    existing_gene_tissue.median_rpkm = median
+                    gene_tissues_to_update.append(existing_gene_tissue)
 
             GeneTissue.objects.bulk_create(gene_tissues_to_create)
+            GeneTissue.objects.bulk_update(gene_tissues_to_update, ["median_rpkm"])
             created += len(gene_tissues_to_create)
+            updated += len(gene_tissues_to_update)
             bar = "#" * i + "-" * (total_tissues - i)
             self.stdout.write(
                 f"\r          [{bar}] {i}/{total_tissues} {tissue_name:<40}", ending=""
@@ -194,5 +206,7 @@ class Command(BaseCommand):
 
         self.stdout.write("")
         self.stdout.write(
-            self.style.SUCCESS(f"Done — {created:,} GeneTissue rows created.")
+            self.style.SUCCESS(
+                f"Done — {created:,} GeneTissue rows created, {updated:,} updated."
+            )
         )
