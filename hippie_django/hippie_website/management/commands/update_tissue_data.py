@@ -5,6 +5,8 @@ from django.core.management.base import BaseCommand, CommandError
 
 from hippie_website.models import Gene, GeneTissue, Tissue
 
+MIN_MEDIAN_RPKM = 1.0
+
 
 def _parse_header(header_line: str, sample_to_verbose: dict[str, str]) -> dict:
     samples = header_line.strip().split("\t")[2:]
@@ -22,7 +24,7 @@ def _parse_header(header_line: str, sample_to_verbose: dict[str, str]) -> dict:
 def _get_ensembl_entrez_map(path_homo_entrez: Path) -> dict[str, tuple[int, str]]:
     map_dict: dict[str, tuple[int, str]] = dict()
     with path_homo_entrez.open(newline="", encoding="utf-8") as f:
-        next(f) # skip header
+        next(f)  # skip header
         for line in f:
             parts = line.split("\t")
             gene_id = int(parts[1])
@@ -175,7 +177,7 @@ class Command(BaseCommand):
                 for gt in GeneTissue.objects.filter(tissue=tissue_cache[tissue_name])
             }
             for rid, median in gene_medians.items():
-                if rid == "idx" or rid not in map_dict or median < 1:
+                if rid == "idx" or rid not in map_dict or median < MIN_MEDIAN_RPKM:
                     continue
                 eid, _ = map_dict[rid]
                 gene = gene_cache.get(eid)
