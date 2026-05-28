@@ -20,7 +20,7 @@ from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
-from django.views.generic.edit import FormView
+from django.views.generic.edit import FormView, DatasetBuilderQueryForm
 
 from .forms import NetworkQueryForm
 from .models import (
@@ -1391,6 +1391,37 @@ def information_view(request):
 # ML splits helpers + views
 # ---------------------------------------------------------------------------
 
+
+def DatasetBuilderView(FormView):
+    template_name = "hippie_website/dataset_builder.html"
+    form_class = DatasetBuilderQueryForm
+    
+    tissue = forms.ModelChoiceField(
+        label="Tissue filter",
+        queryset=Tissue.objects.all().order_by("name"),
+        empty_label="Any tissues",
+        required=False,
+    )
+    min_rpkm = forms.FloatField(
+        label="Min. median RPKM",
+        required=False,
+        min_value=0,
+        widget=forms.NumberInput(attrs={"placeholder": "0", "step": "1"}),
+    )
+    include_isoforms = forms.BooleanField(  ## We need to make sure that we split on generic protein and not on isoform
+        label="Include isoforms",
+        required=False,
+        initial=False,
+        help_text="Expand canonical proteins to all known isoforms.",
+    )
+    score_min = forms.FloatField(  # Perhaps quantile values here
+        label="Minimum confidence score",
+        min_value=0.0,
+        max_value=1.0,
+        initial=0.0,
+        required=False,
+    )
+    
 
 def _validate_split_params(body: dict) -> dict:
     from django.core.exceptions import BadRequest

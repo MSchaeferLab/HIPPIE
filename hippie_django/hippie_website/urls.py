@@ -8,6 +8,8 @@ urlpatterns = [
     path("interaction-query/", views.interaction_query_view, name="interaction_query"),
     path("network/", views.network_query_view, name="network_query"),
     path("browse/", views.browse_view, name="browse"),
+    path("dataset-builder/", views.dataset_builder_view, name="dataset_builder"),
+    
     # ── Utility pages ──────────────────────────────────────────
     path("download/", views.download_view, name="download"),
     path("information/", views.information_view, name="information"),

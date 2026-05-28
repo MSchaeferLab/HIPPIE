@@ -41,7 +41,7 @@ NEGATOME_EDGES_CHOICES = [
 
 
 # ---------------------------------------------------------------------------
-# Form
+# Forms
 # ---------------------------------------------------------------------------
 
 
@@ -199,3 +199,5 @@ class NetworkQueryForm(forms.Form):
             cleaned["score_min"] = float(preset)
 
         return cleaned
+
+class DatasetBuilderQueryForm(forms.Form):
