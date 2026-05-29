@@ -147,38 +147,65 @@ def _parse_links(field_val: str) -> set[tuple[str, str]]:
     return links
 
 
-def get_uniprot_acc_map() -> tuple[dict[str, str], dict[str, str]]:
-    header = True
+def _load_id_mappings() -> tuple[
+    dict[str, str],
+    dict[str, str],
+    dict[str, list[str | None, str | None]],
+    set[str],
+    set[str],
+]:
+    """
+    Build three lookup tables from the UniProt data files in one pass.
+
+    Returns:
+        acc_map          — secondary_acc -> primary_acc (identity for all known accessions)
+        uniprot_name_map — acc -> UniProtKB-ID name
+        gene_map         — acc -> [entrez_id, gene_name]
+        dropped_accs     — accessions dropped because no gene could be mapped
+        conflict_genes   — gene names with conflicting Entrez IDs
+    """
+    # Phase 1: read secondary → primary accession mapping
+    acc_map: dict[str, str] = {}
     with open("data/sec_ac.txt", "r") as f:
-        acc_map: dict[str, str] = {}
+        past_header = False
         for line in f:
             if line.startswith("_"):
-                header = False
+                past_header = True
                 continue
-            if not header:
+            if past_header:
                 accs = line.strip().split(" ")
-                s_ac, p_ac = accs[0], accs[-1]
-                acc_map[s_ac] = p_ac
+                acc_map[accs[0]] = accs[-1]
 
+    # Phase 2: single pass over HUMAN_9606_idmapping.dat builds all three dicts
     uniprot_name_map: dict[str, str] = {}
-    isoforms = set()
+    gene_map: dict[str, list[str | None, str | None]] = {}
+    isoforms: set[str] = set()
+
     with open("data/HUMAN_9606_idmapping.dat", "r") as f:
         for line in f:
-            line = line.strip().split("\t")
-            id = line[0]
-            if "-" in id:
-                isoforms.add(id)
-            acc_map[id] = id
-            if line[1] == "UniProtKB-ID":
-                uniprot_name_map[id] = line[2]
+            parts = line.strip().split("\t")
+            id_ = parts[0]
+            acc_map[id_] = id_
+            if "-" in id_:
+                isoforms.add(id_)
+            if id_ not in gene_map:
+                gene_map[id_] = [None, None]
+            if parts[1] == "UniProtKB-ID":
+                uniprot_name_map[id_] = parts[2]
+            elif parts[1] == "GeneID":
+                gene_map[id_][0] = parts[2]
+            elif parts[1] == "Gene_Name":
+                gene_map[id_][1] = parts[2]
 
+    # Phase 3: derive isoform UniProt names from their canonical entry
     for iso_id in isoforms:
         if iso_id not in uniprot_name_map:
             can_id, iso_n = iso_id.split("-")
             if can_id in uniprot_name_map:
                 uniprot_name_map[iso_id] = uniprot_name_map[can_id] + f"_{iso_n}"
 
-    return acc_map, uniprot_name_map
+    gene_map, dropped_accs, conflict_genes = suppliment_missing_entrez_id(gene_map)
+    return acc_map, uniprot_name_map, gene_map, dropped_accs, conflict_genes
 
 
 def suppliment_missing_entrez_id(entrez_map: dict[str, list[str | None, str | None]]):
@@ -244,27 +271,6 @@ def suppliment_missing_entrez_id(entrez_map: dict[str, list[str | None, str | No
     return entrez_map, acc_to_drop, entrez_uniprot_conflict_genes
 
 
-def get_human_gene_map():
-    human_gene_map: dict[str, list[str | None, str | None]] = dict()
-    with open("data/HUMAN_9606_idmapping.dat", "r") as f:
-        for line in f:
-            line = line.strip().split("\t")
-            id = line[0]
-            if id not in human_gene_map:
-                human_gene_map[id] = [None, None]
-
-            if line[1] == "GeneID":
-                human_gene_map[id][0] = line[2]
-            if line[1] == "Gene_Name":
-                human_gene_map[id][1] = line[2]
-
-    human_gene_map, dropped_acc, conflict_genes = suppliment_missing_entrez_id(
-        human_gene_map
-    )
-
-    return human_gene_map, dropped_acc, conflict_genes
-
-
 # ---------------------------------------------------------------------------
 # Per-source file parsers
 # ---------------------------------------------------------------------------
@@ -288,8 +294,9 @@ def _parse_intact_or_biogrid(
     pimd_skipped = 0
     no_gene_map_skipped = 0
 
-    acc_map, uniprot_name_map = get_uniprot_acc_map()
-    gene_map, non_gene_accs, conflict_genes = get_human_gene_map()
+    acc_map, uniprot_name_map, gene_map, non_gene_accs, conflict_genes = (
+        _load_id_mappings()
+    )
     n_deleted = 0
     deleted: set[str] = set()
 
@@ -642,19 +649,20 @@ def _upsert(
         }
 
         print("  Checking for overlapping PSI_MI codes...", flush=True)
+        existing_mi_map: dict[str, ExperimentType] = {
+            et.psi_mi_code: et for et in ExperimentType.objects.exclude(psi_mi_code="")
+        }
         for n, mi in exp_types.items():
-            if n not in existing_exps and mi != "":
-                if ExperimentType.objects.filter(psi_mi_code=mi).exists():
-                    print(
-                        f"    Warning: experiment type '{n}' has PSI-MI code '{mi}'",
-                        flush=True,
-                    )
-                    existing = ExperimentType.objects.get(psi_mi_code=mi)
-                    print(
-                        f"    which overlaps with existing type '{existing.name}'",
-                        flush=True,
-                    )
-                    # raise ValueError(f"Overlapping PSI-MI code '{mi}' for experiment type '{n}'")
+            if n not in existing_exps and mi != "" and mi in existing_mi_map:
+                existing = existing_mi_map[mi]
+                print(
+                    f"    Warning: experiment type '{n}' has PSI-MI code '{mi}'",
+                    flush=True,
+                )
+                print(
+                    f"    which overlaps with existing type '{existing.name}'",
+                    flush=True,
+                )
 
         print("  Inserting experiment types...", flush=True)
         new_exps = ExperimentType.objects.bulk_create(
@@ -830,23 +838,24 @@ def _upsert(
 
 def _rescore_all() -> None:
     """Recompute and persist scores for all Interactions in the DB."""
-    # Query 1: interaction pk → (gene_pk_1, gene_pk_2) — two joins, no Python objects
-    # Pre-load isoform pk → canonical gene pk so the main loop stays O(1) per row.
-    isoform_to_gene: dict[int, int] = dict(
-        Isoform.objects.values_list("protein_ptr_id", "general_protein__gene_id")
-    )
+    # Query 1a: protein_pk -> effective gene_pk.
+    # Canonical proteins supply their own gene_id; isoforms override with the canonical's gene.
+    protein_to_gene: dict[int, int] = dict(Protein.objects.values_list("pk", "gene_id"))
+    for iso_pk, can_gene_id in Isoform.objects.values_list(
+        "protein_ptr_id", "general_protein__gene_id"
+    ):
+        protein_to_gene[iso_pk] = can_gene_id
+
+    # Query 1b: interaction_pk -> sorted (gene_pk_1, gene_pk_2) pair.
+    # values_list returns integer tuples — no ORM object overhead.
     ipk_to_gene: dict[int, tuple[int, int]] = {}
-    for ix in Interaction.objects.select_related("protein_1__gene", "protein_2__gene"):
-        g: list[int | None] = [None, None]
-        for i, p in enumerate([ix.protein_1, ix.protein_2]):
-            if p.pk in isoform_to_gene:
-                g[i] = isoform_to_gene[p.pk]
-            else:
-                g[i] = p.gene_id
-        ipk_to_gene[ix.pk] = (
-            min(g[0], g[1]),
-            max(g[0], g[1]),
-        )  # Make sure it maps to the same
+    for ipk, p1_pk, p2_pk in Interaction.objects.values_list(
+        "pk", "protein_1_id", "protein_2_id"
+    ):
+        g1 = protein_to_gene.get(p1_pk)
+        g2 = protein_to_gene.get(p2_pk)
+        if g1 is not None and g2 is not None:
+            ipk_to_gene[ipk] = (min(g1, g2), max(g1, g2))
 
     # Accumulators: gene pair → sets of distinct FK pks
     gene_pubs: dict[tuple[int, int], set[int]] = defaultdict(set)
@@ -881,8 +890,11 @@ def _rescore_all() -> None:
     }
 
     # Score each interaction in Python — no further DB queries
+    total = len(ipk_to_gene)
     objs = []
-    for ipk, gp in ipk_to_gene.items():
+    for i, (ipk, gp) in enumerate(ipk_to_gene.items()):
+        if i % 100_000 == 0:
+            print(f"  Scoring {i:,}/{total:,}...", flush=True)
         pub_n = len(gene_pubs.get(gp, ()))
         orth_n = len(gene_species.get(gp, ()))
         exp_sum = sum(et_quality.get(et_pk, 0.0) for et_pk in gene_exptypes.get(gp, ()))

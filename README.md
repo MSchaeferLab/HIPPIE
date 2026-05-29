@@ -118,10 +118,10 @@ files written inside are visible on the host.
 ```bash
 # 1. Download reference files onto the host (into hippie_django/data/)
 mkdir -p hippie_django/data hippie_django/logs
-cd hippie_django && sh data/download_update_data.sh && cd ..
+cd hippie_django && bash data/download_update_data.sh && cd ..
 
 # — or download inside the running container —
-docker compose exec web sh data/download_update_data.sh
+docker compose exec web bash data/download_update_data.sh
 
 # 2. Run the update (paths are relative to the container's WORKDIR)
 # Versions change, check what version BIOGRID extracts into
