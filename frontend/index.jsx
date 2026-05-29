@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { scoreClass, uniprotUrl, entrezUrl, ExtLink, PaginationRow } from "./shared.jsx";
 
@@ -214,6 +214,14 @@ function App() {
     } catch { setError("Network error — could not reach the server."); }
     finally   { setLoading(false); }
   }, [query, filters]);
+
+  // Toggling a filter (isoforms / show-mode) re-runs the search automatically,
+  // as long as there is a query to run — no need to press Search again.
+  const filtersInited = useRef(false);
+  useEffect(() => {
+    if (!filtersInited.current) { filtersInited.current = true; return; }
+    if (query.trim()) handleSearch();
+  }, [filters.includeIsoforms, filters.showMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>

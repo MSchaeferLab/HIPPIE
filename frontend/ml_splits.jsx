@@ -19,8 +19,10 @@ function getCookie(name) {
 }
 
 const FILTER_DEFS = [
-  { key:"tissue",   label:"Tissue",    icon:"bi-heart-pulse",    format: v => `ID ${v}`,      empty:"Any tissue" },
-  { key:"source",   label:"Source",    icon:"bi-database",       format: v => `ID ${v}`,      empty:"Any source" },
+  { key:"tissues",  label:"Tissues",   icon:"bi-heart-pulse",    format: v => `${v.length} selected`, empty:"Any tissue",
+    active: () => Array.isArray(cfg.tissues) && cfg.tissues.length > 0 },
+  { key:"sources",  label:"Sources",   icon:"bi-database",       format: v => `${v.length} selected`, empty:"Any source",
+    active: () => Array.isArray(cfg.sources) && cfg.sources.length > 0 },
   { key:"minScore", label:"Min Score", icon:"bi-bar-chart-line", format: v => `≥ ${v}`, empty:"None",
     active: () => !!(cfg.minScore && cfg.minScore !== "0") },
 ];
@@ -89,8 +91,8 @@ function SplitsForm({ onSubmit, disabled }) {
       seed:       parseInt(seed),
       type_ids:   typeIds,
       min_score:  cfg.minScore ? parseFloat(cfg.minScore) : 0.0,
-      tissue_ids: cfg.tissue   ? [parseInt(cfg.tissue)]   : [],
-      source_ids: cfg.source   ? [parseInt(cfg.source)]   : [],
+      tissue_ids: Array.isArray(cfg.tissues) ? cfg.tissues : [],
+      source_ids: Array.isArray(cfg.sources) ? cfg.sources : [],
     });
   };
 

@@ -390,10 +390,10 @@ def _parse_intact_or_biogrid(
                 log_file.write(msg)
                 no_gene_map_skipped += 1
                 continue
-            
+
             key = tuple(sorted([p1, p2]))
 
-            if iso1 or iso2: # make sure to update the generic interaction as well
+            if iso1 or iso2:  # make sure to update the generic interaction as well
                 can_p1 = p1.split("-")[0] if iso1 else p1
                 can_p2 = p2.split("-")[0] if iso2 else p2
                 can_key = tuple(sorted([can_p1, can_p2]))
@@ -843,7 +843,10 @@ def _rescore_all() -> None:
                 g[i] = isoform_to_gene[p.pk]
             else:
                 g[i] = p.gene_id
-        ipk_to_gene[ix.pk] = (min(g[0], g[1]), max(g[0], g[1])) # Make sure it maps to the same
+        ipk_to_gene[ix.pk] = (
+            min(g[0], g[1]),
+            max(g[0], g[1]),
+        )  # Make sure it maps to the same
 
     # Accumulators: gene pair → sets of distinct FK pks
     gene_pubs: dict[tuple[int, int], set[int]] = defaultdict(set)
@@ -958,4 +961,9 @@ class Command(BaseCommand):
         if rescore_all:
             self.stdout.write("Rescoring interactions.")
             _rescore_all()
+
+        from django.core.management import call_command
+
+        self.stdout.write("Refreshing denormalised protein stats.")
+        call_command("recompute_protein_stats")
         self.stdout.write("Done.")

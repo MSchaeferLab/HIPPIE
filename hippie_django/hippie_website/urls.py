@@ -28,13 +28,24 @@ urlpatterns = [
     path("api/interaction/", views.interaction_query_api, name="interaction_query_api"),
     path("api/network/", views.network_query_api, name="network_query_api"),
     path("api/browse/", views.browse_api, name="browse_api"),
+    path(
+        "api/browse/interactions/",
+        views.browse_interactions_api,
+        name="browse_interactions_api",
+    ),
     path("api/browse/filters/", views.browse_filter_meta, name="browse_filter_meta"),
-    
     # ── ML splits page + API ────────────────────────────────────
     path("ml-splits/", views.ml_splits_view, name="ml_splits"),
-
     # -- ML split API
-    path("api/browse/splits/",                        views.browse_splits_create,   name="browse_splits_create"),
-    path("api/browse/splits/<uuid:job_id>/",          views.browse_splits_status,   name="browse_splits_status"),
-    path("api/browse/splits/<uuid:job_id>/download/", views.browse_splits_download, name="browse_splits_download")
+    path("api/browse/splits/", views.browse_splits_create, name="browse_splits_create"),
+    path(
+        "api/browse/splits/<uuid:job_id>/",
+        views.browse_splits_status,
+        name="browse_splits_status",
+    ),
+    path(
+        "api/browse/splits/<uuid:job_id>/download/",
+        views.browse_splits_download,
+        name="browse_splits_download",
+    ),
 ]

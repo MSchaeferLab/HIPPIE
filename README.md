@@ -8,9 +8,10 @@ cd HIPPIE_FACELIFT
 ```
 
 Create the virtual environment and install the dependencies:
+Because of version conflicts on the server, we are running this with python 3.11 and numpy 1.25
 
 ```bash
-python3 -m venv venv
+python3.11 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -29,7 +30,7 @@ python manage.py test_import_bait_prey
 cd data
 sh download_update_data.sh
 cd ..
-# Versions change, check what version BIOGRID extracts into 
+# Versions change, check what version BIOGRID extracts into
 python manage.py hippie_update \
     --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt \
     --intact data/human.txt

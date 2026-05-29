@@ -66,6 +66,13 @@ class Protein(models.Model):
     uniprot_name = models.CharField(
         max_length=16, db_index=True, default="", blank=True
     )
+
+    # Denormalised browse stats — refreshed by `recompute_protein_stats`.
+    # degree = number of interactions touching this protein (either side);
+    # avg_score = mean confidence score across those interactions.
+    degree = models.PositiveIntegerField(default=0, db_index=True)
+    avg_score = models.FloatField(null=True, blank=True, db_index=True)
+
     objects = ProteinManager()
 
     class Meta:

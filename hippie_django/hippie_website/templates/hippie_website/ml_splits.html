@@ -10,8 +10,8 @@
     createUrl:        "{% url 'hippie_website:browse_splits_create' %}",
     statusBase:       "{% url 'hippie_website:browse_splits_status' job_id='00000000-0000-0000-0000-000000000000' %}".replace("/00000000-0000-0000-0000-000000000000/", "/"),
     browseUrl:        "{% url 'hippie_website:browse' %}",
-    tissue:           "{{ tissue|escapejs }}",
-    source:           "{{ source|escapejs }}",
+    tissues:          {{ tissues_json|safe }},
+    sources:          {{ sources_json|safe }},
     minScore:         "{{ min_score|escapejs }}",
     interactionTypes: {{ interaction_types|safe }},
   };

@@ -10,7 +10,7 @@
       <div class="evidence-card">
         <h4><i class="bi bi-database me-2 text-muted"></i>Source Databases</h4>
         {% if sources %}
-          <ul class="evidence-list">
+          <ul class="evidence-list" data-collapsible="7">
             {% for src in sources %}
               <li>
                 <i class="bi bi-dot" style="color: var(--hippie-teal)"></i>
@@ -33,7 +33,7 @@
       <div class="evidence-card">
         <h4><i class="bi bi-journal-text me-2 text-muted"></i>Publications</h4>
         {% if publications %}
-          <ul class="evidence-list" data-collapsible="4">
+          <ul class="evidence-list" data-collapsible="7">
             {% for pub in publications %}
               <li>
                 <i class="bi bi-file-earmark-text" style="color: var(--hippie-ink-muted)"></i>
@@ -59,7 +59,7 @@
       <div class="evidence-card">
         <h4><i class="bi bi-eyedropper me-2 text-muted"></i>Experimental Systems</h4>
         {% if experiments %}
-          <ul class="evidence-list" data-collapsible="4">
+          <ul class="evidence-list" data-collapsible="7">
             {% for exp in experiments %}
               <li>
                 <span>{{ exp.name }}</span>
@@ -78,7 +78,7 @@
       <div class="evidence-card">
         <h4><i class="bi bi-globe2 me-2 text-muted"></i>Conserved in Species</h4>
         {% if species %}
-          <ul class="evidence-list">
+          <ul class="evidence-list" data-collapsible="7">
             {% for sp in species %}
               <li>
                 <i class="bi bi-dot" style="color: var(--hippie-teal)"></i>
@@ -183,10 +183,10 @@
       expanded = !expanded;
       hidden.forEach(function (li) { li.hidden = !expanded; });
       btn.setAttribute('aria-expanded', String(expanded));
-      btn.textContent = expanded ? 'Show less' : '+' + hidden.length + ' more';
+      btn.textContent = expanded ? 'Show less' : 'Show more';
     }
 
-    btn.textContent = '+' + hidden.length + ' more';
+    btn.textContent = 'Show more';
 
     btn.addEventListener('click', toggle);
     ul.insertAdjacentElement('afterend', btn);
