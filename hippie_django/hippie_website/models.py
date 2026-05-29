@@ -429,6 +429,7 @@ class Interaction(models.Model):
         indexes = [
             models.Index(fields=["protein_1", "score"]),
             models.Index(fields=["protein_2", "score"]),
+            models.Index(fields=["score", "id"]),
         ]
         constraints = [
             models.CheckConstraint(

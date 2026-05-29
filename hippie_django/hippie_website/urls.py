@@ -34,6 +34,7 @@ urlpatterns = [
         name="browse_interactions_api",
     ),
     path("api/browse/filters/", views.browse_filter_meta, name="browse_filter_meta"),
+    path("api/browse/export/", views.browse_export_api, name="browse_export"),
     # ── ML splits page + API ────────────────────────────────────
     path("ml-splits/", views.ml_splits_view, name="ml_splits"),
     # -- ML split API

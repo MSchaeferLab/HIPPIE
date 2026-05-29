@@ -5,6 +5,7 @@ import { Pagination } from "./shared.jsx";
 const {
   proteinsApiUrl,
   interactionsApiUrl,
+  exportApiUrl,
   filterMetaUrl,
   proteinDetailUrl,
   proteinQueryUrl,
@@ -19,6 +20,50 @@ const INTERACTION_DEFAULTS = { minScore: 0, maxScore: 1, source: [], experiment:
 
 function scoreClass(s) {
   return s >= 0.72 ? "score-high" : s >= 0.63 ? "score-med" : "score-low";
+}
+
+// ── Copy / TSV export of ALL matching rows (server-side, capped) ────────────
+function ExportBar({ url, mode, disabled }) {
+  const [busy, setBusy] = useState(false);
+  const [msg,  setMsg]  = useState("");
+  const flash = (m) => { setMsg(m); if (m) setTimeout(() => setMsg(""), 4000); };
+
+  const run = async (action) => {
+    setBusy(true); setMsg("");
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const text = await res.text();
+      const truncated = res.headers.get("X-Export-Truncated") === "1";
+      if (action === "copy") {
+        await navigator.clipboard.writeText(text);
+        flash(truncated ? "Copied (first 50k)" : "Copied");
+      } else {
+        const a = Object.assign(document.createElement("a"), {
+          href: URL.createObjectURL(new Blob([text], { type: "text/tab-separated-values" })),
+          download: `hippie_browse_${mode}.tsv`,
+        });
+        a.click(); URL.revokeObjectURL(a.href);
+        if (truncated) flash("Downloaded (first 50k)");
+      }
+    } catch (e) {
+      flash(e.message || "Export error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="export-bar d-inline-flex align-items-center gap-2">
+      <button disabled={disabled || busy} onClick={() => run("copy")}>
+        <i className="bi bi-clipboard me-1"></i>Copy
+      </button>
+      <button disabled={disabled || busy} onClick={() => run("download")}>
+        <i className="bi bi-download me-1"></i>TSV
+      </button>
+      {msg && <span className="text-muted-sm">{msg}</span>}
+    </div>
+  );
 }
 
 // ── Reusable multi-select checkbox list ──────────────────────────────────
@@ -190,20 +235,20 @@ function App() {
     return () => clearTimeout(id);
   }, [search]);
 
-  // Fetch the current page whenever any query input changes.
-  useEffect(() => {
-    if (abortRef.current) abortRef.current.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setLoading(true); setLoadError(null);
-
+  // Build query params for the current mode + filters. ``forList`` adds
+  // pagination (offset/limit); the export variant adds ``mode`` instead so the
+  // server returns every matching row. Single source of truth shared by the
+  // list fetch and the export buttons.
+  const buildParams = (forList) => {
     const params = new URLSearchParams();
-    params.set("offset", (page - 1) * pageSize);
-    params.set("limit", pageSize);
-
-    let url;
+    if (forList) {
+      params.set("offset", (page - 1) * pageSize);
+      params.set("limit", pageSize);
+    } else {
+      params.set("mode", mode);
+    }
+    if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
     if (mode === "proteins") {
-      if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
       params.set("sort", sortKey);
       params.set("dir", sortDir);
       proteinFilters.tissue.forEach(t => params.append("tissue", t));
@@ -213,7 +258,6 @@ function App() {
       if (proteinFilters.tissue.length > 0 && proteinFilters.minRpkm > 0)
         params.set("min_rpkm", proteinFilters.minRpkm);
       if (proteinFilters.includeIsoforms) params.set("include_isoforms", "1");
-      url = `${proteinsApiUrl}?${params}`;
     } else {
       params.set("dir", intSortDir);
       if (interactionFilters.minScore > 0) params.set("min_score", interactionFilters.minScore);
@@ -221,8 +265,19 @@ function App() {
       interactionFilters.source.forEach(s => params.append("source", s));
       interactionFilters.experiment.forEach(e => params.append("experiment", e));
       if (interactionFilters.includeIsoforms) params.set("include_isoforms", "1");
-      url = `${interactionsApiUrl}?${params}`;
     }
+    return params;
+  };
+
+  // Fetch the current page whenever any query input changes.
+  useEffect(() => {
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setLoading(true); setLoadError(null);
+
+    const apiUrl = mode === "proteins" ? proteinsApiUrl : interactionsApiUrl;
+    const url = `${apiUrl}?${buildParams(true)}`;
 
     fetch(url, { signal: ctrl.signal })
       .then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json(); })
@@ -297,12 +352,12 @@ function App() {
       {/* Search + filter toggle */}
       <div className="hippie-card mb-3">
         <div className="browse-search d-flex gap-2 align-items-center flex-wrap">
-          {mode === "proteins" && (
-            <input type="text" className="form-control flex-grow-1"
-              placeholder="Search by gene symbol, UniProt ID, or Entrez ID…"
-              value={search}
-              onChange={e => setSearch(e.target.value)} />
-          )}
+          <input type="text" className="form-control flex-grow-1"
+            placeholder={mode === "proteins"
+              ? "Search by gene symbol, UniProt ID, or Entrez ID…"
+              : "Search interactions by a partner's gene symbol, UniProt ID, or Entrez ID…"}
+            value={search}
+            onChange={e => setSearch(e.target.value)} />
           <button className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
                   onClick={() => setFiltersOpen(o => !o)}>
             <i className={`bi bi-funnel${activeFilterCount > 0 ? "-fill" : ""}`}></i>
@@ -344,6 +399,8 @@ function App() {
           </span>
         </div>
         <div className="d-flex align-items-center gap-3">
+          <ExportBar url={`${exportApiUrl}?${buildParams(false)}`} mode={mode}
+                     disabled={loading || total === 0} />
           <PageSizeSelect pageSize={pageSize} onChange={(s) => { setPageSize(s); setPage(1); }} />
           {mode === "proteins" && (
             <button onClick={handleGenerateSplits} style={{

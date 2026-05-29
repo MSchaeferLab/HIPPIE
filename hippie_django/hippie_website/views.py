@@ -15,8 +15,8 @@ All database access goes through the custom managers defined in managers.py:
 """
 
 import json
-from django.db.models import Exists, OuterRef, Q
-from django.http import FileResponse, JsonResponse
+from django.db.models import Exists, OuterRef, Q, Subquery
+from django.http import FileResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
@@ -983,48 +983,34 @@ _BROWSE_SORT_FIELDS = {
 }
 
 
-@require_GET
-def browse_api(request):
+def _protein_search_q(q: str) -> Q:
     """
-    GET /api/browse/?offset=<int>&limit=<int>&q=<text>
-                    &sort=<key>&dir=<asc|desc>
-                    &tissue=<id>&tissue=<id>&source=<id>&source=<id>
-                    &min_degree=<int>&min_score=<float>&min_rpkm=<float>
-
-    Returns a single page of proteins (server-side pagination):
-    {
-        "total":    <int>,          # total matching proteins
-        "proteins": [
-            {
-                "id":        <int>,
-                "symbol":    "<gene>",
-                "uniprot_id":"<id>" | "",
-                "entrez_id": <int> | null,
-                "degree":    <int>,
-                "avg_score": <float> | null,
-            },
-            ...
-        ]
-    }
-
-    Filtering, free-text search, sorting and pagination are all done in the
-    database.  ``degree`` / ``avg_score`` are read from the denormalised
-    columns on ``Protein`` (refreshed by the ``recompute_protein_stats``
-    management command), so degree/score sorting and filtering are plain
-    indexed ``WHERE`` / ``ORDER BY`` clauses — no per-request aggregation.
-
-    Multi-valued filters:
-      * ``tissue`` (repeatable): expressed in *any* selected tissue.
-      * ``source`` (repeatable): has an interaction in *any* selected source.
-        Implemented with an ``EXISTS`` subquery to avoid a ``DISTINCT`` over
-        a dual ``interaction`` join.
+    Build the free-text search ``Q`` used by the browse pages: case-insensitive
+    match on gene symbol, UniProt accession, or UniProt entry name; exact match
+    on the Entrez gene ID when the query is all digits.
     """
-    try:
-        offset = max(0, int(request.GET.get("offset", 0)))
-        limit = min(200, max(1, int(request.GET.get("limit", 50))))
-    except (TypeError, ValueError):
-        offset, limit = 0, 50
+    cond = (
+        Q(gene__entrez_name__icontains=q)
+        | Q(uniprot_accession__icontains=q)
+        | Q(uniprot_name__icontains=q)
+    )
+    if q.isdigit():
+        cond |= Q(gene__entrez_id=int(q))
+    return cond
 
+
+def _filtered_protein_qs(request):
+    """
+    Build the ordered Protein queryset for the browse "Proteins" mode from the
+    request's filter params. Shared by ``browse_api`` and ``browse_export_api``.
+
+    ``degree`` / ``avg_score`` are read from denormalised columns (refreshed by
+    ``recompute_protein_stats``), so degree/score filters and sorting are plain
+    indexed clauses. The source filter uses two ``EXISTS`` subqueries over the
+    M2M through table — one per protein side — so each rides the
+    ``(protein_1, score)`` / ``(protein_2, score)`` indexes instead of an
+    OR-correlated subquery across a dual interaction join.
+    """
     tissue_ids = [int(t) for t in request.GET.getlist("tissue") if t.isdigit()]
     source_ids = [int(s) for s in request.GET.getlist("source") if s.isdigit()]
     q = request.GET.get("q", "").strip()
@@ -1047,29 +1033,109 @@ def browse_api(request):
         base_qs = base_qs.expressed_in(tissue_ids, min_rpkm=min_rpkm)
 
     if source_ids:
-        src_exists = Interaction.objects.filter(
-            Q(protein_1_id=OuterRef("pk")) | Q(protein_2_id=OuterRef("pk")),
-            sources__id__in=source_ids,
-        )
-        base_qs = base_qs.filter(Exists(src_exists))
+        through = Interaction.sources.through.objects.filter(source_id__in=source_ids)
+        p1 = through.filter(interaction__protein_1_id=OuterRef("pk"))
+        p2 = through.filter(interaction__protein_2_id=OuterRef("pk"))
+        base_qs = base_qs.filter(Exists(p1) | Exists(p2))
 
     if q:
-        cond = (
-            Q(gene__entrez_name__icontains=q)
-            | Q(uniprot_accession__icontains=q)
-            | Q(uniprot_name__icontains=q)
-        )
-        if q.isdigit():
-            cond |= Q(gene__entrez_id=int(q))
-        base_qs = base_qs.filter(cond)
+        base_qs = base_qs.filter(_protein_search_q(q))
 
     if min_degree is not None and min_degree > 0:
         base_qs = base_qs.filter(degree__gte=min_degree)
     if min_score is not None and min_score > 0:
         base_qs = base_qs.filter(avg_score__gte=min_score)
 
-    base_qs = base_qs.order_by(order, "pk")
+    return base_qs.order_by(order, "pk")
 
+
+def _filtered_interaction_qs(request):
+    """
+    Build the ordered Interaction queryset for the browse "Interactions" mode.
+    Shared by ``browse_interactions_api`` and ``browse_export_api``.
+
+    Performance notes:
+      * Isoform exclusion is a LEFT-JOIN ``IS NULL`` on the reverse one-to-one
+        ``protein_*__isoform`` rather than two ``NOT IN (subquery)`` scans.
+      * Free-text search resolves matching protein PKs in a lean subquery, then
+        filters either interaction side via ``IN``.
+      * Source / experiment filters use ``EXISTS`` over the M2M through table
+        (indexed ``interaction_id`` lookup) — no correlated self-join.
+    """
+    min_score = _safe_float(request.GET.get("min_score"))
+    max_score = _safe_float(request.GET.get("max_score"))
+    source_ids = [int(s) for s in request.GET.getlist("source") if s.isdigit()]
+    experiment_ids = [int(e) for e in request.GET.getlist("experiment") if e.isdigit()]
+    q = request.GET.get("q", "").strip()
+    descending = request.GET.get("dir", "desc") != "asc"
+    include_isoforms = request.GET.get("include_isoforms", "") in ("1", "true")
+
+    qs = Interaction.objects.all()
+    if not include_isoforms:
+        qs = qs.filter(protein_1__isoform__isnull=True, protein_2__isoform__isnull=True)
+    if min_score is not None:
+        qs = qs.filter(score__gte=min_score)
+    if max_score is not None:
+        qs = qs.filter(score__lte=max_score)
+    if q:
+        pid_qs = Protein.objects.filter(_protein_search_q(q)).values("pk")
+        qs = qs.filter(
+            Q(protein_1__in=Subquery(pid_qs)) | Q(protein_2__in=Subquery(pid_qs))
+        )
+    if source_ids:
+        qs = qs.filter(
+            Exists(
+                Interaction.sources.through.objects.filter(
+                    interaction_id=OuterRef("pk"), source_id__in=source_ids
+                )
+            )
+        )
+    if experiment_ids:
+        qs = qs.filter(
+            Exists(
+                Interaction.experiments.through.objects.filter(
+                    interaction_id=OuterRef("pk"),
+                    experimenttype_id__in=experiment_ids,
+                )
+            )
+        )
+
+    return qs.with_proteins().order_by("-score" if descending else "score", "pk")
+
+
+def _interaction_row(ix) -> dict:
+    """Serialise one Interaction for the browse table. Uses prefetched M2M
+    caches (``len`` not ``.count()``) to avoid per-row count queries."""
+    return {
+        "id": ix.pk,
+        "protein_a": _protein_display(ix.protein_1),
+        "protein_b": _protein_display(ix.protein_2),
+        "score": round(ix.score, 4),
+        "source_count": len(ix.sources.all()),
+        "experiment_count": len(ix.experiments.all()),
+        "detail_url": reverse("hippie_website:interaction_detail", args=[ix.pk]),
+    }
+
+
+@require_GET
+def browse_api(request):
+    """
+    GET /api/browse/?offset=<int>&limit=<int>&q=<text>
+                    &sort=<key>&dir=<asc|desc>
+                    &tissue=<id>&tissue=<id>&source=<id>&source=<id>
+                    &min_degree=<int>&min_score=<float>&min_rpkm=<float>
+
+    Returns a single page of proteins (server-side pagination):
+    {"total": <int>, "proteins": [ {id, symbol, uniprot_id, entrez_id,
+                                     degree, avg_score}, ... ]}
+    """
+    try:
+        offset = max(0, int(request.GET.get("offset", 0)))
+        limit = min(200, max(1, int(request.GET.get("limit", 50))))
+    except (TypeError, ValueError):
+        offset, limit = 0, 50
+
+    base_qs = _filtered_protein_qs(request)
     total = base_qs.count()
 
     proteins = [
@@ -1090,7 +1156,7 @@ def browse_api(request):
 @require_GET
 def browse_interactions_api(request):
     """
-    GET /api/browse/interactions/?offset=<int>&limit=<int>
+    GET /api/browse/interactions/?offset=<int>&limit=<int>&q=<text>
                     &min_score=<float>&max_score=<float>
                     &source=<id>&source=<id>&experiment=<id>&experiment=<id>
                     &sort=score&dir=<asc|desc>
@@ -1099,24 +1165,8 @@ def browse_interactions_api(request):
     page's "Interactions" mode.
 
     Returns:
-    {
-        "total":        <int>,
-        "interactions": [
-            {
-                "id":               <int>,
-                "protein_a":        { ...protein dict... },
-                "protein_b":        { ...protein dict... },
-                "score":            <float>,
-                "source_count":     <int>,
-                "experiment_count": <int>,
-                "detail_url":       "/interaction/<id>/"
-            },
-            ...
-        ]
-    }
-
-    Source / experiment multi-filters use ``EXISTS`` subqueries so the outer
-    query never needs a ``DISTINCT`` across the M2M join tables.
+    {"total": <int>, "interactions": [ {id, protein_a, protein_b, score,
+        source_count, experiment_count, detail_url}, ... ]}
     """
     try:
         offset = max(0, int(request.GET.get("offset", 0)))
@@ -1124,59 +1174,89 @@ def browse_interactions_api(request):
     except (TypeError, ValueError):
         offset, limit = 0, 50
 
-    min_score = _safe_float(request.GET.get("min_score"))
-    max_score = _safe_float(request.GET.get("max_score"))
-    source_ids = [int(s) for s in request.GET.getlist("source") if s.isdigit()]
-    experiment_ids = [int(e) for e in request.GET.getlist("experiment") if e.isdigit()]
-    descending = request.GET.get("dir", "desc") != "asc"
-    include_isoforms = request.GET.get("include_isoforms", "") in ("1", "true")
-
-    qs = Interaction.objects.all()
-    if not include_isoforms:
-        isoform_pks = Isoform.objects.values_list("protein_ptr_id", flat=True)
-        qs = qs.exclude(protein_1_id__in=isoform_pks).exclude(
-            protein_2_id__in=isoform_pks
-        )
-    if min_score is not None:
-        qs = qs.filter(score__gte=min_score)
-    if max_score is not None:
-        qs = qs.filter(score__lte=max_score)
-    if source_ids:
-        qs = qs.filter(
-            Exists(
-                Interaction.objects.filter(
-                    pk=OuterRef("pk"), sources__id__in=source_ids
-                )
-            )
-        )
-    if experiment_ids:
-        qs = qs.filter(
-            Exists(
-                Interaction.objects.filter(
-                    pk=OuterRef("pk"), experiments__id__in=experiment_ids
-                )
-            )
-        )
-
-    qs = qs.with_proteins().order_by("-score" if descending else "score", "pk")
-
+    qs = _filtered_interaction_qs(request)
     total = qs.count()
 
     page = qs.prefetch_related("sources", "experiments")[offset : offset + limit]
-    interactions = [
-        {
-            "id": ix.pk,
-            "protein_a": _protein_display(ix.protein_1),
-            "protein_b": _protein_display(ix.protein_2),
-            "score": round(ix.score, 4),
-            "source_count": ix.sources.all().count(),
-            "experiment_count": ix.experiments.all().count(),
-            "detail_url": reverse("hippie_website:interaction_detail", args=[ix.pk]),
-        }
-        for ix in page
-    ]
+    interactions = [_interaction_row(ix) for ix in page]
 
     return JsonResponse({"total": total, "interactions": interactions})
+
+
+# Hard cap on rows returned by the bulk TSV export — protects the server from
+# materialising the full (multi-hundred-thousand-row) interaction table.
+EXPORT_CAP = 50_000
+
+
+def _tsv_cell(value) -> str:
+    """Render one cell, stripping characters that would break TSV structure."""
+    if value is None:
+        return ""
+    return str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
+
+
+def _tsv_line(cells) -> str:
+    return "\t".join(_tsv_cell(c) for c in cells) + "\n"
+
+
+@require_GET
+def browse_export_api(request):
+    """
+    GET /api/browse/export/?mode=proteins|interactions & <same filters as the
+        matching browse list endpoint, incl. q>
+
+    Streams a TSV of *all* rows matching the current filters (capped at
+    ``EXPORT_CAP``). Reuses the shared filter helpers so the export always
+    matches what the browse table shows. When the result set exceeds the cap,
+    the response carries an ``X-Export-Truncated: 1`` header.
+    """
+    mode = request.GET.get("mode", "proteins")
+
+    if mode == "interactions":
+        qs = _filtered_interaction_qs(request)
+        total = qs.count()
+        header = ["Protein A", "Protein B", "Score", "Sources", "Experiments"]
+        page = qs.prefetch_related("sources", "experiments")[:EXPORT_CAP]
+
+        def rows():
+            yield _tsv_line(header)
+            for ix in page.iterator(chunk_size=2000):
+                yield _tsv_line(
+                    [
+                        ix.protein_1.gene.entrez_name or ix.protein_1.uniprot_name,
+                        ix.protein_2.gene.entrez_name or ix.protein_2.uniprot_name,
+                        round(ix.score, 4),
+                        len(ix.sources.all()),
+                        len(ix.experiments.all()),
+                    ]
+                )
+    else:
+        mode = "proteins"
+        qs = _filtered_protein_qs(request)
+        total = qs.count()
+        header = ["UniProt ID", "Entrez Gene ID", "Gene Symbol", "Degree", "Avg. Score"]
+        page = qs[:EXPORT_CAP]
+
+        def rows():
+            yield _tsv_line(header)
+            for p in page.iterator(chunk_size=2000):
+                yield _tsv_line(
+                    [
+                        p.uniprot_accession,
+                        p.gene.entrez_id or "",
+                        p.gene.entrez_name or p.uniprot_name,
+                        p.degree,
+                        round(p.avg_score, 4) if p.avg_score is not None else "",
+                    ]
+                )
+
+    response = StreamingHttpResponse(
+        rows(), content_type="text/tab-separated-values; charset=utf-8"
+    )
+    response["Content-Disposition"] = f'attachment; filename="hippie_browse_{mode}.tsv"'
+    if total > EXPORT_CAP:
+        response["X-Export-Truncated"] = "1"
+    return response
 
 
 def _safe_int(value):

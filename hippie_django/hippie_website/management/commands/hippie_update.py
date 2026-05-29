@@ -20,6 +20,7 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
+from django.db.models.functions import Lower
 
 
 from hippie_website.models import (
@@ -631,8 +632,17 @@ def _upsert(
                 uniprot_accession__in=list(canonical_proteins) + list(isoform_proteins)
             )
         }
+        # Deduplicate sources by lowercase name; keep first-seen original casing
+        sources_lc: dict[str, str] = {}
+        for s in sources:
+            if s.lower() not in sources_lc:
+                sources_lc[s.lower()] = s
+
         existing_sources: dict[str, Source] = {
-            s.name: s for s in Source.objects.filter(name__in=sources)
+            s.name_lower: s
+            for s in Source.objects.annotate(name_lower=Lower("name")).filter(
+                name_lower__in=sources_lc.keys()
+            )
         }
         existing_pubs: dict[int, Publication] = {
             p.pmid: p for p in Publication.objects.filter(pmid__in=pmids)
@@ -705,12 +715,17 @@ def _upsert(
 
         print("  Inserting sources...", flush=True)
         new_sources = Source.objects.bulk_create(
-            [Source(name=name) for name in sources if name not in existing_sources],
+            [
+                Source(name=original)
+                for lc, original in sources_lc.items()
+                if lc not in existing_sources
+            ],
             batch_size=BATCH,
         )
+        # Keyed by lowercase name for case-insensitive lookups
         source_cache: dict[str, Source] = {
             **existing_sources,
-            **{s.name: s for s in new_sources},
+            **{s.name.lower(): s for s in new_sources},
         }
 
         print("  Inserting publications...", flush=True)
@@ -836,14 +851,15 @@ def _upsert(
             iid = ia.pk
             for row in pair_rows:
                 for s in row.source:
+                    sl = s.lower()
                     if (
-                        s in source_cache
-                        and (iid, source_cache[s].pk) not in seen_sources
+                        sl in source_cache
+                        and (iid, source_cache[sl].pk) not in seen_sources
                     ):
-                        seen_sources.add((iid, source_cache[s].pk))
+                        seen_sources.add((iid, source_cache[sl].pk))
                         pending_sources.append(
                             SourceThrough(
-                                interaction_id=iid, source_id=source_cache[s].pk
+                                interaction_id=iid, source_id=source_cache[sl].pk
                             )
                         )
                 for p in row.pmids:
@@ -871,16 +887,17 @@ def _upsert(
                             )
                         )
                 for db, link_id in row.link:
+                    dbl = db.lower()
                     if (
-                        db in source_cache
-                        and (iid, link_id, source_cache[db].pk) not in seen_xrefs
+                        dbl in source_cache
+                        and (iid, link_id, source_cache[dbl].pk) not in seen_xrefs
                     ):
-                        seen_xrefs.add((iid, link_id, source_cache[db].pk))
+                        seen_xrefs.add((iid, link_id, source_cache[dbl].pk))
                         pending_xrefs.append(
                             InteractionCrossReference(
                                 interaction_id=iid,
                                 link=link_id,
-                                source=source_cache[db],
+                                source=source_cache[dbl],
                                 species=None,
                             )
                         )
