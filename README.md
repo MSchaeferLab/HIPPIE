@@ -135,9 +135,10 @@ docker compose exec web python manage.py load_experiment_types \
 docker compose exec web python manage.py hippie_update --rescore-all
 
 # 4. Load tissue information
+# Versions change, check what version is downloaded
 docker compose exec web python manage.py update_tissue_data \
-    --gct-path               data/GTEx_Analysis_*_gene_reads.gct \
-    --annotation-sample-path data/GTEx_Analysis_*_SampleAttributesDS.txt \
+    --gct-path               data/GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct \
+    --annotation-sample-path data/GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt \
     --entrez-homo-path       data/Homo_sapiens.gene_info
 ```
 

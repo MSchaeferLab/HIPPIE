@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandParser
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models.functions import Lower
 
 
@@ -576,7 +576,7 @@ def _upsert(
       so no re-query needed to build caches
     - M2M through tables flushed in one bulk_create each at the end
     """
-    BATCH = 10_000
+    BATCH = 50_000
 
     with transaction.atomic():
         print("  Collecting entities...", flush=True)
@@ -821,100 +821,102 @@ def _upsert(
         }
         touched = {ia.pk for ia in interaction_cache.values()}
 
-        # ---------------------------------------------------------- #
-        # Phase 4: collect M2M rows and flush in bulk
-        # ---------------------------------------------------------- #
-        print("  Building M2M relations...", flush=True)
+    # ---------------------------------------------------------- #
+    # Phase 4: collect M2M rows and flush in a separate transaction
+    # (entities + interactions already committed above, so MariaDB
+    #  doesn't hold a single giant undo log through the M2M inserts)
+    # ---------------------------------------------------------- #
+    print("  Building M2M relations...", flush=True)
 
-        SourceThrough = Interaction.sources.through
-        PubThrough = Interaction.publications.through
-        ExpThrough = Interaction.experiments.through
-        ItypeThrough = Interaction.interaction_types.through
+    SourceThrough = Interaction.sources.through
+    PubThrough = Interaction.publications.through
+    ExpThrough = Interaction.experiments.through
+    ItypeThrough = Interaction.interaction_types.through
 
-        # Use sets to deduplicate within the same source file
-        seen_sources: set[tuple[int, int]] = set()
-        seen_pubs: set[tuple[int, int]] = set()
-        seen_exps: set[tuple[int, int]] = set()
-        seen_itypes: set[tuple[int, int]] = set()
-        seen_xrefs: set[tuple[int, str, int]] = set()
+    seen_sources: set[tuple[int, int]] = set()
+    seen_pubs: set[tuple[int, int]] = set()
+    seen_exps: set[tuple[int, int]] = set()
+    seen_itypes: set[tuple[int, int]] = set()
+    seen_xrefs: set[tuple[int, str, int]] = set()
 
-        pending_sources: list = []
-        pending_pubs: list = []
-        pending_exps: list = []
-        pending_itypes: list = []
-        pending_xrefs: list[InteractionCrossReference] = []
+    pending_sources: list = []
+    pending_pubs: list = []
+    pending_exps: list = []
+    pending_itypes: list = []
+    pending_xrefs: list[InteractionCrossReference] = []
 
-        for (pid1, pid2), pair_rows in pair_map.items():
-            ia = interaction_cache.get((pid1, pid2))
-            if ia is None:
-                continue
-            iid = ia.pk
-            for row in pair_rows:
-                for s in row.source:
-                    sl = s.lower()
-                    if (
-                        sl in source_cache
-                        and (iid, source_cache[sl].pk) not in seen_sources
-                    ):
-                        seen_sources.add((iid, source_cache[sl].pk))
-                        pending_sources.append(
-                            SourceThrough(
-                                interaction_id=iid, source_id=source_cache[sl].pk
-                            )
+    for (pid1, pid2), pair_rows in pair_map.items():
+        ia = interaction_cache.get((pid1, pid2))
+        if ia is None:
+            continue
+        iid = ia.pk
+        for row in pair_rows:
+            for s in row.source:
+                sl = s.lower()
+                if (
+                    sl in source_cache
+                    and (iid, source_cache[sl].pk) not in seen_sources
+                ):
+                    seen_sources.add((iid, source_cache[sl].pk))
+                    pending_sources.append(
+                        SourceThrough(interaction_id=iid, source_id=source_cache[sl].pk)
+                    )
+            for p in row.pmids:
+                if p in pub_cache and (iid, pub_cache[p].pk) not in seen_pubs:
+                    seen_pubs.add((iid, pub_cache[p].pk))
+                    pending_pubs.append(
+                        PubThrough(interaction_id=iid, publication_id=pub_cache[p].pk)
+                    )
+            for mi, tech in row.techs:
+                if tech in exp_cache and (iid, exp_cache[tech].pk) not in seen_exps:
+                    seen_exps.add((iid, exp_cache[tech].pk))
+                    pending_exps.append(
+                        ExpThrough(
+                            interaction_id=iid, experimenttype_id=exp_cache[tech].pk
                         )
-                for p in row.pmids:
-                    if p in pub_cache and (iid, pub_cache[p].pk) not in seen_pubs:
-                        seen_pubs.add((iid, pub_cache[p].pk))
-                        pending_pubs.append(
-                            PubThrough(
-                                interaction_id=iid, publication_id=pub_cache[p].pk
-                            )
+                    )
+            for t in row.types:
+                if t in itype_cache and (iid, itype_cache[t].pk) not in seen_itypes:
+                    seen_itypes.add((iid, itype_cache[t].pk))
+                    pending_itypes.append(
+                        ItypeThrough(
+                            interaction_id=iid, interactiontype_id=itype_cache[t].pk
                         )
-                for mi, tech in row.techs:
-                    if tech in exp_cache and (iid, exp_cache[tech].pk) not in seen_exps:
-                        seen_exps.add((iid, exp_cache[tech].pk))
-                        pending_exps.append(
-                            ExpThrough(
-                                interaction_id=iid, experimenttype_id=exp_cache[tech].pk
-                            )
+                    )
+            for db, link_id in row.link:
+                dbl = db.lower()
+                if (
+                    dbl in source_cache
+                    and (iid, link_id, source_cache[dbl].pk) not in seen_xrefs
+                ):
+                    seen_xrefs.add((iid, link_id, source_cache[dbl].pk))
+                    pending_xrefs.append(
+                        InteractionCrossReference(
+                            interaction_id=iid,
+                            link=link_id,
+                            source=source_cache[dbl],
+                            species=None,
                         )
-                for t in row.types:
-                    if t in itype_cache and (iid, itype_cache[t].pk) not in seen_itypes:
-                        seen_itypes.add((iid, itype_cache[t].pk))
-                        pending_itypes.append(
-                            ItypeThrough(
-                                interaction_id=iid, interactiontype_id=itype_cache[t].pk
-                            )
-                        )
-                for db, link_id in row.link:
-                    dbl = db.lower()
-                    if (
-                        dbl in source_cache
-                        and (iid, link_id, source_cache[dbl].pk) not in seen_xrefs
-                    ):
-                        seen_xrefs.add((iid, link_id, source_cache[dbl].pk))
-                        pending_xrefs.append(
-                            InteractionCrossReference(
-                                interaction_id=iid,
-                                link=link_id,
-                                source=source_cache[dbl],
-                                species=None,
-                            )
-                        )
+                    )
 
-        print("  Flushing M2M relations...", flush=True)
+    with transaction.atomic():
+        print(f"  Flushing sources ({len(pending_sources):,})...", flush=True)
         SourceThrough.objects.bulk_create(
             pending_sources, batch_size=BATCH, ignore_conflicts=True
         )
+        print(f"  Flushing publications ({len(pending_pubs):,})...", flush=True)
         PubThrough.objects.bulk_create(
             pending_pubs, batch_size=BATCH, ignore_conflicts=True
         )
+        print(f"  Flushing experiment types ({len(pending_exps):,})...", flush=True)
         ExpThrough.objects.bulk_create(
             pending_exps, batch_size=BATCH, ignore_conflicts=True
         )
+        print(f"  Flushing interaction types ({len(pending_itypes):,})...", flush=True)
         ItypeThrough.objects.bulk_create(
             pending_itypes, batch_size=BATCH, ignore_conflicts=True
         )
+        print(f"  Flushing cross-references ({len(pending_xrefs):,})...", flush=True)
         InteractionCrossReference.objects.bulk_create(
             pending_xrefs, batch_size=BATCH, ignore_conflicts=True
         )
@@ -926,6 +928,47 @@ def _upsert(
 # ---------------------------------------------------------------------------
 # Rescoring
 # ---------------------------------------------------------------------------
+
+
+def _bulk_update_scores(objs: list[Interaction]) -> None:
+    """
+    Write scores back to the DB.
+
+    MariaDB path: stage into a temp table then do a single JOIN UPDATE.
+    bulk_update generates one CASE WHEN clause per row per batch, which
+    MariaDB parses slowly at scale (several minutes for 750k+ rows).
+    A temp-table JOIN UPDATE reduces that to two queries regardless of size.
+
+    SQLite path (dev only): plain bulk_update with small batches.
+    """
+    if not objs:
+        return
+
+    if connection.vendor == "mysql":
+        table = Interaction._meta.db_table
+        STAGE_BATCH = 50_000
+        with connection.cursor() as cur:
+            cur.execute(
+                "CREATE TEMPORARY TABLE _score_update "
+                "(id INT PRIMARY KEY, score DOUBLE NOT NULL)"
+            )
+            pairs = [(o.pk, o.score) for o in objs]
+            for i in range(0, len(pairs), STAGE_BATCH):
+                chunk = pairs[i : i + STAGE_BATCH]
+                cur.executemany("INSERT INTO _score_update VALUES (%s, %s)", chunk)
+                print(
+                    f"    staged {min(i + STAGE_BATCH, len(pairs)):,}/{len(pairs):,}",
+                    flush=True,
+                )
+            print("  Applying scores via JOIN UPDATE...", flush=True)
+            cur.execute(
+                f"UPDATE `{table}` i "
+                "JOIN _score_update t ON i.id = t.id "
+                "SET i.score = t.score"
+            )
+            cur.execute("DROP TEMPORARY TABLE _score_update")
+    else:
+        Interaction.objects.bulk_update(objs, ["score"], batch_size=1_000)
 
 
 def _rescore_all() -> None:
@@ -992,7 +1035,8 @@ def _rescore_all() -> None:
         exp_sum = sum(et_quality.get(et_pk, 0.0) for et_pk in gene_exptypes.get(gp, ()))
         objs.append(Interaction(pk=ipk, score=_compute_score(pub_n, orth_n, exp_sum)))
 
-    Interaction.objects.bulk_update(objs, ["score"], batch_size=10000)
+    print(f"  Writing scores ({len(objs):,} interactions)...", flush=True)
+    _bulk_update_scores(objs)
 
 
 # ---------------------------------------------------------------------------
