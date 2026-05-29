@@ -14,8 +14,8 @@ const {
 const PAGE_SIZES = [10, 20, 50];
 const DEFAULT_PAGE_SIZE = 50;
 
-const PROTEIN_DEFAULTS = { tissue: [], source: [], minDegree: 0, minScore: 0, minRpkm: 0 };
-const INTERACTION_DEFAULTS = { minScore: 0, maxScore: 1, source: [], experiment: [] };
+const PROTEIN_DEFAULTS = { tissue: [], source: [], minDegree: 0, minScore: 0, minRpkm: 0, includeIsoforms: false };
+const INTERACTION_DEFAULTS = { minScore: 0, maxScore: 1, source: [], experiment: [], includeIsoforms: false };
 
 function scoreClass(s) {
   return s >= 0.72 ? "score-high" : s >= 0.63 ? "score-med" : "score-low";
@@ -83,9 +83,16 @@ function ProteinFilterPanel({ filters, onChange, meta }) {
           <label className="form-label">
             Min. avg score ≥ <span className="mono">{(filters.minScore || 0).toFixed(2)}</span>
           </label>
-          <input type="range" className="form-range" min="0" max="1" step="0.01"
+          <input type="range" className="form-range mb-3" min="0" max="1" step="0.01"
                  value={filters.minScore || 0}
                  onChange={e => onChange({ ...filters, minScore: parseFloat(e.target.value) })} />
+          <div className="filter-section-label">Isoforms</div>
+          <label style={{display:"inline-flex",alignItems:"center",gap:".5rem",cursor:"pointer",userSelect:"none"}}>
+            <input type="checkbox" checked={filters.includeIsoforms}
+                   onChange={e => onChange({ ...filters, includeIsoforms: e.target.checked })}
+                   style={{cursor:"pointer"}} />
+            <span className="text-muted-sm">Include isoforms</span>
+          </label>
         </div>
       </div>
     </div>
@@ -123,6 +130,13 @@ function InteractionFilterPanel({ filters, onChange, meta }) {
           <label className="form-label">Detected by any selected method</label>
           <CheckboxList items={meta.experiments} selected={filters.experiment}
             onToggle={id => onChange({ ...filters, experiment: toggleIn(filters.experiment, id) })} />
+          <div className="filter-section-label mt-3">Isoforms</div>
+          <label style={{display:"inline-flex",alignItems:"center",gap:".5rem",cursor:"pointer",userSelect:"none"}}>
+            <input type="checkbox" checked={filters.includeIsoforms}
+                   onChange={e => onChange({ ...filters, includeIsoforms: e.target.checked })}
+                   style={{cursor:"pointer"}} />
+            <span className="text-muted-sm">Include isoforms</span>
+          </label>
         </div>
       </div>
     </div>
@@ -198,6 +212,7 @@ function App() {
       if (proteinFilters.minScore  > 0) params.set("min_score",  proteinFilters.minScore);
       if (proteinFilters.tissue.length > 0 && proteinFilters.minRpkm > 0)
         params.set("min_rpkm", proteinFilters.minRpkm);
+      if (proteinFilters.includeIsoforms) params.set("include_isoforms", "1");
       url = `${proteinsApiUrl}?${params}`;
     } else {
       params.set("dir", intSortDir);
@@ -205,6 +220,7 @@ function App() {
       if (interactionFilters.maxScore < 1) params.set("max_score", interactionFilters.maxScore);
       interactionFilters.source.forEach(s => params.append("source", s));
       interactionFilters.experiment.forEach(e => params.append("experiment", e));
+      if (interactionFilters.includeIsoforms) params.set("include_isoforms", "1");
       url = `${interactionsApiUrl}?${params}`;
     }
 
@@ -241,10 +257,12 @@ function App() {
 
   const proteinFilterCount =
     proteinFilters.tissue.length + proteinFilters.source.length +
-    (proteinFilters.minDegree > 0 ? 1 : 0) + (proteinFilters.minScore > 0 ? 1 : 0);
+    (proteinFilters.minDegree > 0 ? 1 : 0) + (proteinFilters.minScore > 0 ? 1 : 0) +
+    (proteinFilters.includeIsoforms ? 1 : 0);
   const interactionFilterCount =
     interactionFilters.source.length + interactionFilters.experiment.length +
-    (interactionFilters.minScore > 0 ? 1 : 0) + (interactionFilters.maxScore < 1 ? 1 : 0);
+    (interactionFilters.minScore > 0 ? 1 : 0) + (interactionFilters.maxScore < 1 ? 1 : 0) +
+    (interactionFilters.includeIsoforms ? 1 : 0);
   const activeFilterCount = mode === "proteins" ? proteinFilterCount : interactionFilterCount;
 
   function handleGenerateSplits() {

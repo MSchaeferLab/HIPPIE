@@ -1,9 +1,9 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { ScoreBadge, Pagination } from "./shared.jsx";
+import { ScoreBadge, Pagination, PageSizeSelect } from "./shared.jsx";
 
 const { apiUrl, maxPairs, batchSize } = window.HIPPIE_IQ_CONFIG;
-const PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 25;
 
 const EXAMPLES = [
   { label: "Example 1 — tabs", text: "HTT\tTP53\nBRCA1\tTP53\nEGFR\tERBB2\nHTT\tHSP90AA1" },
@@ -74,9 +74,10 @@ function ExportBar({ rows }) {
 }
 
 function ResultsTable({ rows, streaming, progress }) {
-  const [sortKey, setSortKey] = useState("input_order");
-  const [sortDir, setSortDir] = useState("asc");
-  const [page,    setPage]    = useState(1);
+  const [sortKey,  setSortKey]  = useState("input_order");
+  const [sortDir,  setSortDir]  = useState("asc");
+  const [page,     setPage]     = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const handleSort = (key) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -99,8 +100,8 @@ function ResultsTable({ rows, streaming, progress }) {
     return sortDir === "asc" ? va - vb : vb - va;
   });
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const pageRows   = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const pageRows   = sorted.slice((page - 1) * pageSize, page * pageSize);
   const notFound   = rows.filter(r => r.score < 0).length;
 
   return (
@@ -122,7 +123,10 @@ function ResultsTable({ rows, streaming, progress }) {
             )}
           </div>
         </div>
-        {!streaming && <ExportBar rows={sorted} />}
+        <div className="d-flex align-items-center gap-3">
+          <PageSizeSelect pageSize={pageSize} onChange={s => { setPageSize(s); setPage(1); }} />
+          {!streaming && <ExportBar rows={sorted} />}
+        </div>
       </div>
 
       {streaming && (
@@ -181,7 +185,7 @@ function ResultsTable({ rows, streaming, progress }) {
       {totalPages > 1 && (
         <div className="mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
           <span className="text-muted-sm">
-            Page {page} of {totalPages} — {(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE, sorted.length)} of {sorted.length}
+            Page {page} of {totalPages} — {(page-1)*pageSize+1}–{Math.min(page*pageSize, sorted.length)} of {sorted.length}
           </span>
           <Pagination page={page} totalPages={totalPages}
             onChange={p => { setPage(p); window.scrollTo({top:0,behavior:"smooth"}); }} />

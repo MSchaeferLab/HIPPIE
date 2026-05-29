@@ -220,6 +220,14 @@ def protein_query_api(request):
             .prefetch_related("sources", "experiments")
             .order_by("-score")
         )
+        if not include_isoforms:
+            isoform_pks_not_queried = Isoform.objects.exclude(
+                protein_ptr_id__in=protein_pks_set
+            ).values_list("protein_ptr_id", flat=True)
+            interactions_qs = interactions_qs.exclude(
+                Q(protein_1_id__in=isoform_pks_not_queried)
+                | Q(protein_2_id__in=isoform_pks_not_queried)
+            )
         for interaction in interactions_qs:
             if interaction.protein_1_id in protein_pks_set:
                 query_side, partner = interaction.protein_1, interaction.protein_2
@@ -252,6 +260,14 @@ def protein_query_api(request):
             )
             .order_by("-score")
         )
+        if not include_isoforms:
+            isoform_pks_not_queried = Isoform.objects.exclude(
+                protein_ptr_id__in=protein_pks_set
+            ).values_list("protein_ptr_id", flat=True)
+            noninteractions_qs = noninteractions_qs.exclude(
+                Q(protein_1_id__in=isoform_pks_not_queried)
+                | Q(protein_2_id__in=isoform_pks_not_queried)
+            )
         for ni in noninteractions_qs:
             if ni.protein_1_id in protein_pks_set:
                 query_side, partner = ni.protein_1, ni.protein_2
@@ -1015,6 +1031,7 @@ def browse_api(request):
     min_degree = _safe_int(request.GET.get("min_degree"))
     min_score = _safe_float(request.GET.get("min_score"))
     min_rpkm = _safe_float(request.GET.get("min_rpkm"))
+    include_isoforms = request.GET.get("include_isoforms", "") in ("1", "true")
 
     sort_field = _BROWSE_SORT_FIELDS.get(
         request.GET.get("sort", "symbol"), "gene__entrez_name"
@@ -1023,6 +1040,8 @@ def browse_api(request):
     order = ("-" + sort_field) if descending else sort_field
 
     base_qs = Protein.objects.select_related("gene")
+    if not include_isoforms:
+        base_qs = base_qs.filter(isoform__isnull=True)
 
     if tissue_ids:
         base_qs = base_qs.expressed_in(tissue_ids, min_rpkm=min_rpkm)
@@ -1110,8 +1129,14 @@ def browse_interactions_api(request):
     source_ids = [int(s) for s in request.GET.getlist("source") if s.isdigit()]
     experiment_ids = [int(e) for e in request.GET.getlist("experiment") if e.isdigit()]
     descending = request.GET.get("dir", "desc") != "asc"
+    include_isoforms = request.GET.get("include_isoforms", "") in ("1", "true")
 
     qs = Interaction.objects.all()
+    if not include_isoforms:
+        isoform_pks = Isoform.objects.values_list("protein_ptr_id", flat=True)
+        qs = qs.exclude(protein_1_id__in=isoform_pks).exclude(
+            protein_2_id__in=isoform_pks
+        )
     if min_score is not None:
         qs = qs.filter(score__gte=min_score)
     if max_score is not None:

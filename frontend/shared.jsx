@@ -92,6 +92,20 @@ export function PaginationRow({ page, totalPages, totalItems, pageSize, onChange
   );
 }
 
+const _PAGE_SIZES = [10, 25, 50, 100];
+
+export function PageSizeSelect({ pageSize, onChange }) {
+  return (
+    <label className="text-muted-sm d-inline-flex align-items-center gap-1">
+      Per page
+      <select className="form-select form-select-sm" style={{width:"auto",display:"inline-block"}}
+              value={pageSize} onChange={e => onChange(parseInt(e.target.value))}>
+        {_PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+    </label>
+  );
+}
+
 export function SortableTh({ sortKey, currentKey, currentDir, onSort, children, className="" }) {
   const cls = [className, currentKey === sortKey ? `sorted-${currentDir}` : ""].join(" ").trim();
   return <th className={cls} onClick={() => onSort(sortKey)}>{children}</th>;

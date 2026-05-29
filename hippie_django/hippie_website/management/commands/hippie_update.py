@@ -24,14 +24,15 @@ from django.db import transaction
 
 from hippie_website.models import (
     ExperimentType,
+    Gene,
+    GeneSynonym,
     Interaction,
     InteractionCrossReference,
     InteractionType,
-    Publication,
-    Protein,
     Isoform,
+    Protein,
+    Publication,
     Source,
-    Gene,
 )
 
 # ---------------------------------------------------------------------------
@@ -498,6 +499,67 @@ def _parse_intact_or_biogrid(
 
 
 # ---------------------------------------------------------------------------
+# Gene synonym helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_gene_synonyms(entrez_ids: set[int]) -> dict[int, set[str]]:
+    """
+    Collect synonym strings for the given Entrez IDs from two sources:
+      - Homo_sapiens.gene_info  col 4 (pipe-separated synonyms)
+      - HUMAN_9606_idmapping.dat  Gene_Name and Gene_Synonym type rows
+
+    Returns: entrez_id -> set[synonym_string]
+    """
+    synonyms: dict[int, set[str]] = {eid: set() for eid in entrez_ids}
+
+    with open("data/Homo_sapiens.gene_info", "r") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) < 5:
+                continue
+            try:
+                eid = int(parts[1])
+            except ValueError:
+                continue
+            if eid not in synonyms:
+                continue
+            for syn in parts[4].split("|"):
+                syn = syn.strip()
+                if syn and syn != "-":
+                    synonyms[eid].add(syn)
+
+    # Two-pass over idmapping: first collect acc→entrez, then Gene_Name/Gene_Synonym.
+    acc_to_entrez: dict[str, int] = {}
+    with open("data/HUMAN_9606_idmapping.dat", "r") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) != 3:
+                continue
+            acc, type_, val = parts
+            if type_ == "GeneID":
+                try:
+                    eid = int(val)
+                    if eid in synonyms:
+                        acc_to_entrez[acc] = eid
+                except ValueError:
+                    pass
+
+    with open("data/HUMAN_9606_idmapping.dat", "r") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) != 3:
+                continue
+            acc, type_, val = parts
+            if type_ in ("Gene_Name", "Gene_Synonym"):
+                eid = acc_to_entrez.get(acc)
+                if eid is not None and val.strip():
+                    synonyms[eid].add(val.strip())
+
+    return synonyms
+
+
+# ---------------------------------------------------------------------------
 # upsert interactions
 # ---------------------------------------------------------------------------
 
@@ -547,7 +609,7 @@ def _upsert(
                 else:
                     canonical_proteins[p_acc] = (eid, p_name)
             for s in row.source:
-                sources.add(s.lower().strip())
+                sources.add(s)
             for p in row.pmids:
                 if p is not None:
                     pmids.add(p)
@@ -556,7 +618,7 @@ def _upsert(
             for t in row.types:
                 itypes.add(t)
             for db, _ in row.link:
-                sources.add(db.lower().strip())
+                sources.add(db)
 
         print("  Checking existing records...", flush=True)
         existing_genes: dict[int, Gene] = {
@@ -598,6 +660,19 @@ def _upsert(
             **existing_genes,
             **{g.entrez_id: g for g in new_genes},
         }
+
+        print("  Inserting gene synonyms...", flush=True)
+        gene_synonym_map = _load_gene_synonyms(set(gene_cache.keys()))
+        pending_synonyms: list[GeneSynonym] = []
+        for eid, syns in gene_synonym_map.items():
+            gene_obj = gene_cache.get(eid)
+            if gene_obj is None:
+                continue
+            for syn in syns:
+                pending_synonyms.append(GeneSynonym(gene=gene_obj, synonym=syn))
+        GeneSynonym.objects.bulk_create(
+            pending_synonyms, batch_size=BATCH, ignore_conflicts=True
+        )
 
         print("  Inserting canonical proteins...", flush=True)
         new_proteins = Protein.objects.bulk_create(

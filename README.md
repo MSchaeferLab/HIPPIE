@@ -133,6 +133,12 @@ docker compose exec web python manage.py hippie_update \
 docker compose exec web python manage.py load_experiment_types \
     --csv_path data/techniques_scoring_04-05-26.csv
 docker compose exec web python manage.py hippie_update --rescore-all
+
+# 4. Load tissue information
+docker compose exec web python manage.py update_tissue_data \
+    --gct-path               data/GTEx_Analysis_*_gene_reads.gct \
+    --annotation-sample-path data/GTEx_Analysis_*_SampleAttributesDS.txt \
+    --entrez-homo-path       data/Homo_sapiens.gene_info
 ```
 
 Migrations and `collectstatic` run automatically on each `web` boot. The
