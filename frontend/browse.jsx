@@ -344,12 +344,28 @@ function App() {
     (interactionFilters.includeIsoforms ? 1 : 0);
   const activeFilterCount = mode === "proteins" ? proteinFilterCount : interactionFilterCount;
 
+  // Hand the current mode's applied filters to the standalone ML Splits page
+  // via query params. Protein-browse filters map to the *protein-level* split
+  // filters (note: protein-browse "min score" is an average-score → min_avg_score);
+  // interaction-browse filters map to the *interaction-level* split filters.
   function handleGenerateSplits() {
     const params = new URLSearchParams();
-    const f = appliedProteinFilters;
-    f.tissue.forEach(t => params.append("tissue", t));
-    f.source.forEach(s => params.append("source", s));
-    if (f.minScore > 0) params.set("min_score", f.minScore);
+    if (mode === "proteins") {
+      const f = appliedProteinFilters;
+      f.tissue.forEach(t => params.append("tissue", t));
+      f.source.forEach(s => params.append("source", s));
+      if (f.minDegree > 0) params.set("min_degree", f.minDegree);
+      if (f.minScore > 0) params.set("min_avg_score", f.minScore);
+      if (f.tissue.length > 0 && f.minRpkm > 0) params.set("min_rpkm", f.minRpkm);
+      if (f.includeIsoforms) params.set("include_isoforms", "1");
+    } else {
+      const f = appliedInteractionFilters;
+      if (f.minScore > 0) params.set("min_score", f.minScore);
+      if (f.maxScore < 1) params.set("max_score", f.maxScore);
+      f.source.forEach(s => params.append("source", s));
+      f.experiment.forEach(e => params.append("experiment", e));
+      if (f.includeIsoforms) params.set("include_isoforms", "1");
+    }
     const qs = params.toString();
     window.location.href = mlSplitsUrl + (qs ? "?" + qs : "");
   }
@@ -447,15 +463,13 @@ function App() {
           <ExportBar url={`${exportApiUrl}?${buildParams(false)}`} mode={mode}
                      disabled={loading || total === 0} />
           <PageSizeSelect pageSize={pageSize} onChange={(s) => { setPageSize(s); setPage(1); }} />
-          {mode === "proteins" && (
-            <button onClick={handleGenerateSplits} style={{
-              background:"var(--hippie-teal)",color:"#fff",border:"none",
-              borderRadius:"var(--radius-md)",padding:".45rem 1.1rem",
-              fontWeight:600,fontFamily:"var(--font-body)",fontSize:".88rem",cursor:"pointer",
-            }}>
-              <i className="bi bi-scissors me-1"></i> Generate ML Splits
-            </button>
-          )}
+          <button onClick={handleGenerateSplits} style={{
+            background:"var(--hippie-teal)",color:"#fff",border:"none",
+            borderRadius:"var(--radius-md)",padding:".45rem 1.1rem",
+            fontWeight:600,fontFamily:"var(--font-body)",fontSize:".88rem",cursor:"pointer",
+          }}>
+            <i className="bi bi-scissors me-1"></i> Generate ML Splits
+          </button>
         </div>
       </div>
 

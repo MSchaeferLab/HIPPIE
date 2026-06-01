@@ -76,6 +76,10 @@
          href="{% url 'hippie_website:browse' %}">
         <i class="bi bi-table me-1"></i>Browse
       </a>
+      <a class="nav-link {% block nav_ml_splits %}{% endblock %}"
+         href="{% url 'hippie_website:ml_splits' %}">
+        <i class="bi bi-diagram-2 me-1"></i>ML Splits
+      </a>
     </nav>
   </div>
 </div>

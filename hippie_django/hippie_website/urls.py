@@ -40,6 +40,11 @@ urlpatterns = [
     # -- ML split API
     path("api/browse/splits/", views.browse_splits_create, name="browse_splits_create"),
     path(
+        "api/browse/splits/stats/",
+        views.browse_splits_stats,
+        name="browse_splits_stats",
+    ),
+    path(
         "api/browse/splits/<uuid:job_id>/",
         views.browse_splits_status,
         name="browse_splits_status",

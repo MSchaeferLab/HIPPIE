@@ -1237,7 +1237,13 @@ def browse_export_api(request):
         mode = "proteins"
         qs = _filtered_protein_qs(request)
         total = qs.count()
-        header = ["UniProt ID", "Entrez Gene ID", "Gene Symbol", "Degree", "Avg. Score"]
+        header = [
+            "UniProt Acc",
+            "Entrez Gene ID",
+            "Gene Symbol",
+            "Degree",
+            "Avg. Score",
+        ]
         page = qs[:EXPORT_CAP]
 
         def rows():
@@ -1503,14 +1509,28 @@ def information_view(request):
 
 
 def _validate_split_params(body: dict) -> dict:
+    """Coerce and validate the split/stats parameter payload.
+
+    Keys mirror ``SplitParams`` field names exactly so the dict can be splatted
+    into ``SplitParams(**params)`` (see tasks.run_split_job).
+    """
     from django.core.exceptions import BadRequest
 
     try:
         params = {
+            # interaction-level
             "min_score": float(body.get("min_score", 0.0)),
-            "tissue_ids": [int(x) for x in body.get("tissue_ids") or []],
+            "max_score": float(body.get("max_score", 1.0)),
             "source_ids": [int(x) for x in body.get("source_ids") or []],
+            "experiment_ids": [int(x) for x in body.get("experiment_ids") or []],
             "type_ids": [int(x) for x in body.get("type_ids") or []],
+            # protein-level
+            "tissue_ids": [int(x) for x in body.get("tissue_ids") or []],
+            "min_rpkm": float(body.get("min_rpkm", 0.0)),
+            "min_degree": int(body.get("min_degree", 0)),
+            "min_avg_score": float(body.get("min_avg_score", 0.0)),
+            "include_isoforms": bool(body.get("include_isoforms", False)),
+            # negative sampling
             "neg_ratio": float(body.get("neg_ratio", 1.0)),
             "seed": int(body.get("seed", 78539105873)),
         }
@@ -1518,24 +1538,67 @@ def _validate_split_params(body: dict) -> dict:
         raise BadRequest(str(exc))
     if not 0.0 <= params["min_score"] <= 1.0:
         raise BadRequest("min_score must be between 0.0 and 1.0")
+    if not 0.0 <= params["max_score"] <= 1.0:
+        raise BadRequest("max_score must be between 0.0 and 1.0")
+    if params["max_score"] < params["min_score"]:
+        raise BadRequest("max_score must be >= min_score")
+    if not 0.0 <= params["min_avg_score"] <= 1.0:
+        raise BadRequest("min_avg_score must be between 0.0 and 1.0")
+    if params["min_degree"] < 0:
+        raise BadRequest("min_degree must be >= 0")
+    if params["min_rpkm"] < 0:
+        raise BadRequest("min_rpkm must be >= 0")
     if not 0.1 <= params["neg_ratio"] <= 10.0:
         raise BadRequest("neg_ratio must be between 0.1 and 10.0")
     return params
 
 
+def _ml_filter_meta() -> dict:
+    """Filter option lists for the editable ML-splits controls."""
+    from .models import Source, ExperimentType
+
+    return {
+        "tissues": list(Tissue.objects.order_by("name").values("id", "name")),
+        "sources": list(Source.objects.order_by("name").values("id", "name")),
+        "experiments": list(
+            ExperimentType.objects.order_by("name").values("id", "name")
+        ),
+        "interaction_types": list(
+            InteractionType.objects.order_by("name").values("id", "name")
+        ),
+    }
+
+
 @require_GET
 def ml_splits_view(request):
-    types = list(InteractionType.objects.values("id", "name"))
-    tissue_ids = [int(t) for t in request.GET.getlist("tissue") if t.isdigit()]
-    source_ids = [int(s) for s in request.GET.getlist("source") if s.isdigit()]
+    """Standalone ML-splits page. All filters are editable on the page; any
+    query params (handed off from either Browse tab) seed the initial values."""
+
+    def _float(name):
+        return request.GET.get(name, "")
+
+    initial = {
+        # interaction-level
+        "min_score": request.GET.get("min_score", ""),
+        "max_score": request.GET.get("max_score", ""),
+        "source_ids": [int(s) for s in request.GET.getlist("source") if s.isdigit()],
+        "experiment_ids": [
+            int(e) for e in request.GET.getlist("experiment") if e.isdigit()
+        ],
+        "type_ids": [int(t) for t in request.GET.getlist("type") if t.isdigit()],
+        # protein-level
+        "tissue_ids": [int(t) for t in request.GET.getlist("tissue") if t.isdigit()],
+        "min_rpkm": _float("min_rpkm"),
+        "min_degree": request.GET.get("min_degree", ""),
+        "min_avg_score": _float("min_avg_score"),
+        "include_isoforms": request.GET.get("include_isoforms", "") in ("1", "true"),
+    }
     return render(
         request,
         "hippie_website/ml_splits.html",
         {
-            "interaction_types": types,
-            "tissues_json": json.dumps(tissue_ids),
-            "sources_json": json.dumps(source_ids),
-            "min_score": request.GET.get("min_score", "0"),
+            "meta_json": json.dumps(_ml_filter_meta()),
+            "initial_json": json.dumps(initial),
         },
     )
 
@@ -1547,6 +1610,162 @@ def browse_splits_create(request):
     job = SplitJob.objects.create(params=params)
     run_split_job.delay(str(job.id))
     return JsonResponse({"job_id": str(job.id), "status": job.status}, status=202)
+
+
+def _protein_filtered_qs(params):
+    """Protein queryset after the protein-level filters (for the stats box)."""
+    pqs = Protein.objects.all()
+    if not params.include_isoforms:
+        pqs = pqs.filter(isoform__isnull=True)
+    if params.tissue_ids:
+        pqs = pqs.expressed_in(
+            list(params.tissue_ids),
+            min_rpkm=params.min_rpkm if params.min_rpkm > 0 else None,
+        )
+    if params.min_degree > 0:
+        pqs = pqs.filter(degree__gte=params.min_degree)
+    if params.min_avg_score > 0:
+        pqs = pqs.filter(avg_score__gte=params.min_avg_score)
+    return pqs
+
+
+def _protein_stats(params) -> dict:
+    import statistics
+
+    from .models import GeneTissue
+
+    pqs = _protein_filtered_qs(params)
+
+    degrees: list[int] = []
+    scores: list[float] = []
+    n_isolated = 0
+    # pk in the row keeps tissue-join duplicates from collapsing distinct
+    # proteins that happen to share (degree, avg_score).
+    for _pk, deg, avg in (
+        pqs.values_list("pk", "degree", "avg_score")
+        .distinct()
+        .iterator(chunk_size=10_000)
+    ):
+        degrees.append(deg)
+        if deg == 0:
+            n_isolated += 1
+        if avg is not None:
+            scores.append(avg)
+
+    n_isoforms = (
+        0
+        if not params.include_isoforms
+        else pqs.filter(isoform__isnull=False).values("pk").distinct().count()
+    )
+    tissue_coverage = (
+        GeneTissue.objects.filter(gene__proteins__in=pqs)
+        .values("tissue_id")
+        .distinct()
+        .count()
+    )
+
+    return {
+        "n_proteins": len(degrees),
+        "median_degree": statistics.median(degrees) if degrees else 0,
+        "median_avg_score": round(statistics.median(scores), 4) if scores else None,
+        "n_isolated": n_isolated,
+        "tissue_coverage": tissue_coverage,
+        "n_isoforms": n_isoforms,
+    }
+
+
+# Degree-histogram buckets: (label, lower, upper-inclusive). None upper = open.
+_DEGREE_BUCKETS = [
+    ("0", 0, 0),
+    ("1", 1, 1),
+    ("2", 2, 2),
+    ("3–5", 3, 5),
+    ("6–10", 6, 10),
+    ("11–25", 11, 25),
+    ("26–50", 26, 50),
+    ("51–100", 51, 100),
+    ("100+", 101, None),
+]
+
+
+def _bucket_degrees(degree_by_node: dict) -> list:
+    counts = [0] * len(_DEGREE_BUCKETS)
+    for d in degree_by_node.values():
+        for i, (_label, lo, hi) in enumerate(_DEGREE_BUCKETS):
+            if d >= lo and (hi is None or d <= hi):
+                counts[i] += 1
+                break
+    return [{"label": _DEGREE_BUCKETS[i][0], "count": c} for i, c in enumerate(counts)]
+
+
+def _interaction_stats(iqs) -> dict:
+    from .models import Interaction
+
+    degree_by_node: dict[int, int] = {}
+    score_hist = [0] * 10  # display: 10 bins of width 0.1
+    score_fine = [0] * 100  # internal: for a memory-safe median
+    n = 0
+    for p1, p2, score in iqs.values_list(
+        "protein_1_id", "protein_2_id", "score"
+    ).iterator(chunk_size=10_000):
+        n += 1
+        degree_by_node[p1] = degree_by_node.get(p1, 0) + 1
+        degree_by_node[p2] = degree_by_node.get(p2, 0) + 1
+        score_hist[min(int(score * 10), 9)] += 1
+        score_fine[min(int(score * 100), 99)] += 1
+
+    # Median score from the fine histogram (O(1) memory).
+    median_score = None
+    if n:
+        half, cum = n / 2, 0
+        for i, c in enumerate(score_fine):
+            cum += c
+            if cum >= half:
+                median_score = round((i + 0.5) / 100, 4)
+                break
+
+    n_sources = (
+        Interaction.sources.through.objects.filter(interaction__in=iqs)
+        .values("source_id")
+        .distinct()
+        .count()
+    )
+    n_experiments = (
+        Interaction.experiments.through.objects.filter(interaction__in=iqs)
+        .values("experimenttype_id")
+        .distinct()
+        .count()
+    )
+
+    return {
+        "n_interactions": n,
+        "degree_histogram": _bucket_degrees(degree_by_node),
+        # Label = lower bin edge (e.g. "0.3" = bucket [0.3, 0.4)); short enough
+        # to read along a 10-bin X axis.
+        "score_histogram": [
+            {"label": f"{i / 10:.1f}", "count": c} for i, c in enumerate(score_hist)
+        ],
+        "median_score": median_score,
+        "n_sources": n_sources,
+        "n_experiments": n_experiments,
+    }
+
+
+@require_POST
+def browse_splits_stats(request):
+    """POST the split filter payload, get on-demand protein + interaction
+    statistics for the filter-preview boxes. Same param shape as
+    ``browse_splits_create``."""
+    from .services.generate_splits import SplitParams, build_interaction_queryset
+
+    body = json.loads(request.body)
+    params = SplitParams(**_validate_split_params(body))
+    return JsonResponse(
+        {
+            "protein": _protein_stats(params),
+            "interaction": _interaction_stats(build_interaction_queryset(params)),
+        }
+    )
 
 
 @require_GET
