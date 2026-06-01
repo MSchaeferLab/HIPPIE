@@ -80,11 +80,11 @@ host Node toolchain is required.
 the **host machine** via `DB_HOST=host.docker.internal`. Before `up`, ensure:
 
 - MariaDB is running on the host with the database + user/password from `.env`.
-- It listens on the docker-gateway interface (`bind-address = 0.0.0.0`, not just
+****- It listens on the docker-gateway interface (`bind-address = 172.17.0.1`, not just
   `127.0.0.1`).
 - The app user is granted from the container network, e.g.
   `CREATE USER 'hippie'@'%' ...; GRANT ALL ON hippie.* TO 'hippie'@'%';`
-  (the connection arrives via the host-gateway IP, not loopback).
+  (the connection arrives via the host-gateway IP, not loopback).****
 
 ```bash
 cp .env.example .env       # then edit secrets / passwords / DB host
