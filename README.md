@@ -72,22 +72,25 @@ python manage.py collectstatic
 
 The stack (Redis + Django/Gunicorn + Celery worker + Apache) is defined in
 `docker-compose.yml`. The reverse proxy runs `Apache/2.4.66 (Debian)`
-(debian:trixie-slim base) with `mod_proxy_http` in front of gunicorn. The Vite
-React frontend is built inside the web image via a multi-stage Dockerfile, so no
-host Node toolchain is required.
+(debian:trixie-slim) with `mod_proxy_http` in front of gunicorn (3 workers,
+2 threads, 120 s timeout). The Vite React frontend is built inside the web
+image via a multi-stage Dockerfile, so no host Node toolchain is required.
 
 **The database is not containerised.** The app connects to a MariaDB running on
-the **host machine** via `DB_HOST=host.docker.internal`. Before `up`, ensure:
+the **host machine** via `DB_HOST=host.docker.internal`, which resolves to the
+`hippie_net` bridge gateway (`172.18.0.1`). Before `up`, ensure:
 
 - MariaDB is running on the host with the database + user/password from `.env`.
-****- It listens on the docker-gateway interface (`bind-address = 172.17.0.1`, not just
-  `127.0.0.1`).
-- The app user is granted from the container network, e.g.
-  `CREATE USER 'hippie'@'%' ...; GRANT ALL ON hippie.* TO 'hippie'@'%';`
-  (the connection arrives via the host-gateway IP, not loopback).****
+- It listens on all interfaces (`bind-address = 0.0.0.0`, not just `127.0.0.1`).
+- The app user is granted from the container network:
+  ```sql
+  CREATE USER 'hippie'@'%' IDENTIFIED BY 'password';
+  GRANT ALL ON hippie.* TO 'hippie'@'%';
+  ```
+  (Connections arrive via `172.18.0.1`, not loopback.)
 
 ```bash
-cp .env.example .env       # then edit secrets / passwords / DB host
+cp .env.example .env       # then edit secrets / passwords / domain
 docker compose build
 docker compose up -d
 
@@ -95,11 +98,25 @@ docker compose up -d
 docker compose exec web python manage.py migrate
 ```
 
-Open `http://localhost:8080/`. To deploy under a sub-path, set
-`APACHE_PUBLISHED_PATH=/hippie` in `.env` before `up`; Apache will
-mount `/static/` and `/media/` under that prefix via `Alias` directives.
+Open `http://localhost:8080/`.
 
-Add the following block to your /etc/apache2/apache2.conf:
+**Sub-path deployment** (e.g. `https://example.com/hippie/`): set
+`APACHE_PUBLISHED_PATH=/hippie` in `.env`
+before `up`. Apache mounts `/static/` and `/media/` under that prefix via
+`Alias` directives; Django uses `DJANGO_SCRIPT_NAME` to build correct URLs.
+Override `DJANGO_STATIC_URL` only if your static path differs from the default.
+If it is not set, the app will use `APACHE_PUBLISHED_PATH` as `DJANGO_STATIC_URL`
+
+For production domains, also set in `.env`:
+
+```
+DJANGO_ALLOWED_HOSTS=example.com
+DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com
+```
+
+Add the following block to your host Apache config (`/etc/apache2/apache2.conf`
+or a site conf in `/etc/apache2/sites-enabled/`) to proxy the containerised
+stack:
 
 ```apache
 # HIPPIE Django app
