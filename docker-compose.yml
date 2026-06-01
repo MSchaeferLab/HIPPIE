@@ -31,8 +31,9 @@ services:
     networks:
       - hippie_net
     # Reach the MariaDB running on the Docker host (DB_HOST=host.docker.internal).
+    # 172.18.0.1 = hippie_net gateway (host side of this bridge — same subnet as containers).
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:172.18.0.1"
     depends_on:
       redis:
         condition: service_healthy
@@ -54,8 +55,9 @@ services:
     networks:
       - hippie_net
     # Reach the MariaDB running on the Docker host (DB_HOST=host.docker.internal).
+    # 172.18.0.1 = hippie_net gateway (host side of this bridge — same subnet as containers).
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:172.18.0.1"
     depends_on:
       redis:
         condition: service_healthy
