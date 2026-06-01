@@ -1105,6 +1105,10 @@ class Command(BaseCommand):
 
             self.stdout.write("Refreshing denormalised protein stats.")
             call_command("recompute_protein_stats")
+            self.stdout.write("Refreshing interaction isoform flags.")
+            call_command(
+                "recompute_interaction_flags"
+            )  # also bumps the browse cache epoch
         self.stdout.write(self.style.SUCCESS("Import complete."))
 
     # ------------------------------------------------------------------

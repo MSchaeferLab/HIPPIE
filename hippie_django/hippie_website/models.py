@@ -383,6 +383,12 @@ class Interaction(models.Model):
     # -- Confidence score (0.0–1.0)
     score = models.FloatField(db_index=True)
 
+    # Denormalised browse flag — True when either interactor is an isoform.
+    # Lets the default browse view (canonical-only) filter on one indexed
+    # column instead of two `protein_*__isoform__isnull` anti-joins over the
+    # full table. Refreshed by `recompute_interaction_flags`.
+    involves_isoform = models.BooleanField(default=False, db_index=True)
+
     # -- Inlined from interaction2keggDirection
     #    1 = protein_1 → protein_2, -1 = protein_2 → protein_1
     kegg_direction = models.SmallIntegerField(

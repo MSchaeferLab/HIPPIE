@@ -9,6 +9,9 @@ plus a self-loop correction) that ride the ``(protein_1, score)`` /
 Run after any data import that changes interactions.
 """
 
+import time
+
+from django.core.cache import cache
 from django.core.management.base import BaseCommand
 from django.db.models import Count, F, Sum
 
@@ -71,6 +74,10 @@ class Command(BaseCommand):
 
         if to_update:
             Protein.objects.bulk_update(to_update, ["degree", "avg_score"])
+
+        # Invalidate cached browse totals (degree/avg_score feed min_degree /
+        # min_score filters). See views._cached_total.
+        cache.set("browse:epoch", int(time.time()))
 
         self.stdout.write(
             self.style.SUCCESS(

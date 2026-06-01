@@ -212,15 +212,22 @@ function App() {
   const [pageSize,   setPageSize]   = useState(DEFAULT_PAGE_SIZE);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  // Proteins-mode state
+  // ── Draft vs applied state ────────────────────────────────────────────────
+  // The filter panels and the search box edit *draft* state. Nothing is fetched
+  // until the user commits the draft via the Search button (or Enter). The data
+  // fetch below depends only on the *applied* copies, so toggling several
+  // filters issues zero requests until one explicit submit — this is what stops
+  // the request storm that previously crashed the server.
   const [search,         setSearch]         = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [appliedQuery,   setAppliedQuery]   = useState("");
   const [proteinFilters, setProteinFilters] = useState(PROTEIN_DEFAULTS);
+  const [appliedProteinFilters, setAppliedProteinFilters] = useState(PROTEIN_DEFAULTS);
   const [sortKey, setSortKey] = useState("symbol");
   const [sortDir, setSortDir] = useState("asc");
 
   // Interactions-mode state
   const [interactionFilters, setInteractionFilters] = useState(INTERACTION_DEFAULTS);
+  const [appliedInteractionFilters, setAppliedInteractionFilters] = useState(INTERACTION_DEFAULTS);
   const [intSortDir, setIntSortDir] = useState("desc");
 
   const abortRef = useRef(null);
@@ -229,11 +236,21 @@ function App() {
     fetch(filterMetaUrl).then(r => r.json()).then(setMeta).catch(() => {});
   }, []);
 
-  // Debounce the free-text search (proteins mode).
-  useEffect(() => {
-    const id = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
-    return () => clearTimeout(id);
-  }, [search]);
+  // Commit the draft search + filters → applied, and reset to page 1.
+  const applySearch = () => {
+    setAppliedQuery(search);
+    setAppliedProteinFilters(proteinFilters);
+    setAppliedInteractionFilters(interactionFilters);
+    setPage(1);
+  };
+
+  // True when the draft differs from what is currently applied (drives the
+  // "unapplied changes" hint on the Search button).
+  const dirty = mode === "proteins"
+    ? (search !== appliedQuery ||
+       JSON.stringify(proteinFilters) !== JSON.stringify(appliedProteinFilters))
+    : (search !== appliedQuery ||
+       JSON.stringify(interactionFilters) !== JSON.stringify(appliedInteractionFilters));
 
   // Build query params for the current mode + filters. ``forList`` adds
   // pagination (offset/limit); the export variant adds ``mode`` instead so the
@@ -247,24 +264,26 @@ function App() {
     } else {
       params.set("mode", mode);
     }
-    if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
+    if (appliedQuery.trim()) params.set("q", appliedQuery.trim());
     if (mode === "proteins") {
+      const f = appliedProteinFilters;
       params.set("sort", sortKey);
       params.set("dir", sortDir);
-      proteinFilters.tissue.forEach(t => params.append("tissue", t));
-      proteinFilters.source.forEach(s => params.append("source", s));
-      if (proteinFilters.minDegree > 0) params.set("min_degree", proteinFilters.minDegree);
-      if (proteinFilters.minScore  > 0) params.set("min_score",  proteinFilters.minScore);
-      if (proteinFilters.tissue.length > 0 && proteinFilters.minRpkm > 0)
-        params.set("min_rpkm", proteinFilters.minRpkm);
-      if (proteinFilters.includeIsoforms) params.set("include_isoforms", "1");
+      f.tissue.forEach(t => params.append("tissue", t));
+      f.source.forEach(s => params.append("source", s));
+      if (f.minDegree > 0) params.set("min_degree", f.minDegree);
+      if (f.minScore  > 0) params.set("min_score",  f.minScore);
+      if (f.tissue.length > 0 && f.minRpkm > 0)
+        params.set("min_rpkm", f.minRpkm);
+      if (f.includeIsoforms) params.set("include_isoforms", "1");
     } else {
+      const f = appliedInteractionFilters;
       params.set("dir", intSortDir);
-      if (interactionFilters.minScore > 0) params.set("min_score", interactionFilters.minScore);
-      if (interactionFilters.maxScore < 1) params.set("max_score", interactionFilters.maxScore);
-      interactionFilters.source.forEach(s => params.append("source", s));
-      interactionFilters.experiment.forEach(e => params.append("experiment", e));
-      if (interactionFilters.includeIsoforms) params.set("include_isoforms", "1");
+      if (f.minScore > 0) params.set("min_score", f.minScore);
+      if (f.maxScore < 1) params.set("max_score", f.maxScore);
+      f.source.forEach(s => params.append("source", s));
+      f.experiment.forEach(e => params.append("experiment", e));
+      if (f.includeIsoforms) params.set("include_isoforms", "1");
     }
     return params;
   };
@@ -291,13 +310,17 @@ function App() {
       });
 
     return () => ctrl.abort();
-  }, [mode, page, pageSize, debouncedSearch, sortKey, sortDir, intSortDir, proteinFilters, interactionFilters]);
+  }, [mode, page, pageSize, sortKey, sortDir, intSortDir, appliedQuery, appliedProteinFilters, appliedInteractionFilters]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const switchMode = (m) => {
     if (m === mode) return;
     setMode(m); setRows([]); setTotal(0); setPage(1); setFiltersOpen(false);
+    // Reset both draft and applied so each mode starts clean.
+    setSearch(""); setAppliedQuery("");
+    setProteinFilters(PROTEIN_DEFAULTS); setAppliedProteinFilters(PROTEIN_DEFAULTS);
+    setInteractionFilters(INTERACTION_DEFAULTS); setAppliedInteractionFilters(INTERACTION_DEFAULTS);
   };
 
   const handleSort = (key) => {
@@ -307,8 +330,9 @@ function App() {
   };
   const thCls = (k) => sortKey === k ? `sorted-${sortDir}` : "";
 
-  const updateProteinFilters = (f) => { setProteinFilters(f); setPage(1); };
-  const updateInteractionFilters = (f) => { setInteractionFilters(f); setPage(1); };
+  // Filter edits update *draft* only — no fetch until Search is clicked.
+  const updateProteinFilters = (f) => setProteinFilters(f);
+  const updateInteractionFilters = (f) => setInteractionFilters(f);
 
   const proteinFilterCount =
     proteinFilters.tissue.length + proteinFilters.source.length +
@@ -322,9 +346,10 @@ function App() {
 
   function handleGenerateSplits() {
     const params = new URLSearchParams();
-    proteinFilters.tissue.forEach(t => params.append("tissue", t));
-    proteinFilters.source.forEach(s => params.append("source", s));
-    if (proteinFilters.minScore > 0) params.set("min_score", proteinFilters.minScore);
+    const f = appliedProteinFilters;
+    f.tissue.forEach(t => params.append("tissue", t));
+    f.source.forEach(s => params.append("source", s));
+    if (f.minScore > 0) params.set("min_score", f.minScore);
     const qs = params.toString();
     window.location.href = mlSplitsUrl + (qs ? "?" + qs : "");
   }
@@ -357,7 +382,8 @@ function App() {
               ? "Search by gene symbol, UniProt ID, or Entrez ID…"
               : "Search interactions by a partner's gene symbol, UniProt ID, or Entrez ID…"}
             value={search}
-            onChange={e => setSearch(e.target.value)} />
+            onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") applySearch(); }} />
           <button className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
                   onClick={() => setFiltersOpen(o => !o)}>
             <i className={`bi bi-funnel${activeFilterCount > 0 ? "-fill" : ""}`}></i>
@@ -367,6 +393,25 @@ function App() {
                             fontSize:".65rem",padding:".05rem .4rem",marginLeft:".2rem"}}>
                 {activeFilterCount}
               </span>
+            )}
+          </button>
+          {/* Explicit submit — filters/search are only applied (and the server
+              only queried) when this is clicked or Enter is pressed. */}
+          <button type="button" onClick={applySearch}
+                  title={dirty ? "Apply search & filters" : "Refresh results"}
+                  style={{
+                    background: dirty ? "var(--hippie-accent, #e8590c)" : "var(--hippie-teal)",
+                    color:"#fff", border:"none", borderRadius:"var(--radius-md)",
+                    padding:".45rem 1.1rem", fontWeight:600, fontFamily:"var(--font-body)",
+                    fontSize:".88rem", cursor:"pointer", whiteSpace:"nowrap",
+                  }}>
+            <i className="bi bi-search me-1"></i>
+            Search
+            {dirty && (
+              <span title="Unapplied changes"
+                    style={{display:"inline-block",width:".5rem",height:".5rem",
+                            borderRadius:"50%",background:"#fff",marginLeft:".4rem",
+                            verticalAlign:"middle"}}></span>
             )}
           </button>
         </div>

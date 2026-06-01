@@ -14,7 +14,9 @@ All database access goes through the custom managers defined in managers.py:
   - Interaction.objects.with_full_detail()    → full prefetch for detail page
 """
 
+import hashlib
 import json
+from django.core.cache import cache
 from django.db.models import Exists, OuterRef, Q, Subquery
 from django.http import FileResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, render
@@ -221,12 +223,13 @@ def protein_query_api(request):
             .order_by("-score")
         )
         if not include_isoforms:
-            isoform_pks_not_queried = Isoform.objects.exclude(
-                protein_ptr_id__in=protein_pks_set
-            ).values_list("protein_ptr_id", flat=True)
-            interactions_qs = interactions_qs.exclude(
-                Q(protein_1_id__in=isoform_pks_not_queried)
-                | Q(protein_2_id__in=isoform_pks_not_queried)
+            # Drop interactions whose partner is an isoform, but keep any
+            # isoform the user explicitly queried (protein_pks). A side is
+            # allowed when it is canonical OR is a queried protein. FK anti-join
+            # instead of a ``NOT IN (7.6k-row subquery)`` ORed across both sides.
+            interactions_qs = interactions_qs.filter(
+                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
+                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
             )
         for interaction in interactions_qs:
             if interaction.protein_1_id in protein_pks_set:
@@ -261,12 +264,10 @@ def protein_query_api(request):
             .order_by("-score")
         )
         if not include_isoforms:
-            isoform_pks_not_queried = Isoform.objects.exclude(
-                protein_ptr_id__in=protein_pks_set
-            ).values_list("protein_ptr_id", flat=True)
-            noninteractions_qs = noninteractions_qs.exclude(
-                Q(protein_1_id__in=isoform_pks_not_queried)
-                | Q(protein_2_id__in=isoform_pks_not_queried)
+            # See the interactions branch above — same canonical-or-queried rule.
+            noninteractions_qs = noninteractions_qs.filter(
+                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
+                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
             )
         for ni in noninteractions_qs:
             if ni.protein_1_id in protein_pks_set:
@@ -799,7 +800,6 @@ def network_query_api(request):
     }
     """
     result = _run_network_query(request.GET)
-    print(result)
     if result.get("error"):
         return JsonResponse(result, status=400)
     return JsonResponse(result)
@@ -1055,8 +1055,9 @@ def _filtered_interaction_qs(request):
     Shared by ``browse_interactions_api`` and ``browse_export_api``.
 
     Performance notes:
-      * Isoform exclusion is a LEFT-JOIN ``IS NULL`` on the reverse one-to-one
-        ``protein_*__isoform`` rather than two ``NOT IN (subquery)`` scans.
+      * Isoform exclusion reads the denormalised ``involves_isoform`` boolean
+        (refreshed by ``recompute_interaction_flags``) — one indexed column
+        instead of two ``protein_*__isoform`` anti-joins over the full table.
       * Free-text search resolves matching protein PKs in a lean subquery, then
         filters either interaction side via ``IN``.
       * Source / experiment filters use ``EXISTS`` over the M2M through table
@@ -1072,7 +1073,9 @@ def _filtered_interaction_qs(request):
 
     qs = Interaction.objects.all()
     if not include_isoforms:
-        qs = qs.filter(protein_1__isoform__isnull=True, protein_2__isoform__isnull=True)
+        # Denormalised flag (recompute_interaction_flags) — one indexed column
+        # instead of two `protein_*__isoform__isnull` anti-joins over 1.15M rows.
+        qs = qs.filter(involves_isoform=False)
     if min_score is not None:
         qs = qs.filter(score__gte=min_score)
     if max_score is not None:
@@ -1136,7 +1139,7 @@ def browse_api(request):
         offset, limit = 0, 50
 
     base_qs = _filtered_protein_qs(request)
-    total = base_qs.count()
+    total = _cached_total(_count_cache_key("proteins", request), base_qs)
 
     proteins = [
         {
@@ -1175,7 +1178,7 @@ def browse_interactions_api(request):
         offset, limit = 0, 50
 
     qs = _filtered_interaction_qs(request)
-    total = qs.count()
+    total = _cached_total(_count_cache_key("interactions", request), qs)
 
     page = qs.prefetch_related("sources", "experiments")[offset : offset + limit]
     interactions = [_interaction_row(ix) for ix in page]
@@ -1257,6 +1260,37 @@ def browse_export_api(request):
     if total > EXPORT_CAP:
         response["X-Export-Truncated"] = "1"
     return response
+
+
+# Query-string keys that change pagination/ordering but NOT the matched row
+# set — excluded from the count cache key so every page of one filter set
+# shares a single cached total.
+_COUNT_IGNORE_PARAMS = {"offset", "limit", "sort", "dir"}
+
+
+def _count_cache_key(mode: str, request) -> str:
+    """Stable cache key for a browse result-set total, derived from the filter
+    params only (pagination/sort ignored)."""
+    items = sorted(
+        (k, sorted(request.GET.getlist(k)))
+        for k in request.GET.keys()
+        if k not in _COUNT_IGNORE_PARAMS
+    )
+    digest = hashlib.md5(repr(items).encode()).hexdigest()
+    return f"{mode}:{digest}"
+
+
+def _cached_total(cache_key: str, qs) -> int:
+    """Return ``qs.count()`` memoised in the cache. Keyed under a global epoch
+    so a single ``cache.set("browse:epoch", …)`` after a data import
+    invalidates every cached total at once (no key enumeration needed)."""
+    epoch = cache.get("browse:epoch", 0)
+    full_key = f"browse:total:{epoch}:{cache_key}"
+    total = cache.get(full_key)
+    if total is None:
+        total = qs.count()
+        cache.set(full_key, total, 60 * 60)  # 1h TTL; epoch bump invalidates early
+    return total
 
 
 def _safe_int(value):

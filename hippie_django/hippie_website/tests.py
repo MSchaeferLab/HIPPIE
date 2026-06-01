@@ -117,6 +117,13 @@ class HippieTestCase(TestCase):
         call_command("recompute_protein_stats", stdout=StringIO())
         cls.client = Client()
 
+    def setUp(self):
+        # Browse totals are memoised in the (process-global) cache; clear it
+        # between tests so a cached count from one test can't leak into another.
+        from django.core.cache import cache
+
+        cache.clear()
+
 
 # ---------------------------------------------------------------------------
 # 1. URL-Smoke-Tests — jeder Endpunkt muss erreichbar sein
@@ -1008,6 +1015,46 @@ class GetIsoformsTest(HippieTestCase):
         # Has UniProt entry ID but no accession mapping
         p = make_protein("NO_ACCESSION_P", uniprot_name="NOACC_HUMAN")
         self.assertEqual(_get_isoforms(p.pk), [])
+
+
+# ---------------------------------------------------------------------------
+# 17b. browse_interactions_api — denormalised involves_isoform flag
+# ---------------------------------------------------------------------------
+
+
+class BrowseInteractionsIsoformTest(HippieTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.isoform = Isoform.objects.create(
+            gene=cls.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-2",
+            general_protein=cls.brca1,
+        )
+        # Interaction whose partner is an isoform.
+        cls.iso_ix = make_interaction(cls.isoform, cls.egfr, score=0.9)
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
+    def test_flag_set_correctly(self):
+        self.iso_ix.refresh_from_db()
+        self.ix.refresh_from_db()
+        self.assertTrue(self.iso_ix.involves_isoform)
+        self.assertFalse(self.ix.involves_isoform)
+
+    def test_default_excludes_isoform_interactions(self):
+        r = self.client.get(reverse("hippie_website:browse_interactions_api"))
+        ids = [row["id"] for row in r.json()["interactions"]]
+        self.assertNotIn(self.iso_ix.pk, ids)
+        self.assertIn(self.ix.pk, ids)  # canonical pair still present
+
+    def test_include_isoforms_includes_them(self):
+        r = self.client.get(
+            reverse("hippie_website:browse_interactions_api"),
+            {"include_isoforms": "1"},
+        )
+        ids = [row["id"] for row in r.json()["interactions"]]
+        self.assertIn(self.iso_ix.pk, ids)
 
 
 # ---------------------------------------------------------------------------
