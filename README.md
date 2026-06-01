@@ -70,16 +70,29 @@ python manage.py collectstatic
 
 ## Run with Docker Compose
 
-A full stack (MariaDB + Redis + Django/Gunicorn + Celery worker + Apache) is
-defined in `docker-compose.yml`. The reverse proxy runs `Apache/2.4.66
-(Debian)` (debian:trixie-slim base) with `mod_proxy_http` in front of
-gunicorn. The Vite React frontend is built inside the web image via a
-multi-stage Dockerfile, so no host Node toolchain is required.
+The stack (Redis + Django/Gunicorn + Celery worker + Apache) is defined in
+`docker-compose.yml`. The reverse proxy runs `Apache/2.4.66 (Debian)`
+(debian:trixie-slim base) with `mod_proxy_http` in front of gunicorn. The Vite
+React frontend is built inside the web image via a multi-stage Dockerfile, so no
+host Node toolchain is required.
+
+**The database is not containerised.** The app connects to a MariaDB running on
+the **host machine** via `DB_HOST=host.docker.internal`. Before `up`, ensure:
+
+- MariaDB is running on the host with the database + user/password from `.env`.
+- It listens on the docker-gateway interface (`bind-address = 0.0.0.0`, not just
+  `127.0.0.1`).
+- The app user is granted from the container network, e.g.
+  `CREATE USER 'hippie'@'%' ...; GRANT ALL ON hippie.* TO 'hippie'@'%';`
+  (the connection arrives via the host-gateway IP, not loopback).
 
 ```bash
-cp .env.example .env       # then edit secrets / passwords
+cp .env.example .env       # then edit secrets / passwords / DB host
 docker compose build
 docker compose up -d
+
+# Migrations are manual (RUN_MIGRATIONS=0) — run once the DB is reachable:
+docker compose exec web python manage.py migrate
 ```
 
 Open `http://localhost:8080/`. To deploy under a sub-path, set
@@ -106,7 +119,7 @@ docker compose exec web python manage.py seed_test_data
 docker compose exec web python manage.py test_import_bait_prey
 docker compose logs -f web worker apache
 docker compose down              # stop; volumes preserved
-docker compose down -v           # stop + wipe DB / static / media volumes
+docker compose down -v           # stop + wipe static / media volumes (host DB untouched)
 ```
 
 ### Loading real data in Docker
@@ -142,7 +155,9 @@ docker compose exec web python manage.py update_tissue_data \
     --entrez-homo-path       data/Homo_sapiens.gene_info
 ```
 
-Migrations and `collectstatic` run automatically on each `web` boot. The
+`collectstatic` runs automatically on each `web` boot; migrations are manual
+(`RUN_MIGRATIONS=0`) so they are never applied automatically against the host
+DB — run `docker compose exec web python manage.py migrate` deliberately. The
 `worker` container reuses the same image with `RUN_MIGRATIONS=0` and
 `RUN_COLLECTSTATIC=0` to avoid racing the web container. The `apache`
 container enables `proxy`, `proxy_http`, `headers`, `rewrite`, and

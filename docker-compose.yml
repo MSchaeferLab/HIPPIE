@@ -1,23 +1,5 @@
 services:
 
-  db:
-    image: mariadb:11
-    restart: unless-stopped
-    environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
-      MARIADB_DATABASE:      ${MARIADB_DATABASE}
-      MARIADB_USER:          ${MARIADB_USER}
-      MARIADB_PASSWORD:      ${MARIADB_PASSWORD}
-    volumes:
-      - mariadb_data:/var/lib/mysql
-    networks:
-      - hippie_net
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -37,7 +19,9 @@ services:
     env_file:
       - .env
     environment:
-      RUN_MIGRATIONS: "1"
+      # Migrations are run manually against the host DB:
+      #   docker compose exec web python manage.py migrate
+      RUN_MIGRATIONS: "0"
       RUN_COLLECTSTATIC: "1"
     volumes:
       - static_volume:/code/hippie_django/staticfiles
@@ -46,9 +30,10 @@ services:
       - ./hippie_django/logs:/code/hippie_django/logs
     networks:
       - hippie_net
+    # Reach the MariaDB running on the Docker host (DB_HOST=host.docker.internal).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -68,9 +53,10 @@ services:
       - media_volume:/code/hippie_django/media
     networks:
       - hippie_net
+    # Reach the MariaDB running on the Docker host (DB_HOST=host.docker.internal).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
       web:
@@ -97,6 +83,5 @@ networks:
     driver: bridge
 
 volumes:
-  mariadb_data:
   static_volume:
   media_volume:
