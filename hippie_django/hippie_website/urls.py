@@ -11,6 +11,7 @@ urlpatterns = [
     # ── Utility pages ──────────────────────────────────────────
     path("download/", views.download_view, name="download"),
     path("information/", views.information_view, name="information"),
+    path("machine-learning/", views.machine_learning_view, name="machine_learning"),
     # ── Detail pages ───────────────────────────────────────────
     path(
         "interaction/<int:pk>/",

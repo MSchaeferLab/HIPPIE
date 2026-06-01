@@ -1503,6 +1503,11 @@ def information_view(request):
     return render(request, "hippie_website/information.html", {})
 
 
+@require_GET
+def machine_learning_view(request):
+    return render(request, "hippie_website/ml.html", {})
+
+
 # ---------------------------------------------------------------------------
 # ML splits helpers + views
 # ---------------------------------------------------------------------------
