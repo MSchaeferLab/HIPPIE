@@ -48,7 +48,7 @@ EXPOSE 8000
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["gunicorn", "hippie.wsgi:application", \
-     "--bind", "172.17.0.1:8000", \
+     "--bind", "0.0.0.0:8000", \
      "--workers", "3", \
      "--threads", "2", \
      "--timeout", "120", \
