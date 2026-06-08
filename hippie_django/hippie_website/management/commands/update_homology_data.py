@@ -297,7 +297,7 @@ def update_homology_data(homology_file, ncbi_gene_info_file, stdout=sys.stdout):
         for pair in pairs:
             n_pairs += 1
             if n_pairs % 5_000 == 0:
-                log(f"\r  Pairs scanned: {n_pairs:,}  interactions found: {len(orthointeractions_to_create):,}", end="", flush=True)
+                print(f"\r  Pairs scanned: {n_pairs:,}  interactions found: {len(orthointeractions_to_create):,}", end="", flush=True)
             ortho_gene_1 = onthology_data.get(
                 entrez_to_hgnc_dict.get(str(pair[0])), False)
             ortho_gene_2 = onthology_data.get(
@@ -327,7 +327,7 @@ def update_homology_data(homology_file, ncbi_gene_info_file, stdout=sys.stdout):
                 if added:
                     break
         
-        log(f"\r  Pairs scanned: {n_pairs:,}  interactions found: {len(orthointeractions_to_create):,}")
+        print(f"\r  Pairs scanned: {n_pairs:,}  interactions found: {len(orthointeractions_to_create):,}    ")
 
         oi_objs = [oi for oi, _ in orthointeractions_to_create.values()] # oioi oi
         log(f"  Bulk creating {len(oi_objs):,} OrthologInteractions...")
@@ -351,7 +351,7 @@ def update_homology_data(homology_file, ncbi_gene_info_file, stdout=sys.stdout):
                     Through(orthologinteraction_id=oi_pk, species_id=species.pk)
                 )
         log(f"  Writing {len(through_rows):,} species links...")
-        Through.objects.bulk_create(through_rows)
+        Through.objects.bulk_create(through_rows, ignore_conflicts=True)
         log(f"  Done.")
 
 
