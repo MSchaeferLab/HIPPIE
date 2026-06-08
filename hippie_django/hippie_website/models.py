@@ -264,7 +264,8 @@ class Species(models.Model):
     """
 
     name = models.CharField(max_length=300, unique=True)
-
+    NCBI_tax_id = models.PositiveIntegerField(unique=True)
+    
     class Meta:
         db_table = "species"
         verbose_name_plural = "species"
@@ -570,29 +571,14 @@ class SignalingEndpoint(models.Model):
 
 
 class OrthologInteraction(models.Model):
-    """
-    Cross-species ortholog interactions.
-    Consolidated from three identically-structured table pairs:
-      - homomint_interaction
-      - i2d_interaction
-      - ortho_interaction
-
-    """
-
-    class OrthologSource(models.TextChoices):
-        HOMOMINT = "homomint", "HomoMINT"
-        I2D = "i2d", "I2D"
-        ORTHO = "ortho", "Ortho"
-
-    protein_1 = models.ForeignKey(
-        Protein, on_delete=models.CASCADE, related_name="ortholog_interactions_as_1"
+    
+    gene_1 = models.ForeignKey(
+        Gene, on_delete=models.CASCADE, related_name="ortholog_interactions_as_1"
     )
-    protein_2 = models.ForeignKey(
-        Protein, on_delete=models.CASCADE, related_name="ortholog_interactions_as_2"
+    gene_2 = models.ForeignKey(
+        Gene, on_delete=models.CASCADE, related_name="ortholog_interactions_as_2"
     )
-    source = models.CharField(
-        max_length=20, choices=OrthologSource.choices, db_index=True
-    )
+    
     ortholog_species = models.ManyToManyField(
         Species,
         related_name="ortholog_interactions",
@@ -602,21 +588,21 @@ class OrthologInteraction(models.Model):
     class Meta:
         db_table = "ortholog_interaction"
         indexes = [
-            models.Index(fields=["protein_1", "protein_2"]),
+            models.Index(fields=["gene_1", "gene_2"]),
         ]
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(protein_1_id__lte=models.F("protein_2_id")),
+                condition=models.Q(gene_1_id__lte=models.F("gene_2_id")),
                 name="ortholog_interaction_canonical_order",
             ),
             models.UniqueConstraint(
-                fields=["protein_1", "protein_2", "source"],
+                fields=["gene_1", "gene_2"],
                 name="ortholog_interaction_unique",
             ),
         ]
 
     def __str__(self):
-        return f"{self.protein_1.gene}–{self.protein_2.gene} ({self.source})"
+        return f"{self.gene_2.entrez_name}–{self.gene_1.entrez_name}"
 
 
 class BaitPreyTest(models.Model):
