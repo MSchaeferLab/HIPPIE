@@ -483,7 +483,7 @@ def update_homology_data(homology_file, ncbi_gene_info_file, stdout=sys.stdout):
                 if added:
                     break
 
-        log(f"\n  Homolgous interactions taxon x taxon: {tt_count}, human x taxon {th_count}")
+        log(f"\n  Homologous interactions taxon x taxon: {tt_count}, human x taxon {th_count}")
         oi_objs = [oi for oi, _ in orthointeractions_to_create.values()]  # oioi oi
         log(f"  Bulk creating {len(oi_objs):,} OrthologInteractions...")
         OrthologInteraction.objects.bulk_create(oi_objs, ignore_conflicts=True)
