@@ -428,7 +428,7 @@ def update_homology_data(homology_file, ncbi_gene_info_file, stdout=sys.stdout):
         )
 
         orthointeractions_to_create: dict[
-            tuple[str, str], list[OrthologInteraction, list[Species]]
+            tuple[int, int], tuple[OrthologInteraction, set[Species]]
         ] = {}
         n_pairs = 0
         tt_count = 0
