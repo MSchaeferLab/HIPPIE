@@ -128,7 +128,7 @@ def write_all_mapping(output_file):
             print(f"[{conf_dict['db']} {taxon}] ...", file=sys.stderr)
             lines = _parse_lines(conf_dict, taxon, _lines(taxon, conf_dict))
             for line in lines:
-                w.write(f"{taxon}\t{conf_dict["db"]}\t{"\t".join(line)}\n")
+                w.write(f"{taxon}\t{conf_dict['db']}\t{'\t'.join(line)}\n")
             written += len(lines)
             print(f"  {len(lines):,} pairs", file=sys.stderr)
     print(f"Done — {written:,} mappings written to {output_file}", file=sys.stderr)
