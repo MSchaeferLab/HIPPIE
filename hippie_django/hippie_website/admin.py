@@ -196,11 +196,10 @@ class SignalingEndpointAdmin(admin.ModelAdmin):
 
 @admin.register(OrthologInteraction)
 class OrthologInteractionAdmin(admin.ModelAdmin):
-    list_display = ("id", "protein_1", "protein_2", "source")
-    search_fields = ("=id", "protein_1__gene__entrez_name", "protein_2__gene__entrez_name")
-    list_filter = ("source",)
-    list_select_related = ("protein_1", "protein_2")
-    autocomplete_fields = ("protein_1", "protein_2", "ortholog_species")
+    list_display = ("id", "gene_1", "gene_2")
+    search_fields = ("=id", "gene_1__entrez_id", "gene_2__entrez_id")
+    list_select_related = ("gene_1", "gene_2")
+    autocomplete_fields = ("gene_1", "gene_2")
 
 
 @admin.register(BaitPreyAssociation)
