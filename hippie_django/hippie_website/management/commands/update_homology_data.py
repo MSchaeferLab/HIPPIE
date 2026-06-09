@@ -141,7 +141,7 @@ def write_all_mapping(output_file):
 
 def read_orthology_data(file_path, hgnc_to_entrez_dict):
     """Parse the genome alliance orthology file and return a dict mapping HGNC ID → list of [other_gene_id, other_species] pairs."""
-    orthology_data: dict[str, list[str]] = {}
+    orthology_data: dict[str, list[list[str]]] = {}
     with open(file_path, "r") as file:
         for line in file:
             line = line.strip()
