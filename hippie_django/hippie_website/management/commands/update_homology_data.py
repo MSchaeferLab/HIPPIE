@@ -337,8 +337,9 @@ def _register_edge(
     key: tuple,
     species: "Species",
 ) -> None:
+) -> None:
     if key not in d:
-        d[key] = [OrthologInteraction(gene_1_id=key[0], gene_2_id=key[1]), {species}]
+        d[key] = (OrthologInteraction(gene_1_id=key[0], gene_2_id=key[1]), {species})
     else:
         d[key][1].add(species)
 
