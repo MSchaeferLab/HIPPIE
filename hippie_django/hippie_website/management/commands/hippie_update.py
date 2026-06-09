@@ -30,6 +30,7 @@ from hippie_website.models import (
     Interaction,
     InteractionCrossReference,
     InteractionType,
+    OrthologInteraction,
     Isoform,
     Protein,
     Publication,
@@ -1004,11 +1005,20 @@ def _rescore_all() -> None:
         if gp := ipk_to_gene.get(ia_pk):
             gene_pubs[gp].add(pub_pk)
 
-    # Query 3: bulk-load interaction → species join table
-    for ia_pk, sp_pk in Interaction.conserved_species.through.objects.values_list(
-        "interaction_id", "species_id"
+    # Query 3: gene pair → ortholog species from OrthologInteraction (gene-based)
+    oi_gene_pairs: dict[int, tuple[int, int]] = {
+        oi_pk: (g1, g2)
+        for oi_pk, g1, g2 in OrthologInteraction.objects.values_list(
+            "pk", "gene_1_id", "gene_2_id"
+        )
+    }
+    for (
+        oi_pk,
+        sp_pk,
+    ) in OrthologInteraction.ortholog_species.through.objects.values_list(
+        "orthologinteraction_id", "species_id"
     ):
-        if gp := ipk_to_gene.get(ia_pk):
+        if gp := oi_gene_pairs.get(oi_pk):
             gene_species[gp].add(sp_pk)
 
     # Query 4: bulk-load interaction → experiment type join table

@@ -314,9 +314,12 @@ hippie_django/data/*.dat
 hippie_django/data/*.gz
 hippie_django/data/*.zip
 hippie_django/data/BIOGRID-*
-hippie_django/data/human*+
+hippie_django/data/human*
 hippie_django/data/*.gct
 hippie_django/data/*.gene_info
+hippie_django/data/species/*.zip
+hippie_django/data/species/*.txt
+hippie_django/data/species/*.tsv
 hippie_django/logs/*.log
 hippie_django/logs/*.json
 hippie_django/media
