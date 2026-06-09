@@ -602,7 +602,7 @@ class OrthologInteraction(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.gene_2.entrez_name}–{self.gene_1.entrez_name}"
+        return f"{self.gene_1.entrez_name}–{self.gene_2.entrez_name}"
 
 
 class BaitPreyTest(models.Model):
