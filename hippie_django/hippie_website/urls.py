@@ -11,6 +11,7 @@ urlpatterns = [
     # ── Utility pages ──────────────────────────────────────────
     path("download/", views.download_view, name="download"),
     path("information/", views.information_view, name="information"),
+    path("machine-learning/", views.machine_learning_view, name="machine_learning"),
     # ── Detail pages ───────────────────────────────────────────
     path(
         "interaction/<int:pk>/",
@@ -28,13 +29,30 @@ urlpatterns = [
     path("api/interaction/", views.interaction_query_api, name="interaction_query_api"),
     path("api/network/", views.network_query_api, name="network_query_api"),
     path("api/browse/", views.browse_api, name="browse_api"),
+    path(
+        "api/browse/interactions/",
+        views.browse_interactions_api,
+        name="browse_interactions_api",
+    ),
     path("api/browse/filters/", views.browse_filter_meta, name="browse_filter_meta"),
-    
+    path("api/browse/export/", views.browse_export_api, name="browse_export"),
     # ── ML splits page + API ────────────────────────────────────
     path("ml-splits/", views.ml_splits_view, name="ml_splits"),
-
     # -- ML split API
-    path("api/browse/splits/",                        views.browse_splits_create,   name="browse_splits_create"),
-    path("api/browse/splits/<uuid:job_id>/",          views.browse_splits_status,   name="browse_splits_status"),
-    path("api/browse/splits/<uuid:job_id>/download/", views.browse_splits_download, name="browse_splits_download")
+    path("api/browse/splits/", views.browse_splits_create, name="browse_splits_create"),
+    path(
+        "api/browse/splits/stats/",
+        views.browse_splits_stats,
+        name="browse_splits_stats",
+    ),
+    path(
+        "api/browse/splits/<uuid:job_id>/",
+        views.browse_splits_status,
+        name="browse_splits_status",
+    ),
+    path(
+        "api/browse/splits/<uuid:job_id>/download/",
+        views.browse_splits_download,
+        name="browse_splits_download",
+    ),
 ]

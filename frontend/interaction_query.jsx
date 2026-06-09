@@ -1,9 +1,9 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { ScoreBadge, Pagination } from "./shared.jsx";
+import { ScoreBadge, Pagination, PageSizeSelect } from "./shared.jsx";
 
 const { apiUrl, maxPairs, batchSize } = window.HIPPIE_IQ_CONFIG;
-const PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 25;
 
 const EXAMPLES = [
   { label: "Example 1 — tabs", text: "HTT\tTP53\nBRCA1\tTP53\nEGFR\tERBB2\nHTT\tHSP90AA1" },
@@ -74,9 +74,10 @@ function ExportBar({ rows }) {
 }
 
 function ResultsTable({ rows, streaming, progress }) {
-  const [sortKey, setSortKey] = useState("input_order");
-  const [sortDir, setSortDir] = useState("asc");
-  const [page,    setPage]    = useState(1);
+  const [sortKey,  setSortKey]  = useState("input_order");
+  const [sortDir,  setSortDir]  = useState("asc");
+  const [page,     setPage]     = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const handleSort = (key) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -99,8 +100,8 @@ function ResultsTable({ rows, streaming, progress }) {
     return sortDir === "asc" ? va - vb : vb - va;
   });
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const pageRows   = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const pageRows   = sorted.slice((page - 1) * pageSize, page * pageSize);
   const notFound   = rows.filter(r => r.score < 0).length;
 
   return (
@@ -122,7 +123,10 @@ function ResultsTable({ rows, streaming, progress }) {
             )}
           </div>
         </div>
-        {!streaming && <ExportBar rows={sorted} />}
+        <div className="d-flex align-items-center gap-3">
+          <PageSizeSelect pageSize={pageSize} onChange={s => { setPageSize(s); setPage(1); }} />
+          {!streaming && <ExportBar rows={sorted} />}
+        </div>
       </div>
 
       {streaming && (
@@ -164,8 +168,8 @@ function ResultsTable({ rows, streaming, progress }) {
                     {!row.isoform_uniprot_b && row.input_b !== row.symbol_b && <span className="text-muted-sm ms-1">({row.input_b})</span>}
                   </td>
                   <td><ScoreBadge score={row.score} /></td>
-                  <td>{row.score >= 0 ? <span className="tag-chip">{row.source_count}</span> : <span className="text-muted-sm">—</span>}</td>
-                  <td>{row.score >= 0 ? <span className="tag-chip">{row.experiment_count}</span> : <span className="text-muted-sm">—</span>}</td>
+                  <td>{row.score >= 0 && row.source_count != null ? <span className="tag-chip">{row.source_count}</span> : <span className="text-muted-sm">—</span>}</td>
+                  <td>{row.score >= 0 && row.experiment_count != null ? <span className="tag-chip">{row.experiment_count}</span> : <span className="text-muted-sm">—</span>}</td>
                   <td>
                     {row.score >= 0 && row.interaction_id
                       ? <a href={row.detail_url}><i className="bi bi-journal-text me-1"></i>View</a>
@@ -181,7 +185,7 @@ function ResultsTable({ rows, streaming, progress }) {
       {totalPages > 1 && (
         <div className="mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
           <span className="text-muted-sm">
-            Page {page} of {totalPages} — {(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE, sorted.length)} of {sorted.length}
+            Page {page} of {totalPages} — {(page-1)*pageSize+1}–{Math.min(page*pageSize, sorted.length)} of {sorted.length}
           </span>
           <Pagination page={page} totalPages={totalPages}
             onChange={p => { setPage(p); window.scrollTo({top:0,behavior:"smooth"}); }} />
@@ -191,7 +195,7 @@ function ResultsTable({ rows, streaming, progress }) {
   );
 }
 
-function InputPanel({ onSubmit, disabled, includeIsoforms, onIsoformChange }) {
+function InputPanel({ onSubmit, disabled, includeIsoforms, onIsoformChange, show, onShowChange }) {
   const [mode,       setMode]       = useState("text");
   const [text,       setText]       = useState("");
   const [file,       setFile]       = useState(null);
@@ -288,6 +292,18 @@ function InputPanel({ onSubmit, disabled, includeIsoforms, onIsoformChange }) {
         </div>
       )}
 
+      <div className="d-flex align-items-center gap-2 flex-wrap mb-3">
+        <span className="text-muted-sm">Show</span>
+        <div className="mode-toggle">
+          <button className={show === "interactions" ? "active" : ""}
+                  onClick={() => onShowChange("interactions")}>Interactions</button>
+          <button className={show === "noninteractions" ? "active" : ""}
+                  onClick={() => onShowChange("noninteractions")}>Non-interactions</button>
+          <button className={show === "both" ? "active" : ""}
+                  onClick={() => onShowChange("both")}>Both</button>
+        </div>
+      </div>
+
       <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <label style={{display:"inline-flex",alignItems:"center",gap:".4rem",cursor:"pointer",userSelect:"none"}}>
           <input type="checkbox" checked={includeIsoforms}
@@ -310,9 +326,12 @@ function App() {
   const [progress,        setProgress]       = useState(0);
   const [globalErr,       setGlobalErr]      = useState(null);
   const [includeIsoforms, setIncludeIsoforms]= useState(false);
+  const [show,            setShow]           = useState("interactions");
   const abortRef = useRef(null);
+  const lastPairsRef = useRef(null);
 
   const runQuery = useCallback(async (pairs) => {
+    lastPairsRef.current = pairs;
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -329,7 +348,7 @@ function App() {
         const res = await fetch(apiUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
-          body: JSON.stringify({ pairs: slice, include_isoforms: includeIsoforms }),
+          body: JSON.stringify({ pairs: slice, include_isoforms: includeIsoforms, show }),
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`Server error ${res.status}: ${await res.text()}`);
@@ -343,7 +362,17 @@ function App() {
     } finally {
       setStreaming(false);
     }
-  }, [includeIsoforms]);
+  }, [includeIsoforms, show]);
+
+  // Toggling "include isoforms" or the show-mode re-runs the last query
+  // automatically, so the user need not resubmit the pairs.
+  const togglesInited = useRef(false);
+  useEffect(() => {
+    if (!togglesInited.current) { togglesInited.current = true; return; }
+    if (lastPairsRef.current && lastPairsRef.current.length > 0) {
+      runQuery(lastPairsRef.current);
+    }
+  }, [includeIsoforms, show]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
@@ -354,7 +383,8 @@ function App() {
       </div>
 
       <InputPanel onSubmit={runQuery} disabled={streaming}
-                  includeIsoforms={includeIsoforms} onIsoformChange={setIncludeIsoforms} />
+                  includeIsoforms={includeIsoforms} onIsoformChange={setIncludeIsoforms}
+                  show={show} onShowChange={setShow} />
 
       {globalErr && (
         <div className="hippie-card mb-4 text-center"

@@ -1,5 +1,6 @@
 import uuid
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from .managers import InteractionManager, ProteinManager
 
@@ -66,6 +67,13 @@ class Protein(models.Model):
     uniprot_name = models.CharField(
         max_length=16, db_index=True, default="", blank=True
     )
+
+    # Denormalised browse stats — refreshed by `recompute_protein_stats`.
+    # degree = number of interactions touching this protein (either side);
+    # avg_score = mean confidence score across those interactions.
+    degree = models.PositiveIntegerField(default=0, db_index=True)
+    avg_score = models.FloatField(null=True, blank=True, db_index=True)
+
     objects = ProteinManager()
 
     class Meta:
@@ -223,14 +231,17 @@ class ExperimentType(models.Model):
 
     class Meta:
         db_table = "experiment_type"
-        constraints = [
-            # Make psi_mi_code unique, but allow multiple empty strings
-            models.UniqueConstraint(
-                fields=["psi_mi_code"],
-                condition=~models.Q(psi_mi_code=""),
-                name="experiment_type_psi_mi_unique",
+
+    def clean(self) -> None:
+        if (
+            self.psi_mi_code
+            and ExperimentType.objects.exclude(pk=self.pk)
+            .filter(psi_mi_code=self.psi_mi_code)
+            .exists()
+        ):
+            raise ValidationError(
+                {"psi_mi_code": "PSI-MI code must be unique among non-empty values."}
             )
-        ]
 
     def __str__(self):
         return self.name
@@ -246,13 +257,17 @@ class InteractionType(models.Model):
 
     class Meta:
         db_table = "interaction_type"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["psi_mi_code"],
-                condition=~models.Q(psi_mi_code=""),
-                name="interaction_type_psi_mi_unique",
+
+    def clean(self) -> None:
+        if (
+            self.psi_mi_code
+            and InteractionType.objects.exclude(pk=self.pk)
+            .filter(psi_mi_code=self.psi_mi_code)
+            .exists()
+        ):
+            raise ValidationError(
+                {"psi_mi_code": "PSI-MI code must be unique among non-empty values."}
             )
-        ]
 
     def __str__(self):
         return self.name
@@ -263,9 +278,9 @@ class Species(models.Model):
     NCBI taxonomy species.
     """
 
-    name = models.CharField(max_length=300, unique=True)
+    name = models.CharField(max_length=255, unique=True)
     NCBI_tax_id = models.PositiveIntegerField(unique=True)
-    
+
     class Meta:
         db_table = "species"
         verbose_name_plural = "species"
@@ -377,6 +392,12 @@ class Interaction(models.Model):
     # -- Confidence score (0.0–1.0)
     score = models.FloatField(db_index=True)
 
+    # Denormalised browse flag — True when either interactor is an isoform.
+    # Lets the default browse view (canonical-only) filter on one indexed
+    # column instead of two `protein_*__isoform__isnull` anti-joins over the
+    # full table. Refreshed by `recompute_interaction_flags`.
+    involves_isoform = models.BooleanField(default=False, db_index=True)
+
     # -- Inlined from interaction2keggDirection
     #    1 = protein_1 → protein_2, -1 = protein_2 → protein_1
     kegg_direction = models.SmallIntegerField(
@@ -423,6 +444,7 @@ class Interaction(models.Model):
         indexes = [
             models.Index(fields=["protein_1", "score"]),
             models.Index(fields=["protein_2", "score"]),
+            models.Index(fields=["score", "id"]),
         ]
         constraints = [
             models.CheckConstraint(
@@ -470,6 +492,7 @@ class NonInteraction(models.Model):
         indexes = [
             models.Index(fields=["protein_1", "score"]),
             models.Index(fields=["protein_2", "score"]),
+            models.Index(fields=["score", "id"]),
         ]
         constraints = [
             models.CheckConstraint(
@@ -571,14 +594,13 @@ class SignalingEndpoint(models.Model):
 
 
 class OrthologInteraction(models.Model):
-    
     gene_1 = models.ForeignKey(
         Gene, on_delete=models.CASCADE, related_name="ortholog_interactions_as_1"
     )
     gene_2 = models.ForeignKey(
         Gene, on_delete=models.CASCADE, related_name="ortholog_interactions_as_2"
     )
-    
+
     ortholog_species = models.ManyToManyField(
         Species,
         related_name="ortholog_interactions",

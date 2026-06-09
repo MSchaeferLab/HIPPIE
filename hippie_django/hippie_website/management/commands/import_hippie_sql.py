@@ -1099,6 +1099,16 @@ class Command(BaseCommand):
             )
             for cat in sorted(counts):
                 self.stdout.write(f"  {cat:<22} {counts[cat]:>8,}")
+
+        if not dry:
+            from django.core.management import call_command
+
+            self.stdout.write("Refreshing denormalised protein stats.")
+            call_command("recompute_protein_stats")
+            self.stdout.write("Refreshing interaction isoform flags.")
+            call_command(
+                "recompute_interaction_flags"
+            )  # also bumps the browse cache epoch
         self.stdout.write(self.style.SUCCESS("Import complete."))
 
     # ------------------------------------------------------------------
@@ -1271,7 +1281,8 @@ class Command(BaseCommand):
 
         pt_rows = []
         protein_to_gene_id = {
-            int(protein_id): int(gene_id) for protein_id, gene_id, *_ in data["protein2entrez"]
+            int(protein_id): int(gene_id)
+            for protein_id, gene_id, *_ in data["protein2entrez"]
         }
         seen_gene_tissues: set[tuple[int, int]] = set()
         for r in data["protein2tissue"]:

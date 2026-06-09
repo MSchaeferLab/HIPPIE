@@ -98,6 +98,8 @@ if os.environ.get("DATABASE_ENGINE") == "mariadb":
             "HOST": os.environ.get("DB_HOST", "db"),
             "PORT": os.environ.get("DB_PORT", "3306"),
             "OPTIONS": {"charset": "utf8mb4"},
+            # Reuse connections across requests (avoid per-request connect/auth).
+            "CONN_MAX_AGE": 60,
         }
     }
 else:
@@ -178,3 +180,24 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 # Uncomment to run tasks synchronously (no Redis required for dev/testing):
 # CELERY_TASK_ALWAYS_EAGER = True
+
+# ── Cache ──────────────────────────────────────────────────────────────────
+# Used to memoise the browse-page row counts so pagination and repeat loads
+# don't re-COUNT the 1.15M-row interaction table. When REDIS_CACHE_URL is set
+# (prod), use the django 5.2 built-in Redis backend (no django-redis dep —
+# relies on the already-installed `redis` package) on a separate DB index (/1)
+# from Celery (/0). Otherwise fall back to per-process local memory so dev and
+# the test suite need no running Redis. Mirrors the mariadb/sqlite switch above.
+if os.environ.get("REDIS_CACHE_URL"):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.environ["REDIS_CACHE_URL"],
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        }
+    }

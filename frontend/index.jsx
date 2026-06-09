@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { scoreClass, uniprotUrl, entrezUrl, ExtLink, PaginationRow } from "./shared.jsx";
+import { scoreClass, uniprotUrl, entrezUrl, ExtLink, PaginationRow, PageSizeSelect } from "./shared.jsx";
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 10;
 const EXAMPLES  = ["HTT", "P42858", "3064", "BRCA1_HUMAN"];
 const INITIAL_Q = new URLSearchParams(window.location.search).get("q") || "";
 const DEFAULT_FILTERS = { includeIsoforms: false, showMode: "interactions" };
@@ -32,9 +32,10 @@ function ExportBar({ data, symbol }) {
 }
 
 function ResultsTable({ interactions, queryProtein, isoformsIncluded }) {
-  const [sortKey, setSortKey] = useState("score");
-  const [sortDir, setSortDir] = useState("desc");
-  const [page,    setPage]    = useState(1);
+  const [sortKey,  setSortKey]  = useState("score");
+  const [sortDir,  setSortDir]  = useState("desc");
+  const [page,     setPage]     = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const handleSort = (key) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -56,8 +57,8 @@ function ResultsTable({ interactions, queryProtein, isoformsIncluded }) {
     return sortDir === "asc" ? va - vb : vb - va;
   });
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const rows       = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const rows       = sorted.slice((page - 1) * pageSize, page * pageSize);
   const thCls      = (k) => sortKey === k ? `sorted-${sortDir}` : "";
 
   return (
@@ -67,7 +68,10 @@ function ResultsTable({ interactions, queryProtein, isoformsIncluded }) {
           <h2 className="results-title">Results for <em>{queryProtein.symbol}</em></h2>
           <span className="text-muted-sm">{interactions.length.toLocaleString()} result{interactions.length !== 1 ? "s" : ""}</span>
         </div>
-        <ExportBar data={sorted} symbol={queryProtein.symbol} />
+        <div className="d-flex align-items-center gap-3">
+          <PageSizeSelect pageSize={pageSize} onChange={s => { setPageSize(s); setPage(1); }} />
+          <ExportBar data={sorted} symbol={queryProtein.symbol} />
+        </div>
       </div>
 
       <div className="hippie-card p-0 overflow-hidden">
@@ -124,7 +128,7 @@ function ResultsTable({ interactions, queryProtein, isoformsIncluded }) {
 
       <div className="mt-3">
         <PaginationRow page={page} totalPages={totalPages} totalItems={interactions.length}
-          pageSize={PAGE_SIZE} onChange={p => { setPage(p); window.scrollTo({top:0,behavior:"smooth"}); }} />
+          pageSize={pageSize} onChange={p => { setPage(p); window.scrollTo({top:0,behavior:"smooth"}); }} />
       </div>
     </div>
   );
@@ -214,6 +218,14 @@ function App() {
     } catch { setError("Network error — could not reach the server."); }
     finally   { setLoading(false); }
   }, [query, filters]);
+
+  // Toggling a filter (isoforms / show-mode) re-runs the search automatically,
+  // as long as there is a query to run — no need to press Search again.
+  const filtersInited = useRef(false);
+  useEffect(() => {
+    if (!filtersInited.current) { filtersInited.current = true; return; }
+    if (query.trim()) handleSearch();
+  }, [filters.includeIsoforms, filters.showMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>

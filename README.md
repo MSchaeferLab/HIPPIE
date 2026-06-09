@@ -8,9 +8,10 @@ cd HIPPIE_FACELIFT
 ```
 
 Create the virtual environment and install the dependencies:
+Because of version conflicts on the server, we are running this with python 3.11 and numpy 1.25
 
 ```bash
-python3 -m venv venv
+python3.11 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -29,7 +30,7 @@ python manage.py test_import_bait_prey
 cd data
 sh download_update_data.sh
 cd ..
-# Versions change, check what version BIOGRID extracts into 
+# Versions change, check what version BIOGRID extracts into
 python manage.py hippie_update \
     --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt \
     --intact data/human.txt
@@ -69,23 +70,53 @@ python manage.py collectstatic
 
 ## Run with Docker Compose
 
-A full stack (MariaDB + Redis + Django/Gunicorn + Celery worker + Apache) is
-defined in `docker-compose.yml`. The reverse proxy runs `Apache/2.4.66
-(Debian)` (debian:trixie-slim base) with `mod_proxy_http` in front of
-gunicorn. The Vite React frontend is built inside the web image via a
-multi-stage Dockerfile, so no host Node toolchain is required.
+The stack (Redis + Django/Gunicorn + Celery worker + Apache) is defined in
+`docker-compose.yml`. The reverse proxy runs `Apache/2.4.66 (Debian)`
+(debian:trixie-slim) with `mod_proxy_http` in front of gunicorn (3 workers,
+2 threads, 120 s timeout). The Vite React frontend is built inside the web
+image via a multi-stage Dockerfile, so no host Node toolchain is required.
+
+**The database is not containerised.** The app connects to a MariaDB running on
+the **host machine** via `DB_HOST=host.docker.internal`, which resolves to the
+`hippie_net` bridge gateway (`172.18.0.1`). Before `up`, ensure:
+
+- MariaDB is running on the host with the database + user/password from `.env`.
+- It listens on all interfaces (`bind-address = 0.0.0.0`, not just `127.0.0.1`).
+- The app user is granted from the container network:
+  ```sql
+  CREATE USER 'hippie'@'%' IDENTIFIED BY 'password';
+  GRANT ALL ON hippie.* TO 'hippie'@'%';
+  ```
+  (Connections arrive via `172.18.0.1`, not loopback.)
 
 ```bash
-cp .env.example .env       # then edit secrets / passwords
+cp .env.example .env       # then edit secrets / passwords / domain
 docker compose build
 docker compose up -d
+
+# Migrations are manual (RUN_MIGRATIONS=0) — run once the DB is reachable:
+docker compose exec web python manage.py migrate
 ```
 
-Open `http://localhost:8080/`. To deploy under a sub-path, set
-`APACHE_PUBLISHED_PATH=/hippie` in `.env` before `up`; Apache will
-mount `/static/` and `/media/` under that prefix via `Alias` directives.
+Open `http://localhost:8080/`.
 
-Add the following block to your /etc/apache2/apache2.conf:
+**Sub-path deployment** (e.g. `https://example.com/hippie/`): set
+`APACHE_PUBLISHED_PATH=/hippie` in `.env`
+before `up`. Apache mounts `/static/` and `/media/` under that prefix via
+`Alias` directives; Django uses `DJANGO_SCRIPT_NAME` to build correct URLs.
+Override `DJANGO_STATIC_URL` only if your static path differs from the default.
+If it is not set, the app will use `APACHE_PUBLISHED_PATH` as `DJANGO_STATIC_URL`
+
+For production domains, also set in `.env`:
+
+```
+DJANGO_ALLOWED_HOSTS=example.com
+DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com
+```
+
+Add the following block to your host Apache config (`/etc/apache2/apache2.conf`
+or a site conf in `/etc/apache2/sites-enabled/`) to proxy the containerised
+stack:
 
 ```apache
 # HIPPIE Django app
@@ -105,7 +136,7 @@ docker compose exec web python manage.py seed_test_data
 docker compose exec web python manage.py test_import_bait_prey
 docker compose logs -f web worker apache
 docker compose down              # stop; volumes preserved
-docker compose down -v           # stop + wipe DB / static / media volumes
+docker compose down -v           # stop + wipe static / media volumes (host DB untouched)
 ```
 
 ### Loading real data in Docker
@@ -117,10 +148,10 @@ files written inside are visible on the host.
 ```bash
 # 1. Download reference files onto the host (into hippie_django/data/)
 mkdir -p hippie_django/data hippie_django/logs
-cd hippie_django && sh data/download_update_data.sh && cd ..
+cd hippie_django && bash data/download_update_data.sh && cd ..
 
 # — or download inside the running container —
-docker compose exec web sh data/download_update_data.sh
+docker compose exec web bash data/download_update_data.sh
 
 # 2. Run the update (paths are relative to the container's WORKDIR)
 # Versions change, check what version BIOGRID extracts into
@@ -132,9 +163,18 @@ docker compose exec web python manage.py hippie_update \
 docker compose exec web python manage.py load_experiment_types \
     --csv_path data/techniques_scoring_04-05-26.csv
 docker compose exec web python manage.py hippie_update --rescore-all
+
+# 4. Load tissue information
+# Versions change, check what version is downloaded
+docker compose exec web python manage.py update_tissue_data \
+    --gct-path               data/GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct \
+    --annotation-sample-path data/GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt \
+    --entrez-homo-path       data/Homo_sapiens.gene_info
 ```
 
-Migrations and `collectstatic` run automatically on each `web` boot. The
+`collectstatic` runs automatically on each `web` boot; migrations are manual
+(`RUN_MIGRATIONS=0`) so they are never applied automatically against the host
+DB — run `docker compose exec web python manage.py migrate` deliberately. The
 `worker` container reuses the same image with `RUN_MIGRATIONS=0` and
 `RUN_COLLECTSTATIC=0` to avoid racing the web container. The `apache`
 container enables `proxy`, `proxy_http`, `headers`, `rewrite`, and

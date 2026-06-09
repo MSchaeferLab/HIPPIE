@@ -14,9 +14,11 @@ All database access goes through the custom managers defined in managers.py:
   - Interaction.objects.with_full_detail()    → full prefetch for detail page
 """
 
+import hashlib
 import json
-from django.db.models import Q
-from django.http import FileResponse, JsonResponse
+from django.core.cache import cache
+from django.db.models import Exists, OuterRef, Q, Subquery
+from django.http import FileResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
@@ -220,6 +222,15 @@ def protein_query_api(request):
             .prefetch_related("sources", "experiments")
             .order_by("-score")
         )
+        if not include_isoforms:
+            # Drop interactions whose partner is an isoform, but keep any
+            # isoform the user explicitly queried (protein_pks). A side is
+            # allowed when it is canonical OR is a queried protein. FK anti-join
+            # instead of a ``NOT IN (7.6k-row subquery)`` ORed across both sides.
+            interactions_qs = interactions_qs.filter(
+                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
+                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
+            )
         for interaction in interactions_qs:
             if interaction.protein_1_id in protein_pks_set:
                 query_side, partner = interaction.protein_1, interaction.protein_2
@@ -252,6 +263,12 @@ def protein_query_api(request):
             )
             .order_by("-score")
         )
+        if not include_isoforms:
+            # See the interactions branch above — same canonical-or-queried rule.
+            noninteractions_qs = noninteractions_qs.filter(
+                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
+                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
+            )
         for ni in noninteractions_qs:
             if ni.protein_1_id in protein_pks_set:
                 query_side, partner = ni.protein_1, ni.protein_2
@@ -783,7 +800,6 @@ def network_query_api(request):
     }
     """
     result = _run_network_query(request.GET)
-    print(result)
     if result.get("error"):
         return JsonResponse(result, status=400)
     return JsonResponse(result)
@@ -932,7 +948,9 @@ def _run_network_query(params) -> dict:
         )
 
     seed_names = set(
-        Protein.objects.filter(pk__in=protein_ids).values_list("gene__entrez_name", flat=True)
+        Protein.objects.filter(pk__in=protein_ids).values_list(
+            "gene__entrez_name", flat=True
+        )
     )
 
     return {
@@ -956,235 +974,329 @@ def browse_view(request):
     return render(request, "hippie_website/browse.html", {})
 
 
+_BROWSE_SORT_FIELDS = {
+    "symbol": "gene__entrez_name",
+    "uniprot_id": "uniprot_accession",
+    "entrez_id": "gene__entrez_id",
+    "degree": "degree",
+    "avg_score": "avg_score",
+}
+
+
+def _protein_search_q(q: str) -> Q:
+    """
+    Build the free-text search ``Q`` used by the browse pages: case-insensitive
+    match on gene symbol, UniProt accession, or UniProt entry name; exact match
+    on the Entrez gene ID when the query is all digits.
+    """
+    cond = (
+        Q(gene__entrez_name__icontains=q)
+        | Q(uniprot_accession__icontains=q)
+        | Q(uniprot_name__icontains=q)
+    )
+    if q.isdigit():
+        cond |= Q(gene__entrez_id=int(q))
+    return cond
+
+
+def _filtered_protein_qs(request):
+    """
+    Build the ordered Protein queryset for the browse "Proteins" mode from the
+    request's filter params. Shared by ``browse_api`` and ``browse_export_api``.
+
+    ``degree`` / ``avg_score`` are read from denormalised columns (refreshed by
+    ``recompute_protein_stats``), so degree/score filters and sorting are plain
+    indexed clauses. The source filter uses two ``EXISTS`` subqueries over the
+    M2M through table — one per protein side — so each rides the
+    ``(protein_1, score)`` / ``(protein_2, score)`` indexes instead of an
+    OR-correlated subquery across a dual interaction join.
+    """
+    tissue_ids = [int(t) for t in request.GET.getlist("tissue") if t.isdigit()]
+    source_ids = [int(s) for s in request.GET.getlist("source") if s.isdigit()]
+    q = request.GET.get("q", "").strip()
+    min_degree = _safe_int(request.GET.get("min_degree"))
+    min_score = _safe_float(request.GET.get("min_score"))
+    min_rpkm = _safe_float(request.GET.get("min_rpkm"))
+    include_isoforms = request.GET.get("include_isoforms", "") in ("1", "true")
+
+    sort_field = _BROWSE_SORT_FIELDS.get(
+        request.GET.get("sort", "symbol"), "gene__entrez_name"
+    )
+    descending = request.GET.get("dir", "asc") == "desc"
+    order = ("-" + sort_field) if descending else sort_field
+
+    base_qs = Protein.objects.select_related("gene")
+    if not include_isoforms:
+        base_qs = base_qs.filter(isoform__isnull=True)
+
+    if tissue_ids:
+        base_qs = base_qs.expressed_in(tissue_ids, min_rpkm=min_rpkm)
+
+    if source_ids:
+        through = Interaction.sources.through.objects.filter(source_id__in=source_ids)
+        p1 = through.filter(interaction__protein_1_id=OuterRef("pk"))
+        p2 = through.filter(interaction__protein_2_id=OuterRef("pk"))
+        base_qs = base_qs.filter(Exists(p1) | Exists(p2))
+
+    if q:
+        base_qs = base_qs.filter(_protein_search_q(q))
+
+    if min_degree is not None and min_degree > 0:
+        base_qs = base_qs.filter(degree__gte=min_degree)
+    if min_score is not None and min_score > 0:
+        base_qs = base_qs.filter(avg_score__gte=min_score)
+
+    return base_qs.order_by(order, "pk")
+
+
+def _filtered_interaction_qs(request):
+    """
+    Build the ordered Interaction queryset for the browse "Interactions" mode.
+    Shared by ``browse_interactions_api`` and ``browse_export_api``.
+
+    Performance notes:
+      * Isoform exclusion reads the denormalised ``involves_isoform`` boolean
+        (refreshed by ``recompute_interaction_flags``) — one indexed column
+        instead of two ``protein_*__isoform`` anti-joins over the full table.
+      * Free-text search resolves matching protein PKs in a lean subquery, then
+        filters either interaction side via ``IN``.
+      * Source / experiment filters use ``EXISTS`` over the M2M through table
+        (indexed ``interaction_id`` lookup) — no correlated self-join.
+    """
+    min_score = _safe_float(request.GET.get("min_score"))
+    max_score = _safe_float(request.GET.get("max_score"))
+    source_ids = [int(s) for s in request.GET.getlist("source") if s.isdigit()]
+    experiment_ids = [int(e) for e in request.GET.getlist("experiment") if e.isdigit()]
+    q = request.GET.get("q", "").strip()
+    descending = request.GET.get("dir", "desc") != "asc"
+    include_isoforms = request.GET.get("include_isoforms", "") in ("1", "true")
+
+    qs = Interaction.objects.all()
+    if not include_isoforms:
+        # Denormalised flag (recompute_interaction_flags) — one indexed column
+        # instead of two `protein_*__isoform__isnull` anti-joins over 1.15M rows.
+        qs = qs.filter(involves_isoform=False)
+    if min_score is not None:
+        qs = qs.filter(score__gte=min_score)
+    if max_score is not None:
+        qs = qs.filter(score__lte=max_score)
+    if q:
+        pid_qs = Protein.objects.filter(_protein_search_q(q)).values("pk")
+        qs = qs.filter(
+            Q(protein_1__in=Subquery(pid_qs)) | Q(protein_2__in=Subquery(pid_qs))
+        )
+    if source_ids:
+        qs = qs.filter(
+            Exists(
+                Interaction.sources.through.objects.filter(
+                    interaction_id=OuterRef("pk"), source_id__in=source_ids
+                )
+            )
+        )
+    if experiment_ids:
+        qs = qs.filter(
+            Exists(
+                Interaction.experiments.through.objects.filter(
+                    interaction_id=OuterRef("pk"),
+                    experimenttype_id__in=experiment_ids,
+                )
+            )
+        )
+
+    return qs.with_proteins().order_by("-score" if descending else "score", "pk")
+
+
+def _interaction_row(ix) -> dict:
+    """Serialise one Interaction for the browse table. Uses prefetched M2M
+    caches (``len`` not ``.count()``) to avoid per-row count queries."""
+    return {
+        "id": ix.pk,
+        "protein_a": _protein_display(ix.protein_1),
+        "protein_b": _protein_display(ix.protein_2),
+        "score": round(ix.score, 4),
+        "source_count": len(ix.sources.all()),
+        "experiment_count": len(ix.experiments.all()),
+        "detail_url": reverse("hippie_website:interaction_detail", args=[ix.pk]),
+    }
+
+
 @require_GET
 def browse_api(request):
     """
-    GET /api/browse/?offset=<int>&limit=<int>
-                    &tissue=<id>&source=<id>
-                    &min_degree=<int>&min_score=<float>
+    GET /api/browse/?offset=<int>&limit=<int>&q=<text>
+                    &sort=<key>&dir=<asc|desc>
+                    &tissue=<id>&tissue=<id>&source=<id>&source=<id>
+                    &min_degree=<int>&min_score=<float>&min_rpkm=<float>
 
-    Streams the protein list in chunks.  Each response includes:
-    {
-        "total":    <int>,          # total matching proteins (for progress bar)
-        "proteins": [
-            {
-                "id":        <int>,
-                "symbol":    "<gene>",
-                "uniprot_id":"<id>" | "",
-                "entrez_id": <int> | null,
-                "degree":    <int>,
-                "avg_score": <float> | null,
-            },
-            ...
-        ]
-    }
-
-    Server-side filters applied here: tissue, source, min_degree, min_score.
-    Free-text search, sort, and pagination are handled client-side.
-
-    Performance notes
-    -----------------
-    The client streams all proteins in ~500-row chunks.  The old
-    implementation annotated every chunk with ``degree`` (two joins + GROUP
-    BY) and ``avg_score`` (a correlated RawSQL subquery that ran once per
-    protein row) and then called ``qs.count()`` on the annotated queryset,
-    which forces Django to wrap the whole annotated query in a subquery and
-    count it — catastrophically slow for tens of thousands of proteins
-    across millions of interactions.
-
-    Here we avoid those annotations entirely.  Degree and avg_score are
-    always computed via three GROUP BYs on ``interaction`` (one per FK side,
-    plus a self-loop correction) which go through the existing
-    ``(protein_1, score)`` / ``(protein_2, score)`` covering indexes as
-    index-only scans.
-
-      * No ``min_degree`` / ``min_score``: count + slice on the lean
-        queryset, then compute stats only for the ~500 sliced IDs.
-      * ``min_degree`` / ``min_score`` set: compute stats once across every
-        candidate protein, then filter + sort + slice in Python.  The
-        aggregates stay fast because they still only touch
-        ``interaction`` and its indexes — the DB never has to JOIN
-        ``protein`` against ``interaction`` twice with a GROUP BY.
+    Returns a single page of proteins (server-side pagination):
+    {"total": <int>, "proteins": [ {id, symbol, uniprot_id, entrez_id,
+                                     degree, avg_score}, ... ]}
     """
-    from django.db.models import Q as _Q
-
-    # ── Parse params ────────────────────────────────────────────────────
     try:
         offset = max(0, int(request.GET.get("offset", 0)))
-        limit = min(2000, max(1, int(request.GET.get("limit", 500))))
+        limit = min(200, max(1, int(request.GET.get("limit", 50))))
     except (TypeError, ValueError):
-        offset, limit = 0, 500
+        offset, limit = 0, 50
 
-    tissue_id = request.GET.get("tissue")
-    source_id = request.GET.get("source")
-    min_degree = request.GET.get("min_degree")
-    min_score = request.GET.get("min_score")
-    min_rpkm = request.GET.get("min_rpkm")
+    base_qs = _filtered_protein_qs(request)
+    total = _cached_total(_count_cache_key("proteins", request), base_qs)
 
-    # ── Build a lean queryset (no annotations) ─────────────────────────
-    base_qs = Protein.objects.all()
-    has_scope_filter = False
-
-    if tissue_id:
-        try:
-            min_rpkm_val = _safe_float(min_rpkm)
-            base_qs = base_qs.expressed_in([int(tissue_id)], min_rpkm=min_rpkm_val)
-            has_scope_filter = True
-        except (TypeError, ValueError):
-            pass
-
-    # Proteins that have at least one interaction from this source
-    # (on either side).
-    if source_id:
-        try:
-            sid = int(source_id)
-            base_qs = base_qs.filter(
-                _Q(interactions_as_1__sources__id=sid)
-                | _Q(interactions_as_2__sources__id=sid)
-            ).distinct()
-            has_scope_filter = True
-        except (TypeError, ValueError):
-            pass
-
-    # ``min_degree=0`` / ``min_score=0`` are no-ops, treat as absent.
-    min_degree_val = _safe_int(min_degree)
-    min_score_val = _safe_float(min_score)
-    if min_degree_val is not None and min_degree_val <= 0:
-        min_degree_val = None
-    if min_score_val is not None and min_score_val <= 0:
-        min_score_val = None
-    needs_degree_filter = min_degree_val is not None or min_score_val is not None
-
-    base_qs = base_qs.order_by("pk")
-
-    # ── Decide the slice and precompute stats ──────────────────────────
-    if needs_degree_filter:
-        # We need degree / avg_score to know which proteins pass the filter,
-        # so compute them once across the scoped candidates and filter in
-        # Python.  When no tissue/source filter narrows the scope, pass
-        # ``None`` so the aggregates run against all interactions (no IN
-        # list) — that's the shape the query planner likes best.
-        scope = None if not has_scope_filter else base_qs.values("pk")
-        side1, side2, self_loops = _protein_stats(scope)
-
-        base_pids = list(base_qs.values_list("pk", flat=True))
-        matching = []
-        for pid in base_pids:
-            c1, s1 = side1.get(pid, (0, 0.0))
-            c2, s2 = side2.get(pid, (0, 0.0))
-            cl, sl = self_loops.get(pid, (0, 0.0))
-
-            degree = c1 + c2
-            unique = c1 + c2 - cl
-            avg = (s1 + s2 - sl) / unique if unique > 0 else None
-
-            if min_degree_val is not None and degree < min_degree_val:
-                continue
-            if min_score_val is not None and (avg is None or avg < min_score_val):
-                continue
-            matching.append(pid)
-
-        total = len(matching)
-        pid_slice = matching[offset : offset + limit]
-    else:
-        # Fast path: no degree/score filter — cheap count, slice IDs, then
-        # compute stats for only the sliced IDs.
-        total = base_qs.count()
-        pid_slice = list(base_qs.values_list("pk", flat=True)[offset : offset + limit])
-        if pid_slice:
-            side1, side2, self_loops = _protein_stats(pid_slice)
-        else:
-            side1, side2, self_loops = {}, {}, {}
-
-    if not pid_slice:
-        return JsonResponse({"total": total, "proteins": []})
-
-    # ── Fetch proteins w/ gene select_related ───────────────────────────
-    proteins_by_pk = {
-        p.pk: p for p in Protein.objects.filter(pk__in=pid_slice).select_related("gene")
-    }
-
-    # ── Build response in slice order ───────────────────────────────────
-    proteins = []
-    for pid in pid_slice:
-        p = proteins_by_pk.get(pid)
-        if p is None:
-            continue  # defensive; pk__in should cover every slice id
-
-        c1, s1 = side1.get(pid, (0, 0.0))
-        c2, s2 = side2.get(pid, (0, 0.0))
-        cl, sl = self_loops.get(pid, (0, 0.0))
-
-        degree = c1 + c2
-        unique_count = c1 + c2 - cl
-        avg = round((s1 + s2 - sl) / unique_count, 4) if unique_count > 0 else None
-
-        proteins.append(
-            {
-                "id": pid,
-                "symbol": p.gene.entrez_name or p.uniprot_name,
-                "uniprot_id": p.uniprot_accession,
-                "entrez_id": p.gene.entrez_id or None,
-                "degree": degree,
-                "avg_score": avg,
-            }
-        )
+    proteins = [
+        {
+            "id": p.pk,
+            "symbol": p.gene.entrez_name or p.uniprot_name,
+            "uniprot_id": p.uniprot_accession,
+            "entrez_id": p.gene.entrez_id or None,
+            "degree": p.degree,
+            "avg_score": p.avg_score,
+        }
+        for p in base_qs[offset : offset + limit]
+    ]
 
     return JsonResponse({"total": total, "proteins": proteins})
 
 
-def _protein_stats(scope):
+@require_GET
+def browse_interactions_api(request):
     """
-    Compute interaction-derived stats per protein.
+    GET /api/browse/interactions/?offset=<int>&limit=<int>&q=<text>
+                    &min_score=<float>&max_score=<float>
+                    &source=<id>&source=<id>&experiment=<id>&experiment=<id>
+                    &sort=score&dir=<asc|desc>
 
-    Returns three dicts keyed by protein id::
+    Server-side paginated listing of the interaction table for the browse
+    page's "Interactions" mode.
 
-        side1      : pid -> (count(i : i.p1 = pid), sum(score))
-        side2      : pid -> (count(i : i.p2 = pid), sum(score))
-        self_loops : pid -> (count(i : i.p1 = i.p2 = pid), sum(score))
-
-    ``scope``:
-      * ``None``            — aggregate over every interaction row.  Use
-                              this when no upstream filter narrows the set
-                              of proteins; it's the shape the query planner
-                              likes best.
-      * iterable of PKs     — restrict aggregates to interactions whose
-                              relevant FK side is in this collection.  A
-                              list (for small slices) or a subquery
-                              ``QuerySet`` (``base_qs.values("pk")``, for
-                              large candidate sets) both work.
-
-    Each aggregate is a ``GROUP BY protein_[1|2]_id`` on ``interaction`` —
-    the ``(protein_1, score)`` / ``(protein_2, score)`` indexes are covering,
-    so these run as index-only scans.
+    Returns:
+    {"total": <int>, "interactions": [ {id, protein_a, protein_b, score,
+        source_count, experiment_count, detail_url}, ... ]}
     """
-    from django.db.models import Count, F, Sum
+    try:
+        offset = max(0, int(request.GET.get("offset", 0)))
+        limit = min(200, max(1, int(request.GET.get("limit", 50))))
+    except (TypeError, ValueError):
+        offset, limit = 0, 50
 
-    if scope is None:
-        side1_qs = Interaction.objects.all()
-        side2_qs = Interaction.objects.all()
-        self_qs = Interaction.objects.filter(protein_1_id=F("protein_2_id"))
+    qs = _filtered_interaction_qs(request)
+    total = _cached_total(_count_cache_key("interactions", request), qs)
+
+    page = qs.prefetch_related("sources", "experiments")[offset : offset + limit]
+    interactions = [_interaction_row(ix) for ix in page]
+
+    return JsonResponse({"total": total, "interactions": interactions})
+
+
+# Hard cap on rows returned by the bulk TSV export — protects the server from
+# materialising the full (multi-hundred-thousand-row) interaction table.
+EXPORT_CAP = 50_000
+
+
+def _tsv_cell(value) -> str:
+    """Render one cell, stripping characters that would break TSV structure."""
+    if value is None:
+        return ""
+    return str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
+
+
+def _tsv_line(cells) -> str:
+    return "\t".join(_tsv_cell(c) for c in cells) + "\n"
+
+
+@require_GET
+def browse_export_api(request):
+    """
+    GET /api/browse/export/?mode=proteins|interactions & <same filters as the
+        matching browse list endpoint, incl. q>
+
+    Streams a TSV of *all* rows matching the current filters (capped at
+    ``EXPORT_CAP``). Reuses the shared filter helpers so the export always
+    matches what the browse table shows. When the result set exceeds the cap,
+    the response carries an ``X-Export-Truncated: 1`` header.
+    """
+    mode = request.GET.get("mode", "proteins")
+
+    if mode == "interactions":
+        qs = _filtered_interaction_qs(request)
+        total = qs.count()
+        header = ["Protein A", "Protein B", "Score", "Sources", "Experiments"]
+        page = qs.prefetch_related("sources", "experiments")[:EXPORT_CAP]
+
+        def rows():
+            yield _tsv_line(header)
+            for ix in page.iterator(chunk_size=2000):
+                yield _tsv_line(
+                    [
+                        ix.protein_1.gene.entrez_name or ix.protein_1.uniprot_name,
+                        ix.protein_2.gene.entrez_name or ix.protein_2.uniprot_name,
+                        round(ix.score, 4),
+                        len(ix.sources.all()),
+                        len(ix.experiments.all()),
+                    ]
+                )
     else:
-        if isinstance(scope, (list, tuple, set)) and not scope:
-            return {}, {}, {}
-        side1_qs = Interaction.objects.filter(protein_1_id__in=scope)
-        side2_qs = Interaction.objects.filter(protein_2_id__in=scope)
-        self_qs = Interaction.objects.filter(
-            protein_1_id__in=scope,
-            protein_1_id=F("protein_2_id"),
-        )
+        mode = "proteins"
+        qs = _filtered_protein_qs(request)
+        total = qs.count()
+        header = [
+            "UniProt Acc",
+            "Entrez Gene ID",
+            "Gene Symbol",
+            "Degree",
+            "Avg. Score",
+        ]
+        page = qs[:EXPORT_CAP]
 
-    def _group(qs, col):
-        return {
-            row[col]: (row["cnt"], row["sm"] or 0.0)
-            for row in qs.values(col).annotate(cnt=Count("id"), sm=Sum("score"))
-        }
+        def rows():
+            yield _tsv_line(header)
+            for p in page.iterator(chunk_size=2000):
+                yield _tsv_line(
+                    [
+                        p.uniprot_accession,
+                        p.gene.entrez_id or "",
+                        p.gene.entrez_name or p.uniprot_name,
+                        p.degree,
+                        round(p.avg_score, 4) if p.avg_score is not None else "",
+                    ]
+                )
 
-    return (
-        _group(side1_qs, "protein_1_id"),
-        _group(side2_qs, "protein_2_id"),
-        _group(self_qs, "protein_1_id"),
+    response = StreamingHttpResponse(
+        rows(), content_type="text/tab-separated-values; charset=utf-8"
     )
+    response["Content-Disposition"] = f'attachment; filename="hippie_browse_{mode}.tsv"'
+    if total > EXPORT_CAP:
+        response["X-Export-Truncated"] = "1"
+    return response
+
+
+# Query-string keys that change pagination/ordering but NOT the matched row
+# set — excluded from the count cache key so every page of one filter set
+# shares a single cached total.
+_COUNT_IGNORE_PARAMS = {"offset", "limit", "sort", "dir"}
+
+
+def _count_cache_key(mode: str, request) -> str:
+    """Stable cache key for a browse result-set total, derived from the filter
+    params only (pagination/sort ignored)."""
+    items = sorted(
+        (k, sorted(request.GET.getlist(k)))
+        for k in request.GET.keys()
+        if k not in _COUNT_IGNORE_PARAMS
+    )
+    digest = hashlib.md5(repr(items).encode()).hexdigest()
+    return f"{mode}:{digest}"
+
+
+def _cached_total(cache_key: str, qs) -> int:
+    """Return ``qs.count()`` memoised in the cache. Keyed under a global epoch
+    so a single ``cache.set("browse:epoch", …)`` after a data import
+    invalidates every cached total at once (no key enumeration needed)."""
+    epoch = cache.get("browse:epoch", 0)
+    full_key = f"browse:total:{epoch}:{cache_key}"
+    total = cache.get(full_key)
+    if total is None:
+        total = qs.count()
+        cache.set(full_key, total, 60 * 60)  # 1h TTL; epoch bump invalidates early
+    return total
 
 
 def _safe_int(value):
@@ -1210,17 +1322,21 @@ def browse_filter_meta(request):
     """
     GET /api/browse/filters/
 
-    Returns the data needed to populate the filter dropdowns:
+    Returns the data needed to populate the filter controls:
     {
-        "tissues": [{ "id": <int>, "name": "<str>" }, ...],
-        "sources": [{ "id": <int>, "name": "<str>" }, ...]
+        "tissues":     [{ "id": <int>, "name": "<str>" }, ...],
+        "sources":     [{ "id": <int>, "name": "<str>" }, ...],
+        "experiments": [{ "id": <int>, "name": "<str>" }, ...]   # interactions mode
     }
     """
-    from .models import Tissue, Source
+    from .models import Tissue, Source, ExperimentType
 
     tissues = list(Tissue.objects.order_by("name").values("id", "name"))
     sources = list(Source.objects.order_by("name").values("id", "name"))
-    return JsonResponse({"tissues": tissues, "sources": sources})
+    experiments = list(ExperimentType.objects.order_by("name").values("id", "name"))
+    return JsonResponse(
+        {"tissues": tissues, "sources": sources, "experiments": experiments}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1387,20 +1503,39 @@ def information_view(request):
     return render(request, "hippie_website/information.html", {})
 
 
+@require_GET
+def machine_learning_view(request):
+    return render(request, "hippie_website/ml.html", {})
+
+
 # ---------------------------------------------------------------------------
 # ML splits helpers + views
 # ---------------------------------------------------------------------------
 
 
 def _validate_split_params(body: dict) -> dict:
+    """Coerce and validate the split/stats parameter payload.
+
+    Keys mirror ``SplitParams`` field names exactly so the dict can be splatted
+    into ``SplitParams(**params)`` (see tasks.run_split_job).
+    """
     from django.core.exceptions import BadRequest
 
     try:
         params = {
+            # interaction-level
             "min_score": float(body.get("min_score", 0.0)),
-            "tissue_ids": [int(x) for x in body.get("tissue_ids") or []],
+            "max_score": float(body.get("max_score", 1.0)),
             "source_ids": [int(x) for x in body.get("source_ids") or []],
+            "experiment_ids": [int(x) for x in body.get("experiment_ids") or []],
             "type_ids": [int(x) for x in body.get("type_ids") or []],
+            # protein-level
+            "tissue_ids": [int(x) for x in body.get("tissue_ids") or []],
+            "min_rpkm": float(body.get("min_rpkm", 0.0)),
+            "min_degree": int(body.get("min_degree", 0)),
+            "min_avg_score": float(body.get("min_avg_score", 0.0)),
+            "include_isoforms": bool(body.get("include_isoforms", False)),
+            # negative sampling
             "neg_ratio": float(body.get("neg_ratio", 1.0)),
             "seed": int(body.get("seed", 78539105873)),
         }
@@ -1408,22 +1543,67 @@ def _validate_split_params(body: dict) -> dict:
         raise BadRequest(str(exc))
     if not 0.0 <= params["min_score"] <= 1.0:
         raise BadRequest("min_score must be between 0.0 and 1.0")
+    if not 0.0 <= params["max_score"] <= 1.0:
+        raise BadRequest("max_score must be between 0.0 and 1.0")
+    if params["max_score"] < params["min_score"]:
+        raise BadRequest("max_score must be >= min_score")
+    if not 0.0 <= params["min_avg_score"] <= 1.0:
+        raise BadRequest("min_avg_score must be between 0.0 and 1.0")
+    if params["min_degree"] < 0:
+        raise BadRequest("min_degree must be >= 0")
+    if params["min_rpkm"] < 0:
+        raise BadRequest("min_rpkm must be >= 0")
     if not 0.1 <= params["neg_ratio"] <= 10.0:
         raise BadRequest("neg_ratio must be between 0.1 and 10.0")
     return params
 
 
+def _ml_filter_meta() -> dict:
+    """Filter option lists for the editable ML-splits controls."""
+    from .models import Source, ExperimentType
+
+    return {
+        "tissues": list(Tissue.objects.order_by("name").values("id", "name")),
+        "sources": list(Source.objects.order_by("name").values("id", "name")),
+        "experiments": list(
+            ExperimentType.objects.order_by("name").values("id", "name")
+        ),
+        "interaction_types": list(
+            InteractionType.objects.order_by("name").values("id", "name")
+        ),
+    }
+
+
 @require_GET
 def ml_splits_view(request):
-    types = list(InteractionType.objects.values("id", "name"))
+    """Standalone ML-splits page. All filters are editable on the page; any
+    query params (handed off from either Browse tab) seed the initial values."""
+
+    def _float(name):
+        return request.GET.get(name, "")
+
+    initial = {
+        # interaction-level
+        "min_score": request.GET.get("min_score", ""),
+        "max_score": request.GET.get("max_score", ""),
+        "source_ids": [int(s) for s in request.GET.getlist("source") if s.isdigit()],
+        "experiment_ids": [
+            int(e) for e in request.GET.getlist("experiment") if e.isdigit()
+        ],
+        "type_ids": [int(t) for t in request.GET.getlist("type") if t.isdigit()],
+        # protein-level
+        "tissue_ids": [int(t) for t in request.GET.getlist("tissue") if t.isdigit()],
+        "min_rpkm": _float("min_rpkm"),
+        "min_degree": request.GET.get("min_degree", ""),
+        "min_avg_score": _float("min_avg_score"),
+        "include_isoforms": request.GET.get("include_isoforms", "") in ("1", "true"),
+    }
     return render(
         request,
         "hippie_website/ml_splits.html",
         {
-            "interaction_types": types,
-            "tissue": request.GET.get("tissue", ""),
-            "source": request.GET.get("source", ""),
-            "min_score": request.GET.get("min_score", "0"),
+            "meta_json": json.dumps(_ml_filter_meta()),
+            "initial_json": json.dumps(initial),
         },
     )
 
@@ -1435,6 +1615,162 @@ def browse_splits_create(request):
     job = SplitJob.objects.create(params=params)
     run_split_job.delay(str(job.id))
     return JsonResponse({"job_id": str(job.id), "status": job.status}, status=202)
+
+
+def _protein_filtered_qs(params):
+    """Protein queryset after the protein-level filters (for the stats box)."""
+    pqs = Protein.objects.all()
+    if not params.include_isoforms:
+        pqs = pqs.filter(isoform__isnull=True)
+    if params.tissue_ids:
+        pqs = pqs.expressed_in(
+            list(params.tissue_ids),
+            min_rpkm=params.min_rpkm if params.min_rpkm > 0 else None,
+        )
+    if params.min_degree > 0:
+        pqs = pqs.filter(degree__gte=params.min_degree)
+    if params.min_avg_score > 0:
+        pqs = pqs.filter(avg_score__gte=params.min_avg_score)
+    return pqs
+
+
+def _protein_stats(params) -> dict:
+    import statistics
+
+    from .models import GeneTissue
+
+    pqs = _protein_filtered_qs(params)
+
+    degrees: list[int] = []
+    scores: list[float] = []
+    n_isolated = 0
+    # pk in the row keeps tissue-join duplicates from collapsing distinct
+    # proteins that happen to share (degree, avg_score).
+    for _pk, deg, avg in (
+        pqs.values_list("pk", "degree", "avg_score")
+        .distinct()
+        .iterator(chunk_size=10_000)
+    ):
+        degrees.append(deg)
+        if deg == 0:
+            n_isolated += 1
+        if avg is not None:
+            scores.append(avg)
+
+    n_isoforms = (
+        0
+        if not params.include_isoforms
+        else pqs.filter(isoform__isnull=False).values("pk").distinct().count()
+    )
+    tissue_coverage = (
+        GeneTissue.objects.filter(gene__proteins__in=pqs)
+        .values("tissue_id")
+        .distinct()
+        .count()
+    )
+
+    return {
+        "n_proteins": len(degrees),
+        "median_degree": statistics.median(degrees) if degrees else 0,
+        "median_avg_score": round(statistics.median(scores), 4) if scores else None,
+        "n_isolated": n_isolated,
+        "tissue_coverage": tissue_coverage,
+        "n_isoforms": n_isoforms,
+    }
+
+
+# Degree-histogram buckets: (label, lower, upper-inclusive). None upper = open.
+_DEGREE_BUCKETS = [
+    ("0", 0, 0),
+    ("1", 1, 1),
+    ("2", 2, 2),
+    ("3–5", 3, 5),
+    ("6–10", 6, 10),
+    ("11–25", 11, 25),
+    ("26–50", 26, 50),
+    ("51–100", 51, 100),
+    ("100+", 101, None),
+]
+
+
+def _bucket_degrees(degree_by_node: dict) -> list:
+    counts = [0] * len(_DEGREE_BUCKETS)
+    for d in degree_by_node.values():
+        for i, (_label, lo, hi) in enumerate(_DEGREE_BUCKETS):
+            if d >= lo and (hi is None or d <= hi):
+                counts[i] += 1
+                break
+    return [{"label": _DEGREE_BUCKETS[i][0], "count": c} for i, c in enumerate(counts)]
+
+
+def _interaction_stats(iqs) -> dict:
+    from .models import Interaction
+
+    degree_by_node: dict[int, int] = {}
+    score_hist = [0] * 10  # display: 10 bins of width 0.1
+    score_fine = [0] * 100  # internal: for a memory-safe median
+    n = 0
+    for p1, p2, score in iqs.values_list(
+        "protein_1_id", "protein_2_id", "score"
+    ).iterator(chunk_size=10_000):
+        n += 1
+        degree_by_node[p1] = degree_by_node.get(p1, 0) + 1
+        degree_by_node[p2] = degree_by_node.get(p2, 0) + 1
+        score_hist[min(int(score * 10), 9)] += 1
+        score_fine[min(int(score * 100), 99)] += 1
+
+    # Median score from the fine histogram (O(1) memory).
+    median_score = None
+    if n:
+        half, cum = n / 2, 0
+        for i, c in enumerate(score_fine):
+            cum += c
+            if cum >= half:
+                median_score = round((i + 0.5) / 100, 4)
+                break
+
+    n_sources = (
+        Interaction.sources.through.objects.filter(interaction__in=iqs)
+        .values("source_id")
+        .distinct()
+        .count()
+    )
+    n_experiments = (
+        Interaction.experiments.through.objects.filter(interaction__in=iqs)
+        .values("experimenttype_id")
+        .distinct()
+        .count()
+    )
+
+    return {
+        "n_interactions": n,
+        "degree_histogram": _bucket_degrees(degree_by_node),
+        # Label = lower bin edge (e.g. "0.3" = bucket [0.3, 0.4)); short enough
+        # to read along a 10-bin X axis.
+        "score_histogram": [
+            {"label": f"{i / 10:.1f}", "count": c} for i, c in enumerate(score_hist)
+        ],
+        "median_score": median_score,
+        "n_sources": n_sources,
+        "n_experiments": n_experiments,
+    }
+
+
+@require_POST
+def browse_splits_stats(request):
+    """POST the split filter payload, get on-demand protein + interaction
+    statistics for the filter-preview boxes. Same param shape as
+    ``browse_splits_create``."""
+    from .services.generate_splits import SplitParams, build_interaction_queryset
+
+    body = json.loads(request.body)
+    params = SplitParams(**_validate_split_params(body))
+    return JsonResponse(
+        {
+            "protein": _protein_stats(params),
+            "interaction": _interaction_stats(build_interaction_queryset(params)),
+        }
+    )
 
 
 @require_GET

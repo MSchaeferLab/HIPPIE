@@ -24,6 +24,7 @@ Abdeckung:
 
 import json
 import tempfile
+from io import StringIO
 from pathlib import Path
 
 from django.core.management import CommandError, call_command
@@ -67,9 +68,7 @@ def make_protein(name, uniprot_name=None, gene_id=None, accession=None):
             entrez_id=gene_id, defaults={"entrez_name": name}
         )
     else:
-        gene, _ = Gene.objects.get_or_create(
-            entrez_id=0, defaults={"entrez_name": ""}
-        )
+        gene, _ = Gene.objects.get_or_create(entrez_id=0, defaults={"entrez_name": ""})
     return Protein.objects.create(
         gene=gene,
         uniprot_name=uniprot_name or (name if gene_id is None else ""),
@@ -113,7 +112,17 @@ class HippieTestCase(TestCase):
         )
         cls.ix.sources.add(cls.src)
         cls.ix.experiments.add(cls.exp)
+        # Browse reads denormalised degree/avg_score columns; populate them so
+        # min_degree / min_score filter tests exercise real values.
+        call_command("recompute_protein_stats", stdout=StringIO())
         cls.client = Client()
+
+    def setUp(self):
+        # Browse totals are memoised in the (process-global) cache; clear it
+        # between tests so a cached count from one test can't leak into another.
+        from django.core.cache import cache
+
+        cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +358,9 @@ class BrowseApiTest(HippieTestCase):
     def setUpTestData(cls):
         super().setUpTestData()
         cls.tissue = Tissue.objects.create(name="Brain")
-        GeneTissue.objects.create(gene=cls.brca1.gene, tissue=cls.tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(
+            gene=cls.brca1.gene, tissue=cls.tissue, median_rpkm=1.0
+        )
 
     def _get(self, **params):
         r = self.client.get(reverse("hippie_website:browse_api"), params)
@@ -394,7 +405,8 @@ class BrowseApiTest(HippieTestCase):
 
     def test_min_degree_filter(self):
         data = self._get(min_degree=1)
-        # Nur Proteine mit mindestens einer Interaction
+        # BRCA1 + TP53 have one interaction each; EGFR has none → excluded.
+        self.assertEqual(data["total"], 2)
         for p in data["proteins"]:
             self.assertGreaterEqual(p["degree"], 1)
 
@@ -443,8 +455,12 @@ class NetworkQueryTest(HippieTestCase):
     def setUpTestData(cls):
         super().setUpTestData()
         cls.tissue = Tissue.objects.create(name="NetworkTestTissue")
-        GeneTissue.objects.create(gene=cls.brca1.gene, tissue=cls.tissue, median_rpkm=1.0)
-        GeneTissue.objects.create(gene=cls.tp53.gene, tissue=cls.tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(
+            gene=cls.brca1.gene, tissue=cls.tissue, median_rpkm=1.0
+        )
+        GeneTissue.objects.create(
+            gene=cls.tp53.gene, tissue=cls.tissue, median_rpkm=1.0
+        )
 
     def test_get_renders_form(self):
         r = self.client.get(reverse("hippie_website:network_query"))
@@ -481,10 +497,14 @@ class NetworkQueryTest(HippieTestCase):
             "tissue": self.tissue.pk,
         }
         # both proteins have rpkm=1.0; threshold below → edge survives
-        r_low = self.client.post(reverse("hippie_website:network_query"), {**base, "min_rpkm": "0.5"})
+        r_low = self.client.post(
+            reverse("hippie_website:network_query"), {**base, "min_rpkm": "0.5"}
+        )
         self.assertGreater(r_low.context["network_result"]["edge_count"], 0)
         # threshold above → edge filtered out
-        r_high = self.client.post(reverse("hippie_website:network_query"), {**base, "min_rpkm": "2.0"})
+        r_high = self.client.post(
+            reverse("hippie_website:network_query"), {**base, "min_rpkm": "2.0"}
+        )
         self.assertEqual(r_high.context["network_result"]["edge_count"], 0)
 
     def test_post_with_unknown_seed(self):
@@ -998,6 +1018,46 @@ class GetIsoformsTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
+# 17b. browse_interactions_api — denormalised involves_isoform flag
+# ---------------------------------------------------------------------------
+
+
+class BrowseInteractionsIsoformTest(HippieTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.isoform = Isoform.objects.create(
+            gene=cls.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-2",
+            general_protein=cls.brca1,
+        )
+        # Interaction whose partner is an isoform.
+        cls.iso_ix = make_interaction(cls.isoform, cls.egfr, score=0.9)
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
+    def test_flag_set_correctly(self):
+        self.iso_ix.refresh_from_db()
+        self.ix.refresh_from_db()
+        self.assertTrue(self.iso_ix.involves_isoform)
+        self.assertFalse(self.ix.involves_isoform)
+
+    def test_default_excludes_isoform_interactions(self):
+        r = self.client.get(reverse("hippie_website:browse_interactions_api"))
+        ids = [row["id"] for row in r.json()["interactions"]]
+        self.assertNotIn(self.iso_ix.pk, ids)
+        self.assertIn(self.ix.pk, ids)  # canonical pair still present
+
+    def test_include_isoforms_includes_them(self):
+        r = self.client.get(
+            reverse("hippie_website:browse_interactions_api"),
+            {"include_isoforms": "1"},
+        )
+        ids = [row["id"] for row in r.json()["interactions"]]
+        self.assertIn(self.iso_ix.pk, ids)
+
+
+# ---------------------------------------------------------------------------
 # 18. InteractionQuerySet methods
 # ---------------------------------------------------------------------------
 
@@ -1053,8 +1113,9 @@ class BrowseApiMinScoreTest(HippieTestCase):
         return json.loads(r.content)
 
     def test_min_score_excludes_proteins_with_low_avg(self):
-        # EGFR has no interactions → avg_score=None, should be excluded
+        # BRCA1 + TP53 share a 0.85 interaction; EGFR has none (avg_score=None).
         data = self._get(min_score=0.5)
+        self.assertEqual(data["total"], 2)
         for p in data["proteins"]:
             self.assertIsNotNone(p["avg_score"])
             self.assertGreaterEqual(p["avg_score"], 0.5)
@@ -1063,6 +1124,60 @@ class BrowseApiMinScoreTest(HippieTestCase):
         all_data = self._get()
         zero_data = self._get(min_score=0)
         self.assertEqual(zero_data["total"], all_data["total"])
+
+
+# ---------------------------------------------------------------------------
+# 19b. browse_interactions_api
+# ---------------------------------------------------------------------------
+
+
+class BrowseInteractionsApiTest(HippieTestCase):
+    def _get(self, **params):
+        r = self.client.get(reverse("hippie_website:browse_interactions_api"), params)
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def test_returns_total_and_interactions(self):
+        data = self._get()
+        self.assertEqual(data["total"], Interaction.objects.count())
+        self.assertGreater(len(data["interactions"]), 0)
+        row = data["interactions"][0]
+        for key in (
+            "id",
+            "protein_a",
+            "protein_b",
+            "score",
+            "source_count",
+            "experiment_count",
+            "detail_url",
+        ):
+            self.assertIn(key, row)
+
+    def test_score_range_filter(self):
+        # The single fixture interaction scores 0.85.
+        self.assertEqual(self._get(min_score=0.9)["total"], 0)
+        self.assertEqual(self._get(min_score=0.5, max_score=0.9)["total"], 1)
+
+    def test_source_filter(self):
+        self.assertEqual(self._get(source=self.src.pk)["total"], 1)
+
+    def test_experiment_filter(self):
+        self.assertEqual(self._get(experiment=self.exp.pk)["total"], 1)
+
+
+# ---------------------------------------------------------------------------
+# 19c. browse_filter_meta — experiments for the interactions filter
+# ---------------------------------------------------------------------------
+
+
+class BrowseFilterMetaExperimentsTest(HippieTestCase):
+    def test_experiments_present(self):
+        data = json.loads(
+            self.client.get(reverse("hippie_website:browse_filter_meta")).content
+        )
+        self.assertIn("experiments", data)
+        names = [e["name"] for e in data["experiments"]]
+        self.assertIn("Two-hybrid", names)
 
 
 # ---------------------------------------------------------------------------
@@ -1224,7 +1339,9 @@ class UpdateTissueDataCommandTest(TestCase):
     def test_existing_gene_tissue_median_is_updated(self):
         gene = Gene.objects.create(entrez_id=101, entrez_name="GENE1")
         tissue = Tissue.objects.create(name="Liver")
-        gene_tissue = GeneTissue.objects.create(gene=gene, tissue=tissue, median_rpkm=2.0)
+        gene_tissue = GeneTissue.objects.create(
+            gene=gene, tissue=tissue, median_rpkm=2.0
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

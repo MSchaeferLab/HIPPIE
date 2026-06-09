@@ -6,8 +6,10 @@
 {% block content %}
 <script>
   window.HIPPIE_BROWSE_CONFIG = {
-    proteinsApiUrl:   "{% url 'hippie_website:browse_api' %}",
-    filterMetaUrl:    "{% url 'hippie_website:browse_filter_meta' %}",
+    proteinsApiUrl:     "{% url 'hippie_website:browse_api' %}",
+    interactionsApiUrl: "{% url 'hippie_website:browse_interactions_api' %}",
+    exportApiUrl:       "{% url 'hippie_website:browse_export' %}",
+    filterMetaUrl:      "{% url 'hippie_website:browse_filter_meta' %}",
     proteinDetailUrl: "{% url 'hippie_website:protein_detail' pk=0 %}".replace("/0/", "/{id}/"),
     proteinQueryUrl:  "{% url 'hippie_website:index' %}",
     mlSplitsUrl:      "{% url 'hippie_website:ml_splits' %}",

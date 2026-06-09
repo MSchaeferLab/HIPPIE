@@ -31,6 +31,8 @@ hippie_django/data/*.zip
 hippie_django/data/*.sql
 hippie_django/data/BIOGRID-*
 hippie_django/data/human*
+hippie_django/data/*.gct
+hippie_django/data/*.gene_info
 hippie_django/logs/
 
 # IDE / OS

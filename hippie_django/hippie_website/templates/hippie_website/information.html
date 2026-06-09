@@ -4,199 +4,517 @@
 
 {% block content %}
 
-<div class="hippie-hero">
+{# ====================================================================== #}
+{#  NOTE: Section wording below is preserved verbatim from the original   #}
+{#  HIPPIE information page. Only the surrounding markup/styling is new.   #}
+{#  Features not yet present in the Django rewrite are flagged in red as   #}
+{#  "REWORK NEEDED" (heading kept, body replaced).                        #}
+{# ====================================================================== #}
+
+<style>
+  .rework-needed {
+    color: #dc3545;
+    font-weight: 700;
+    letter-spacing: .04em;
+    margin: 0;
+  }
+  .toc-list { columns: 2; font-size: .875rem; line-height: 1.9; padding-left: 1.1rem; }
+  .toc-list li { break-inside: avoid; }
+  #top { scroll-margin-top: 80px; }
+  .info-section h4[id], .info-section h5[id] { scroll-margin-top: 80px; }
+  .back-to-top { font-size: .8rem; }
+</style>
+
+<div class="hippie-hero" id="top">
   <span class="page-eyebrow">HIPPIE</span>
-  <h1>Information &amp;<br /><em>Documentation</em></h1>
+  <h1>HIPPIE<br /><em>Howto</em></h1>
   <p class="page-subtitle">
-    Methodology, confidence scoring, data sources, and citation guidelines.
+    Details on the information stored in HIPPIE and the multiple ways to access it.
   </p>
 </div>
 
-{# ── About ── #}
+{# ── Table of contents ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <span class="section-label">About HIPPIE</span>
+    <span class="section-label">Contents</span>
+    <ul class="toc-list mt-2 mb-0">
+      <li><a href="#welcome">Generation of reliable and meaningful PPI networks with HIPPIE.</a></li>
+      <li><a href="#scoring">Confidence scoring of experimentally measured interactions.</a></li>
+      <li><a href="#query">Query interactions.</a></li>
+      <li><a href="#network">Network construction.</a></li>
+      <li><a href="#input">Input.</a></li>
+      <li><a href="#output">Output type.</a></li>
+      <li><a href="#int_layers">Interaction layers.</a></li>
+      <li><a href="#common_int">Min. number of PPIs to query set.</a></li>
+      <li><a href="#score">Score filter.</a></li>
+      <li><a href="#type">Interaction type filter.</a></li>
+      <li><a href="#tissue">Tissue filter.</a></li>
+      <li><a href="#function">Functional filter.</a></li>
+      <li><a href="#direction">Directed edges.</a></li>
+      <li><a href="#effect">Inhibitory or activating effect of an interaction.</a></li>
+      <li><a href="#export">Exporting query results.</a></li>
+      <li><a href="#enrichment">Disease and Gene Ontology enrichment of query results.</a></li>
+      <li><a href="#browsing">Browsing the HIPPIE proteome.</a></li>
+      <li><a href="#cytoscape">Cytoscape visualization of HIPPIE output.</a></li>
+      <li><a href="#script">HIPPIE network construction script.</a></li>
+      <li><a href="#annotation">Annotation of a list of newly measured interactions.</a></li>
+      <li><a href="#download">Download the repository.</a></li>
+      <li><a href="#example">Example of a HIPPIE workflow.</a></li>
+      <li><a href="#sources">Sources.</a></li>
+      <li><a href="#api">HIPPIE API.</a></li>
+      <li><a href="#remarks">General technical remarks.</a></li>
+      <li><a href="#cite">Related manuscripts (how to cite).</a></li>
+      <li><a href="#contact">Contact.</a></li>
+    </ul>
+  </div>
+</div>
+
+{# ── Welcome ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="welcome" class="section-label">Generation of reliable and meaningful PPI networks with HIPPIE</h4>
     <p>
-      HIPPIE (<strong>H</strong>uman <strong>I</strong>ntegrated <strong>P</strong>rotein–<strong>P</strong>rotein
-      <strong>I</strong>nteraction r<strong>E</strong>ference) is a scored, integrated resource of human
-      protein–protein interactions (PPIs). It aggregates experimental interaction data from multiple
-      public databases and assigns a unified confidence score to each interaction based on the quality
-      and quantity of supporting evidence.
+      Welcome to HIPPIE (the Human Integrated Protein Protein Interaction Reference)! We provide
+      confidence scored and functionally annotated human protein-protein interactions (PPIs). This
+      page contains details on the information stored in HIPPIE and the multiple ways to access it.
+      First time users might want to start with the <a href="#example">walk-through example</a> to
+      get an idea what types of analyses can be performed with HIPPIE.
     </p>
-    <p class="mb-0 text-muted-sm">
-      HIPPIE is maintained at ExB / TU München. It is freely available for academic use.
-    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>
 
 {# ── Confidence scoring ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <span class="section-label">Confidence Scoring</span>
+    <h4 id="scoring" class="section-label">Confidence scoring of experimentally measured interactions</h4>
     <p>
-      Each interaction is assigned a score between 0 and 1 based on a weighted sum of experimental
-      evidence. The formula accounts for the quality of the detection method, the number of
-      independent studies, and cross-species conservation.
+      A core component of HIPPIE is the confidence scoring of interactions based on the amount and
+      reliability of evidence supporting them. This score is calculated as a weighted sum of the
+      number of studies in which an interaction was detected, the number and quality of experimental
+      techniques used to measure an interaction and the number of non-human organisms in which an
+      interaction was reproduced.
+    </p>
+    <p>
+      The parameters of this scoring scheme were jointly optimized by a group of experts and a
+      computer algorithm: we first assigned quality scores to each experimental technique that
+      measures protein-protein interactions. This experimental quality score is supposed to reflect
+      the reliability and the error rate of the techniques. The list of experimental quality scores
+      can be found in the <a href="{% url 'hippie_website:download' %}">download</a> section. We are
+      aware that, to a high degree, the estimation of experimental quality is led by the individual
+      perception and experience of our expert team and can only reflect our subjective beliefs. If
+      you feel that a technique was fundamentally misjudged, please give us your feedback.
+    </p>
+    <p>
+      Also, there is the possibility for users of HIPPIE to modify the scores and to apply our
+      rescoring tool to get an individually scored version of HIPPIE. Please, find a stand-alone
+      version of the tool and instructions on how to run it in the
+      <a href="{% url 'hippie_website:download' %}">download</a> section.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Query interactions ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="query" class="section-label">Query interactions</h4>
+    <p>
+      The <a href="{% url 'hippie_website:index' %}">query mode</a> allows for querying HIPPIE with a
+      <a href="http://www.uniprot.org/" target="_blank" rel="noopener">UniProt</a> identifier (id or
+      accession), <a href="http://www.ncbi.nlm.nih.gov/gene" target="_blank" rel="noopener">gene
+      symbol</a> or <a href="http://www.ncbi.nlm.nih.gov/gene" target="_blank" rel="noopener">Entrez</a>
+      gene id. All literature interactions in HIPPIE that match the query protein are displayed.
+    </p>
+    <p>
+      On the result page, UniProt id, Entrez gene id and gene symbol of the interactors of the query
+      protein are indicated. The confidence score of the interaction is given in the last column.
+      Clicking on it opens an evidence page where the source databases of the interaction are listed,
+      together with the publications which mention the interaction, the experimental systems used to
+      detect it and the species in which it is conserved.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Network construction ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="network" class="section-label">Network construction</h4>
+    <p>
+      In the <a href="{% url 'hippie_website:network_query' %}">network construction mode</a>, several
+      proteins (or interactions) can be queried at the same time ("batch mode") and a network is
+      constructed from the input. The resulting network can be either visualized graphically, listed
+      in a tabular format in the browser or downloaded as a file in several formats.
     </p>
 
-    <div class="formula-box mb-3">
-      score(A, B) = norm( Σ<sub>e</sub> w(e) × n(e) + conservation_bonus )
-      <br />
-      where:
-      <br />
-      &nbsp;&nbsp;w(e) = quality weight of experiment type e (see table below)
-      <br />
-      &nbsp;&nbsp;n(e) = number of independent studies using method e
-      <br />
-      &nbsp;&nbsp;conservation_bonus = 0.1 × (number of orthologous species)
-    </div>
-
-    <span class="section-label section-label--inline">Score thresholds</span>
-    <div class="mt-2">
-      <div class="score-tier">
-        <span class="score-badge score-high">≥ 0.72</span>
-        <div>
-          <strong style="font-size:.875rem;">High confidence</strong>
-          <div class="text-muted-sm">Supported by multiple independent studies using high-quality methods (e.g. X-ray crystallography, SPR).</div>
-        </div>
-      </div>
-      <div class="score-tier">
-        <span class="score-badge score-med">≥ 0.63</span>
-        <div>
-          <strong style="font-size:.875rem;">Medium confidence</strong>
-          <div class="text-muted-sm">Supported by at least one well-validated method or multiple lower-quality studies.</div>
-        </div>
-      </div>
-      <div class="score-tier">
-        <span class="score-badge score-low">&lt; 0.63</span>
-        <div>
-          <strong style="font-size:.875rem;">Low confidence</strong>
-          <div class="text-muted-sm">Single study or low-quality detection method. Use with caution.</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-{# ── Data sources ── #}
-<div class="info-section">
-  <div class="hippie-card">
-    <span class="section-label">Data Sources</span>
-    <p class="text-muted-sm mb-3">
-      HIPPIE integrates interaction evidence from the following databases:
+    <h5 id="input" class="section-label section-label--inline mt-3">Input</h5>
+    <p class="mt-2">
+      In the network construction mode HIPPIE can be either queried with a list of proteins or a list
+      of interactions (a maximum of 100 lines is allowed, that can be either pasted into the query
+      field or uploaded as a file). Each line must contain a single protein or a protein pair
+      (separated by a tab or whitespaces). Allowed identifier types are:
+      <a href="http://www.uniprot.org/" target="_blank" rel="noopener">UniProt</a> identifiers (id or
+      accession), <a href="http://www.ncbi.nlm.nih.gov/gene" target="_blank" rel="noopener">gene
+      symbols</a> or <a href="http://www.ncbi.nlm.nih.gov/gene" target="_blank" rel="noopener">Entrez</a>
+      gene ids.
     </p>
-    <div class="source-grid">
-      <div class="source-chip">
-        <strong>BioGRID</strong>
-        <span class="text-muted-sm">General repository</span>
-        <a href="https://thebiogrid.org/" target="_blank" rel="noopener">thebiogrid.org</a>
-      </div>
-      <div class="source-chip">
-        <strong>IntAct</strong>
-        <span class="text-muted-sm">EBI curated database</span>
-        <a href="https://www.ebi.ac.uk/intact/" target="_blank" rel="noopener">ebi.ac.uk/intact</a>
-      </div>
-      <div class="source-chip">
-        <strong>MINT</strong>
-        <span class="text-muted-sm">Molecular interactions</span>
-        <a href="https://mint.bio.uniroma2.it/" target="_blank" rel="noopener">mint.bio.uniroma2.it</a>
-      </div>
-      <div class="source-chip">
-        <strong>HPRD</strong>
-        <span class="text-muted-sm">Human proteome reference</span>
-        <a href="http://www.hprd.org/" target="_blank" rel="noopener">hprd.org</a>
-      </div>
-      <div class="source-chip">
-        <strong>DIP</strong>
-        <span class="text-muted-sm">Database of interacting proteins</span>
-        <a href="https://dip.doe-mbi.ucla.edu/" target="_blank" rel="noopener">dip.doe-mbi.ucla.edu</a>
-      </div>
-      <div class="source-chip">
-        <strong>HomoMINT</strong>
-        <span class="text-muted-sm">Predicted human interactions</span>
-        <a href="https://mint.bio.uniroma2.it/" target="_blank" rel="noopener">mint.bio.uniroma2.it</a>
-      </div>
-    </div>
-  </div>
-</div>
-
-{# ── Querying ── #}
-<div class="info-section">
-  <div class="hippie-card">
-    <span class="section-label">Querying HIPPIE</span>
-    <div class="row g-3">
-
-      <div class="col-md-6">
-        <span class="section-label section-label--inline">Accepted identifier formats</span>
-        <ul class="mt-2 mb-0" style="font-size:.875rem; padding-left:1.25rem; line-height:2;">
-          <li><strong>Gene symbol</strong> — e.g. <code class="mono">BRCA1</code>, <code class="mono">TP53</code></li>
-          <li><strong>UniProt entry ID</strong> — e.g. <code class="mono">BRCA1_HUMAN</code></li>
-          <li><strong>UniProt accession</strong> — e.g. <code class="mono">P38398</code></li>
-          <li><strong>Entrez Gene ID</strong> — e.g. <code class="mono">672</code></li>
-        </ul>
-      </div>
-
-      <div class="col-md-6">
-        <span class="section-label section-label--inline">Query types</span>
-        <ul class="mt-2 mb-0" style="font-size:.875rem; padding-left:1.25rem; line-height:2;">
-          <li><strong>Protein Query</strong> — all interactions for a single protein</li>
-          <li><strong>Interaction Query</strong> — look up specific protein pairs in bulk</li>
-          <li><strong>Network Query</strong> — extract a sub-network from seed proteins</li>
-          <li><strong>Browse</strong> — explore all proteins with filtering</li>
-        </ul>
-      </div>
-
-    </div>
-  </div>
-</div>
-
-{# ── REST API ── #}
-<div class="info-section">
-  <div class="hippie-card">
-    <span class="section-label">REST API</span>
-    <p class="text-muted-sm mb-3">
-      All query functions are available programmatically via JSON endpoints.
+    <p>
+      The main goal of this mode is to allow users to construct networks around proteins of interest
+      or around experimentally measured protein interactions. For that purpose also interacting
+      protein pairs can be used as seeds for the network construction and both the input interactions
+      and interactions from HIPPIE will be displayed in the resulting network. Proteins and
+      interactions submitted by the user are highlighted in blue in our graphical output and, in case
+      they are not in HIPPIE, they are highlighted in red. Several filter criteria allow to modify the
+      resulting network (see below). Note, however, that these filters are only applied to
+      interactions added from the HIPPIE repository and do not affect the input proteins or
+      interactions, which will be displayed regardless of whether they pass the filter criteria or not.
     </p>
 
-    <div class="hippie-card--muted mb-2">
-      <div style="font-family:var(--font-mono); font-size:.82rem; color:var(--hippie-ink-muted);">GET</div>
-      <code class="mono" style="font-size:.875rem;">/api/query/?q=BRCA1</code>
-      <div class="text-muted-sm mt-1">Returns all interactions for a protein. Accepts any identifier format.</div>
-    </div>
+    <h5 id="output" class="section-label section-label--inline mt-3">Output type</h5>
+    <p class="mt-2">The user can choose between different output types.</p>
+    <ul>
+      <li>show in browser - text: output the table of interactions in the browser</li>
+      <li>show in browser - visualization: use Cytoscape.js to visualize the constructed subnetwork</li>
+      <li>HIPPIE tab file format : the interactions are written to a simple text file</li>
+      <li>PSI-MI TAB 2.5 output format : interactions are written to the standardized MITAB format</li>
+    </ul>
 
-    <div class="hippie-card--muted mb-2">
-      <div style="font-family:var(--font-mono); font-size:.82rem; color:var(--hippie-ink-muted);">POST</div>
-      <code class="mono" style="font-size:.875rem;">/api/interaction/</code>
-      <div class="text-muted-sm mt-1">
-        Look up specific protein pairs. Body: <code class="mono">{"pairs": [{"a": "BRCA1", "b": "TP53", "input_order": 0}]}</code>
-      </div>
-    </div>
+    <h5 id="int_layers" class="section-label section-label--inline mt-3">Interaction layers</h5>
+    <p class="mt-2">The size of the network can be modulated by choosing the interaction layer size:</p>
+    <ul>
+      <li>0 - only interactions within the input set are considered</li>
+      <li>1 - all interactions in which members of the input set participate are listed</li>
+    </ul>
+    <p>
+      Please note that we had to limit the amount of layers that can be queried and the size of the
+      input sets due to the computing time that rapidly increases for large input sets or layer-2
+      queries. However, we offer a script for
+      <a href="{% url 'hippie_website:download' %}">download</a> that implements the algorithm behind
+      the HIPPIE network construction tool and can be run locally.
+    </p>
 
-    <div class="hippie-card--muted mb-2">
-      <div style="font-family:var(--font-mono); font-size:.82rem; color:var(--hippie-ink-muted);">GET</div>
-      <code class="mono" style="font-size:.875rem;">/api/browse/?offset=0&amp;limit=500&amp;tissue=5&amp;min_score=0.63</code>
-      <div class="text-muted-sm mt-1">Paginated protein list with server-side filtering by tissue, source, degree, and score.</div>
-    </div>
+    <h5 id="common_int" class="section-label section-label--inline mt-3">Min. number of PPIs to query set</h5>
+    <p class="mt-2">
+      This output parameter is useful when the user wants to know whether the query set has one or
+      more common interactors. The default value of 1 simply queries for proteins interacting with
+      the query set. However, a value of 2, for example, focuses on proteins that interact with at
+      least 2 members of the query set.
+    </p>
+    <p>Note that only integer values greater or equal to 1 are valid. Values below 0 are reset to 1 and fractions are rounded.</p>
 
-    <div class="hippie-card--muted">
-      <div style="font-family:var(--font-mono); font-size:.82rem; color:var(--hippie-ink-muted);">GET</div>
-      <code class="mono" style="font-size:.875rem;">/api/browse/filters/</code>
-      <div class="text-muted-sm mt-1">Returns available tissue and source database lists for filter dropdowns.</div>
-    </div>
+    <h5 id="score" class="section-label section-label--inline mt-3">Score filter</h5>
+    <p class="mt-2">
+      A threshold on the HIPPIE confidence score can be chosen. The user can either specify a custom
+      value between 0 and 1 or choose a predefined confidence level: medium confidence (0.63 - second
+      quartile of the HIPPIE score distribution) or high confidence (0.73 - third quartile). If both
+      custom and predefined thresholds are selected, the higher one is applied.
+    </p>
+    <p>Note, that the confidence filter is not applied to interactions uploaded by the user.</p>
+
+    <h5 id="type" class="section-label section-label--inline mt-3">Interaction type filter</h5>
+    <p class="mt-2">
+      HIPPIE offers an interaction type filter to distinguish between binary and complex interactions.
+      For the interaction type filter we rely on the annotation of interactions from MINT, BioGRID and
+      IntAct. We offer to select interactions annotated with the PSI-MI categories association
+      (MI:0914), physical association (MI:0915), direct interaction (MI:0407) and colocalization
+      (MI:0403).
+    </p>
+
+    <h5 id="tissue" class="section-label section-label--inline mt-3">Tissue filter</h5>
+    <p class="mt-2">
+      Interactions can be filtered for tissue specificity. Several tissue filters can be selected at
+      the same time by ticking more than one tissue from the menu. For an interaction to pass this
+      filter, both interactors should be expressed in at least one of the selected tissues.
+    </p>
+    <p>
+      It is also possible to upload user defined filter sets (e.g. results from microarray
+      experiments), which are used instead (if no tissues are selected) or in addition (if there are
+      selected tissues) to the predefined tissue filter sets.
+    </p>
+    <p>
+      The tissue expression RNA-Seq data was taken from
+      <a href="http://gtexportal.org/" target="_blank" rel="noopener">GTEx</a>. A gene was considered
+      to be expressed in a given tissue if it showed an RPKM &gt;= 1.
+    </p>
+
+    <h5 id="function" class="section-label section-label--inline mt-3">Functional filter</h5>
+    <p class="mt-2">
+      Interactions can be filtered for annotation of
+      <a href="http://www.geneontology.org/" target="_blank" rel="noopener">GO</a> and
+      <a href="http://www.nlm.nih.gov/mesh/" target="_blank" rel="noopener">MeSH</a> terms.
+      Interactions are associated with the lowest common ancestor within the hierarchy of terms
+      associated with the interacting proteins. Selection of a more generic term causes interactions
+      annotated with a more specific term to pass the filter.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>
 
-{# ── Citation ── #}
+{# ── Directed edges (REWORK NEEDED) ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <span class="section-label">How to Cite</span>
-    <p class="text-muted-sm mb-3">If you use HIPPIE in your research, please cite:</p>
-    <div class="hippie-card--muted" style="font-size:.875rem; line-height:1.9;">
-      Alanis-Lobato G, Andrade-Navarro MA, Schaefer MH.
-      <strong>HIPPIE v2.0: Enhancing meaningfulness and reliability of protein–protein interaction networks.</strong>
-      <em>Nucleic Acids Research</em>, 2017;45(D1):D408–D414.
-      <a href="https://doi.org/10.1093/nar/gkw985" target="_blank" rel="noopener">doi:10.1093/nar/gkw985</a>
+    <h4 id="direction" class="section-label">Directed edges</h4>
+    <p class="rework-needed">REWORK NEEDED</p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Effect (REWORK NEEDED) ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="effect" class="section-label">Inhibitory or activating effect of an interaction</h4>
+    <p class="rework-needed">REWORK NEEDED</p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Exporting query results ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="export" class="section-label">Exporting query results</h4>
+    <p>
+      The browser-based results of the above-mentioned
+      <a href="{% url 'hippie_website:index' %}">protein</a> and
+      <a href="{% url 'hippie_website:network_query' %}">network</a> queries can be copied or
+      downloaded as tab-separated text files (TSV format). When the network visualization output is
+      chosen in the network query, the resulting Cytoscape.js representation of the subnetwork can be
+      saved as a PNG or JPEG graphic, or as a JSON object.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Enrichment (REWORK NEEDED) ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="enrichment" class="section-label">Disease and Gene Ontology enrichment of query results</h4>
+    <p class="rework-needed">REWORK NEEDED</p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Browsing ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="browsing" class="section-label">Browsing the HIPPIE proteome.</h4>
+    <p>
+      The <a href="{% url 'hippie_website:browse' %}">browsing mode</a> in HIPPIE allows for the
+      exploration of the entire set of proteins in the database and presents summary statistics about
+      the network members. UniProt, Entrez and Symbol IDs, node degree (i.e. the number of
+      interaction partners), average score of adjacent edges and a link to query interaction partners
+      are shown for each protein in a big table. Note that loading the entire HIPPIE proteome may take
+      a few seconds, depending on the type of Internet connection being used.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Cytoscape ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="cytoscape" class="section-label">Cytoscape visualization of HIPPIE output</h4>
+    <p>
+      HIPPIE offers to display any constructed subnetwork with the light-weight network visualization
+      tool <a href="http://js.cytoscape.org/" target="_blank" rel="noopener">Cytoscape.js</a>.
+      However, for more detailed analyses, we recommend using HIPPIE's export facilities and using the
+      desktop version of <a href="http://www.cytoscape.org/" target="_blank" rel="noopener">Cytoscape</a>.
+      The HIPPIE tab format is specifically designed in a way that important features of interactions
+      are listed in separated columns and can be easily imported into Cytoscape as edge features. For
+      that purpose choose 'File' -&gt; 'Import' -&gt; 'Network from table' in Cytoscape. Select a file
+      exported from HIPPIE and activate the columns which should be imported.
+    </p>
+    <p>
+      In our example the 'score' and the 'uploaded interaction' columns have been selected and are
+      imported as edge features. In the resulting Cytoscape network the score attribute is size
+      encoded: high confidence interactions are drawn with a thicker line as compared to those with
+      fewer experimental evidence. The information whether an interaction is from HIPPIE or uploaded by
+      the user is color encoded: HIPPIE interactions are painted in blue while user specified
+      interactions are rendered in red.
+    </p>
+    <p>
+      Alternatively, a visual representation of the network can be generated using HIPPIE and
+      Cytoscape.js and then exported for further analyses. The available JSON format can be imported
+      into Cytoscape (requires Cytoscape version 3.1.0 or newer).
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Network construction script (Java tool — REWORK NEEDED) ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="script" class="section-label">HIPPIE network construction script</h4>
+    <p class="rework-needed">REWORK NEEDED</p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Annotation of newly measured interactions (REWORK NEEDED) ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="annotation" class="section-label">Annotation of a list of newly measured interactions</h4>
+    <p class="rework-needed">REWORK NEEDED</p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Download the repository ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="download" class="section-label">Download the repository</h4>
+    <p>
+      HIPPIE is provided in two different download formats: PSI-MITAB 2.5 and our own tab-separated
+      flat file format. Besides offering the data in compliance with the specification of the
+      <a href="http://www.psidev.info/" target="_blank" rel="noopener">Proteomics Standards Initiative
+      (PSI)</a>, we decided to additionally offer the data in a format described below which makes it
+      slightly easier to either compare or extend experimental datasets with HIPPIE, by resolving
+      ambiguities and synonymous ids into several lines:
+    </p>
+    <p>
+      The columns indicate (1) UniProt identifier and (2) Entrez Gene identifier of the first protein
+      partner, (3) UniProt identifier and (4) Entrez Gene identifier of the second protein partner,
+      (5) score and (6) a description summarizing the origin of the evidence for the interaction. If
+      one gene maps to several proteins each combination of proteins is listed in a separate line.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Example workflow ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="example" class="section-label">Example of a HIPPIE workflow</h4>
+    <p>
+      To demonstrate HIPPIE's functionality, we give a simple example of a typical query that makes
+      use of expression data and shortest paths computations.
+    </p>
+    <p>
+      We start from the NETWORK QUERY tab. The user can enter a list of proteins or protein pairs
+      (separated by a space or tab, which will then be interpreted as interacting proteins) into the
+      up-most text field (encircled below). In this example, we want to explore HIPPIE's functionality
+      to construct context-specific signaling networks. We therefore query HIPPIE with the kinases
+      BRAF, MEK1 (MAP2K1) and ERK1 (MAPK3), which are members of the Mitogen-activated protein kinase
+      (MAPK) signaling cascade and activate each other in the stated order.
+    </p>
+    <p>
+      Additionally, we select two filters: (A) high confidence interactions to make sure that only
+      experimentally reliable interactions are shown. (B) Colon tissue to exclude all PPIs formed by
+      proteins not expressed in colon. The activity of the MAPK pathways is altered in many colon
+      cancers. 9% of all colon cancer patients carry BRAF mutations (Lawrence et al. Nature. 2014).
+      (C) We enable shortest path computation from BRAF to transcription factors
+    </p>
+    <p>
+      Displaying shortest paths between BRAF ("source", in blue) and transcription factors ("sinks")
+      correctly reproduces the chain of signaling events (BRAF activates MEK1, which activates ERK1 in
+      turn). All terminal nodes in pink (ELK1, MYC, JUN, TP53, SREBF1/2) are known substrates of ERK1
+      (Yoon &amp; Seger. Growth Factors. 2006)⁠.
+    </p>
+    <p>
+      The resulting network can be further analysed. One option is to identify diseases overrepresented
+      among the proteins in the network. To this end, the proteins in the network will be automatically
+      transferred to the tool "Gene set to Diseases" (Fontaine &amp; Andrade-Navarro. Under review)
+      when the link in the circle is clicked.
+    </p>
+    <p>
+      In the case of the MAPK example, the disease enrichment analysis reveals that the subnetwork is
+      strongly enriched in “neoplastic cell transformation” (q &lt; 1e-9). In agreement with filtering
+      for colon expression, the most strongly represented single tumor type is 'colonic neoplasms'
+      (q &lt; 1e-5).
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Sources ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="sources" class="section-label">Sources</h4>
+    <p>
+      HIPPIE integrates interaction data from 10 source databases and 11 studies (that have not been
+      fully covered by the other databases yet). The chart below visualizes the contributions of the
+      main sources. Only studies and databases contributing with at least 200 unique (not found in any
+      other dataset) interactions are shown.
+    </p>
+    <div style="overflow-x:auto;">
+      <table class="format-table">
+        <thead>
+          <tr><th>Source</th><th>Total number interactions</th><th>Unique interactions</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Bell09</td><td>3,271</td><td>3,200</td></tr>
+          <tr><td>BioGRID</td><td>85,155</td><td>46,783</td></tr>
+          <tr><td>DIP</td><td>1,499</td><td>263</td></tr>
+          <tr><td>HPRD</td><td>38,627</td><td>2,021</td></tr>
+          <tr><td>IntAct</td><td>46,710</td><td>16,429</td></tr>
+          <tr><td>MINT</td><td>22,761</td><td>4,818</td></tr>
+        </tbody>
+      </table>
     </div>
+    <p class="mt-3">
+      <a href="http://www.ncbi.nlm.nih.gov/pubmed/19293945" target="_blank" rel="noopener">Bell09</a>
+      is a high-throughput study. The bar plot was created using
+      <a href="http://code.google.com/apis/chart/" target="_blank" rel="noopener">Google chart tools</a>.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── HIPPIE API ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="api" class="section-label">HIPPIE API</h4>
+    <p>
+      HIPPIE users can query the resource via our REST web service. This means that HIPPIE can be
+      easily integrated in any Bioinformatics pipeline using the following template:
+    </p>
+    <div class="hippie-card--muted mb-3">
+      <code class="mono" style="font-size:.82rem; word-break:break-all;">http://cbdm-01.zdv.uni-mainz.de/~mschaefer/hippie/queryHIPPIE.php?<b>proteins=</b>xxx,xxx;xxx|xxx&amp;<b>layers=</b>xxx&amp;<b>conf_thres=</b>xxx&amp;<b>out_type=</b>xxx</code>
+    </div>
+    <ul>
+      <li><b>proteins</b> = One or more proteins of interest separated by ",", ";" or "|" (<em>mandatory</em>).</li>
+      <li><b>layers</b> = 0 to query interactions within the input set or 1 to query interactions between the input set and HIPPIE (<em>optional, default = 1</em>).</li>
+      <li><b>conf_thres</b> = Only protein interactions with confidence scores above this threshold, which can range between 0 an 1, are considered (<em>optional, default = 0</em>).</li>
+      <li><b>out_type</b> = The query output format. <em>browser</em> shows the list of interactions in a table in HIPPIE, <em>viz</em> shows a network visualization, <em>mitab</em> generates a MITAB file and <em>conc_file</em> generates a simple tab-separated text file (<em>optional, default = conc_file</em>).</li>
+    </ul>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── General technical remarks ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="remarks" class="section-label">General technical remarks</h4>
+    <p>
+      HIPPIE works best with a recent version of Mozilla Firefox (≥3.6.). We observed problems with
+      Microsoft Internet Explorer. While we are fixing these problems, we recommend you to visit
+      HIPPIE with a different web browser.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Related manuscripts ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="cite" class="section-label">Related manuscripts</h4>
+    <ul style="line-height:1.8;">
+      <li>Schaefer MH, Fontaine J-F, Vinayagam A, Porras P, Wanker EE, et al. (2012) <i>HIPPIE: Integrating Protein Interaction Networks with Experiment Based Quality Scores</i>. PLoS ONE, 7(2): e31826 [<a href="http://www.plosone.org/article/info%3Adoi%2F10.1371%2Fjournal.pone.0031826" target="_blank" rel="noopener">link</a>]</li>
+      <li>Schaefer MH, Lopes TJS, Mah N, Shoemaker JE, Matsuoka Y, et al. (2013) <i>Adding Protein Context to the Human Protein-Protein Interaction Network to Reveal Meaningful Interactions</i>. PLoS Computational Biology, 9(1): e1002860 [<a href="http://www.ploscompbiol.org/article/info%3Adoi%2F10.1371%2Fjournal.pcbi.1002860" target="_blank" rel="noopener">link</a>]</li>
+      <li>Suratanee A, Schaefer MH, Betts M, Soons Z, Mannsperger H, et al. (2014) <i>Characterizing Protein Interactions Employing a Genome-Wide siRNA Cellular Phenotyping Screen</i>. PLoS Computational Biology, 10.9: e1003814 [<a href="http://www.ploscompbiol.org/article/info%3Adoi%2F10.1371%2Fjournal.pcbi.1003814" target="_blank" rel="noopener">link</a>]</li>
+      <li>Alanis-Lobato G, Andrade-Navarro MA, &amp; Schaefer MH. (2016). <i>HIPPIE v2.0: enhancing meaningfulness and reliability of protein-protein interaction networks</i>. Nucleic Acids Research, gkw985 [<a href="http://nar.oxfordjournals.org/content/early/2016/10/28/nar.gkw985" target="_blank" rel="noopener">link</a>]</li>
+    </ul>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Contact ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="contact" class="section-label">Contact</h4>
+    <p>Please send questions or comments on HIPPIE to: <a href="mailto:martin.schaefer@crg.eu">martin.schaefer@ieo.it</a></p>
+    <p class="mb-0">HIPPIE is hosted by the <a href="http://cbdm.uni-mainz.de/" target="_blank" rel="noopener">CBDM group</a> at the JGU in Mainz.</p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>
 

@@ -20,18 +20,59 @@ export function ExtLink({ href, children }) {
     : <span>{children}</span>;
 }
 
+function _range(start, end) {
+  const out = [];
+  for (let i = start; i <= end; i++) out.push(i);
+  return out;
+}
+
+// Build the page-button items: always show first + last, a sibling window
+// around the current page, and a single "…" only when it would hide ≥2 pages
+// (otherwise the hidden single page is rendered as a normal button). This
+// guarantees no duplicate page numbers and a stable button count.
+export function paginationItems(page, totalPages, siblingCount = 1, boundaryCount = 1) {
+  if (totalPages <= 1) return totalPages === 1 ? [1] : [];
+
+  const startPages = _range(1, Math.min(boundaryCount, totalPages));
+  const endPages = _range(
+    Math.max(totalPages - boundaryCount + 1, boundaryCount + 1),
+    totalPages,
+  );
+
+  const siblingsStart = Math.max(
+    Math.min(page - siblingCount, totalPages - boundaryCount - siblingCount * 2 - 1),
+    boundaryCount + 2,
+  );
+  const siblingsEnd = Math.min(
+    Math.max(page + siblingCount, boundaryCount + siblingCount * 2 + 2),
+    endPages.length > 0 ? endPages[0] - 2 : totalPages - 1,
+  );
+
+  return [
+    ...startPages,
+    ...(siblingsStart > boundaryCount + 2
+      ? ["ellipsis"]
+      : boundaryCount + 1 < totalPages - boundaryCount
+        ? [boundaryCount + 1]
+        : []),
+    ..._range(siblingsStart, siblingsEnd),
+    ...(siblingsEnd < totalPages - boundaryCount - 1
+      ? ["ellipsis"]
+      : totalPages - boundaryCount > boundaryCount
+        ? [totalPages - boundaryCount]
+        : []),
+    ...endPages,
+  ];
+}
+
 export function Pagination({ page, totalPages, onChange }) {
   if (totalPages <= 1) return null;
-  const pages = [];
-  const lo = Math.max(1, page - 2), hi = Math.min(totalPages, page + 2);
-  if (lo > 1) { pages.push(1); if (lo > 2) pages.push("…"); }
-  for (let i = lo; i <= hi; i++) pages.push(i);
-  if (hi < totalPages) { if (hi < totalPages - 1) pages.push("…"); pages.push(totalPages); }
+  const items = paginationItems(page, totalPages);
   return (
     <div className="hippie-pagination">
       <button disabled={page === 1} onClick={() => onChange(page - 1)}>‹</button>
-      {pages.map((p, i) => p === "…"
-        ? <span key={i} style={{padding:"0 .25rem",color:"var(--hippie-ink-muted)"}}>…</span>
+      {items.map((p, i) => p === "ellipsis"
+        ? <span key={`e${i}`} style={{padding:"0 .25rem",color:"var(--hippie-ink-muted)"}}>…</span>
         : <button key={p} className={p === page ? "active" : ""} onClick={() => onChange(p)}>{p}</button>
       )}
       <button disabled={page === totalPages} onClick={() => onChange(page + 1)}>›</button>
@@ -48,6 +89,20 @@ export function PaginationRow({ page, totalPages, totalItems, pageSize, onChange
       </span>
       <Pagination page={page} totalPages={totalPages} onChange={onChange} />
     </div>
+  );
+}
+
+const _PAGE_SIZES = [10, 25, 50, 100];
+
+export function PageSizeSelect({ pageSize, onChange }) {
+  return (
+    <label className="text-muted-sm d-inline-flex align-items-center gap-1">
+      Per page
+      <select className="form-select form-select-sm" style={{width:"auto",display:"inline-block"}}
+              value={pageSize} onChange={e => onChange(parseInt(e.target.value))}>
+        {_PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+    </label>
   );
 }
 

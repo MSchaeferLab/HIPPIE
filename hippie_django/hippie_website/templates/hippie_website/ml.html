@@ -1,0 +1,296 @@
+{% extends "hippie_website/base.html" %}
+{% block title %}Machine Learning{% endblock %}
+{% block react_cdn %}{% endblock %}
+
+{% block content %}
+
+<style>
+  .ml-step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.9rem; height: 1.9rem; border-radius: 50%;
+    background: var(--hippie-green, #2e7d5b); color: #fff;
+    font-family: var(--font-mono); font-weight: 600; font-size: .9rem;
+    margin-right: .6rem; flex: 0 0 auto;
+  }
+  .ml-step-head { display: flex; align-items: center; margin-bottom: .75rem; }
+  .ml-step-head h3 { font-size: 1.15rem; margin: 0; }
+  pre.code-block {
+    background: #1e1e2e; color: #e6e6f0; border-radius: 8px;
+    padding: 1rem 1.1rem; overflow-x: auto; font-family: var(--font-mono), monospace;
+    font-size: .8rem; line-height: 1.55; margin: .75rem 0;
+  }
+  pre.code-block .c { color: #8a8aa0; }
+  .leak-warn {
+    border-left: 4px solid #dc3545; background: #fdf0f1;
+    padding: .75rem 1rem; border-radius: 0 8px 8px 0; font-size: .875rem; margin: .75rem 0;
+  }
+  .leak-ok {
+    border-left: 4px solid #2e7d5b; background: #eef7f1;
+    padding: .75rem 1rem; border-radius: 0 8px 8px 0; font-size: .875rem; margin: .75rem 0;
+  }
+  .paper-card { display: flex; flex-direction: column; gap: .35rem; }
+</style>
+
+<div class="hippie-hero">
+  <span class="page-eyebrow">HIPPIE</span>
+  <h1>Machine<br /><em>Learning</em></h1>
+  <p class="page-subtitle">
+    Resources, key papers, and a worked example for building a protein–protein interaction
+    prediction model from HIPPIE data — without fooling yourself through data leakage.
+  </p>
+</div>
+
+{# ── Resources / papers ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <span class="section-label">Key Reading</span>
+    <p class="text-muted-sm mb-3">
+      Before training a PPI predictor, read these. They explain why most reported PPI-prediction
+      accuracies are inflated, and how to build honest evaluations.
+    </p>
+
+    <div class="hippie-card--muted mb-2 paper-card">
+      <span class="tag-chip">Open Access</span>
+      <strong>Cracking the black box of deep sequence-based protein–protein interaction prediction</strong>
+      <span class="text-muted-sm">Bernett J, Blumenthal DB, List M. <em>Briefings in Bioinformatics</em>, 2024; 25(2): bbae076.</span>
+      <span class="text-muted-sm">
+        Shows that random train/test splitting leaks information; once sequence similarity between
+        splits is minimised, deep models drop to near-random, while trivial sequence-similarity /
+        node-degree baselines remain competitive.
+      </span>
+      <a href="https://doi.org/10.1093/bib/bbae076" target="_blank" rel="noopener">doi:10.1093/bib/bbae076</a>
+    </div>
+
+    <div class="hippie-card--muted mb-2 paper-card">
+      <strong>Guiding questions to avoid data leakage in biological machine learning applications</strong>
+      <span class="text-muted-sm">Bernett J, Blumenthal DB, Grimm DG, Haselbeck F, Joeres R, Kalinina OV, List M. <em>Nature Methods</em>, 2024; 21(8): 1444–1453.</span>
+      <span class="text-muted-sm">
+        Seven concrete questions to ask while building any biological ML model so that information
+        does not leak from the test set into training.
+      </span>
+      <a href="https://doi.org/10.1038/s41592-024-02362-y" target="_blank" rel="noopener">doi:10.1038/s41592-024-02362-y</a>
+    </div>
+
+    <div class="hippie-card--muted paper-card">
+      <span class="tag-chip">Tool</span>
+      <strong>Data splitting to avoid information leakage with DataSAIL</strong>
+      <span class="text-muted-sm">Joeres R, et al. <em>Nature Communications</em>, 2025.</span>
+      <span class="text-muted-sm">
+        Practical tool for generating similarity-aware train/test splits — useful for the negative
+        and positive sets you export from HIPPIE.
+      </span>
+      <a href="https://doi.org/10.1038/s41467-025-58606-8" target="_blank" rel="noopener">doi:10.1038/s41467-025-58606-8</a>
+    </div>
+  </div>
+</div>
+
+{# ── Workflow intro ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <span class="section-label">A PPI-Prediction Workflow</span>
+    <p class="text-muted-sm mb-0">
+      A typical end-to-end example: choose data, pull it out of HIPPIE, train two contrasting models
+      (a classic feature-based baseline and a sequence-based model), and evaluate honestly. The
+      running theme — taken from the papers above — is that <strong>how you split your data matters
+      more than which model you pick.</strong>
+    </p>
+  </div>
+</div>
+
+{# ── Step 1 ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <div class="ml-step-head"><span class="ml-step-num">1</span><h3>How do I choose my data?</h3></div>
+    <p>
+      A PPI classifier needs <strong>positive</strong> examples (interacting pairs) and
+      <strong>negative</strong> examples (non-interacting pairs). HIPPIE gives you scored positives
+      directly; negatives are the hard part.
+    </p>
+    <ul style="font-size:.9rem; line-height:1.8;">
+      <li><strong>Positives</strong> — interactions above a confidence threshold. Higher thresholds
+        (≥ 0.73, high confidence) trade quantity for reliability.</li>
+      <li><strong>Negatives</strong> — there is no gold-standard "these never interact" set. Common
+        choices: random non-edges, or curated non-interactions. Random negatives are biased by node
+        degree, which a model can exploit instead of learning biology.</li>
+      <li><strong>Scope</strong> — restrict to a tissue or a confidence band so the question is
+        well-defined (e.g. "high-confidence PPIs among colon-expressed proteins").</li>
+    </ul>
+    <div class="leak-warn">
+      <strong>Leakage trap (paper 1).</strong> If the same protein appears in both train and test —
+      or two near-identical sequences are split across train/test — the model can memorise per-protein
+      or per-family signal and report inflated accuracy. Decide your split strategy <em>before</em>
+      sampling negatives.
+    </div>
+  </div>
+</div>
+
+{# ── Step 2 ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <div class="ml-step-head"><span class="ml-step-num">2</span><h3>How do I pick that in HIPPIE?</h3></div>
+    <p>
+      Use the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool. It applies the same
+      filters as <a href="{% url 'hippie_website:browse' %}">Browse</a> (confidence score, source,
+      experiment type, interaction type, tissue / RPKM, node degree) and then builds a labelled
+      train/test dataset with negative sampling for you:
+    </p>
+    <ul style="font-size:.9rem; line-height:1.8;">
+      <li>Set <code class="mono">min_score</code> (e.g. 0.73) to keep high-confidence positives.</li>
+      <li>Add a <strong>tissue</strong> filter and <code class="mono">min_rpkm</code> to scope the proteome.</li>
+      <li>Choose a <code class="mono">neg_ratio</code> (negatives per positive) and a fixed
+        <code class="mono">seed</code> so the export is reproducible.</li>
+      <li>Decide whether to <code class="mono">include_isoforms</code>.</li>
+    </ul>
+    <p class="text-muted-sm">
+      The tool returns a downloadable TSV with labelled pairs. You can also drive it from the JSON API
+      directly:
+    </p>
+<pre class="code-block"><span class="c"># Create a split job, then poll for the result, via the HIPPIE API</span>
+import requests, time
+
+BASE = "https://your-hippie-host"          <span class="c"># this server</span>
+params = {
+    "min_score": 0.73,                       <span class="c"># high-confidence positives only</span>
+    "tissue_ids": [5],                       <span class="c"># e.g. colon</span>
+    "min_rpkm": 1.0,
+    "neg_ratio": 1.0,                        <span class="c"># balanced negatives</span>
+    "include_isoforms": False,
+    "seed": 78539105873,                     <span class="c"># reproducibility</span>
+}
+job = requests.post(f"{BASE}/api/browse/splits/", json=params).json()
+job_id = job["job_id"]
+
+<span class="c"># poll until the background job finishes</span>
+while True:
+    status = requests.get(f"{BASE}/api/browse/splits/{job_id}/").json()
+    if status["state"] in ("done", "failed"):
+        break
+    time.sleep(2)
+
+<span class="c"># download the labelled train/test TSV</span>
+tsv = requests.get(f"{BASE}/api/browse/splits/{job_id}/download/").content
+open("hippie_ppi.tsv", "wb").write(tsv)</pre>
+  </div>
+</div>
+
+{# ── Step 3 ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <div class="ml-step-head"><span class="ml-step-num">3</span><h3>How do I create a model with the data?</h3></div>
+    <p>
+      We build two models side by side: a <strong>classic feature-based baseline</strong> and a
+      <strong>sequence-based</strong> model. Both share the same split so the comparison is fair.
+    </p>
+
+    <span class="section-label section-label--inline">Load the data</span>
+<pre class="code-block">import pandas as pd
+
+df = pd.read_csv("hippie_ppi.tsv", sep="\t")
+<span class="c"># columns: protein_a, protein_b, label (1 = interacts, 0 = negative)</span>
+print(df["label"].value_counts())</pre>
+
+    <span class="section-label section-label--inline mt-3">A — Classic baseline (scikit-learn)</span>
+    <p class="text-muted-sm mt-2">
+      Cheap topological features straight from the HIPPIE network. Per paper 1, this kind of baseline
+      is surprisingly hard to beat — always report against it.
+    </p>
+<pre class="code-block"><span class="c"># pip install scikit-learn networkx</span>
+import networkx as nx
+from sklearn.ensemble import RandomForestClassifier
+
+<span class="c"># build the graph from POSITIVE training edges only (no test leakage!)</span>
+train = df[df.split == "train"]
+G = nx.Graph()
+G.add_edges_from(train[train.label == 1][["protein_a", "protein_b"]].itertuples(index=False))
+
+def features(a, b):
+    deg_a = G.degree(a) if a in G else 0
+    deg_b = G.degree(b) if b in G else 0
+    common = len(list(nx.common_neighbors(G, a, b))) if a in G and b in G else 0
+    return [deg_a, deg_b, deg_a * deg_b, common]
+
+X_train = [features(a, b) for a, b in train[["protein_a", "protein_b"]].itertuples(index=False)]
+clf = RandomForestClassifier(n_estimators=300, n_jobs=-1, random_state=0)
+clf.fit(X_train, train["label"])</pre>
+
+    <span class="section-label section-label--inline mt-3">B — Sequence-based model</span>
+    <p class="text-muted-sm mt-2">
+      Embed each protein sequence with a protein language model (e.g. ESM-2), concatenate the pair,
+      and train a small classifier. More expressive — and far more prone to leakage.
+    </p>
+<pre class="code-block"><span class="c"># pip install torch fair-esm scikit-learn</span>
+import torch, esm
+from sklearn.linear_model import LogisticRegression
+
+model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
+batch_converter = alphabet.get_batch_converter()
+model.eval()
+
+def embed(seq):
+    _, _, toks = batch_converter([("p", seq)])
+    with torch.no_grad():
+        out = model(toks, repr_layers=[12])["representations"][12]
+    return out[0, 1:len(seq) + 1].mean(0).numpy()   <span class="c"># mean-pooled residue embeddings</span>
+
+<span class="c"># seqs: dict protein_id -&gt; amino-acid sequence (fetch from UniProt)</span>
+emb = {p: embed(seqs[p]) for p in set(df.protein_a) | set(df.protein_b)}
+
+import numpy as np
+def pair_vec(a, b):
+    return np.concatenate([emb[a], emb[b]])
+
+Xtr = np.array([pair_vec(a, b) for a, b in train[["protein_a", "protein_b"]].itertuples(index=False)])
+seq_clf = LogisticRegression(max_iter=1000).fit(Xtr, train["label"])</pre>
+
+    <div class="leak-warn">
+      <strong>Where leakage creeps in (paper 2, Q on data splitting).</strong> A <em>random</em> pair
+      split lets the <em>same protein</em> sit in both train and test. The sequence model then just
+      recognises proteins it has already seen — not interactions. A naive random split can push AUROC
+      from ~0.6 to &gt;0.9 of pure illusion.
+    </div>
+    <div class="leak-ok">
+      <strong>Fix.</strong> Split on <em>proteins</em>, not pairs: assign each protein to train or
+      test, and cluster by sequence similarity (e.g. MMseqs2 / DataSAIL) so near-identical proteins
+      never straddle the split. The <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool's
+      <code class="mono">seed</code> keeps this reproducible; re-cluster if you change the protein set.
+    </div>
+  </div>
+</div>
+
+{# ── Step 4 ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <div class="ml-step-head"><span class="ml-step-num">4</span><h3>How do I evaluate this?</h3></div>
+    <p>
+      Score both models on the held-out test split and always compare against the baseline. Because
+      negatives usually outnumber positives, report <strong>AUPRC</strong> alongside AUROC.
+    </p>
+<pre class="code-block">from sklearn.metrics import roc_auc_score, average_precision_score
+
+test = df[df.split == "test"]
+y = test["label"].to_numpy()
+
+Xte_base = [features(a, b) for a, b in test[["protein_a", "protein_b"]].itertuples(index=False)]
+Xte_seq  = np.array([pair_vec(a, b) for a, b in test[["protein_a", "protein_b"]].itertuples(index=False)])
+
+for name, proba in [
+    ("baseline", clf.predict_proba(Xte_base)[:, 1]),
+    ("sequence", seq_clf.predict_proba(Xte_seq)[:, 1]),
+]:
+    print(f"{name:9s}  AUROC={roc_auc_score(y, proba):.3f}  "
+          f"AUPRC={average_precision_score(y, proba):.3f}")</pre>
+    <ul style="font-size:.9rem; line-height:1.8;">
+      <li><strong>Beat the baseline, or report why not.</strong> If the sequence model only wins under
+        a random split but ties the baseline under a similarity-aware split, the "win" was leakage.</li>
+      <li><strong>Stratify by novelty.</strong> Report metrics separately for test proteins that are
+        dissimilar to anything in training — that is the realistic use case.</li>
+      <li><strong>Fix the seed and publish the split.</strong> Reproducibility is part of the result.</li>
+    </ul>
+    <p class="text-muted-sm mb-0">
+      For the full reasoning behind each of these checks, see the two papers under
+      <a href="#top">Key Reading</a> above.
+    </p>
+  </div>
+</div>
+
+{% endblock %}
