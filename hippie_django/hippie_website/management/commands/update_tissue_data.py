@@ -141,16 +141,17 @@ class Command(BaseCommand):
         self.stdout.write("Step 4/5  Syncing Gene and Tissue records...")
         existing_genes = Gene.objects.filter(entrez_id__in=[e[0] for e in entrez_genes])
         gene_cache: dict[int, Gene] = {g.entrez_id: g for g in existing_genes}
-        new_genes = Gene.objects.bulk_create(
-            [
-                Gene(entrez_id=eid, entrez_name=name)
-                for eid, name in entrez_genes
-                if eid not in gene_cache
-            ]
-        )
-        gene_cache.update({g.entrez_id: g for g in new_genes})
+        ## Comment out to only include genes that exists, we dont want to swamp the DB with RNA-genes
+        # new_genes = Gene.objects.bulk_create(
+        #     [
+        #         Gene(entrez_id=eid, entrez_name=name)
+        #         for eid, name in entrez_genes
+        #         if eid not in gene_cache
+        #     ]
+        # )
+        # gene_cache.update({g.entrez_id: g for g in new_genes})
         self.stdout.write(
-            f"          Genes — {len(existing_genes):,} existing, {len(new_genes):,} created."
+            f"          Genes — {len(existing_genes):,} existing"
         )
 
         tissues = set(sample_to_verbose.values())

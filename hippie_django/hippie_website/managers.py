@@ -173,7 +173,6 @@ class InteractionQuerySet(models.QuerySet):
             "sources",
             "publications",
             "experiments",
-            "conserved_species",
             "interaction_types",
             "cross_references",
             "cross_references__source",

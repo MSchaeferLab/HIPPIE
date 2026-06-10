@@ -35,6 +35,11 @@ python manage.py hippie_update \
     --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt \
     --intact data/human.txt
 python manage.py load_experiment_types --csv_path data/techniques_scoring_04-05-26.csv
+python manage.py update_homology_data \
+    --homology_file data/ORTHOLOGY-ALLIANCE_COMBINED.tsv \
+    --ncbi_gene_info_file data/Homo_sapiens.gene_info \
+    --intact_file data/intact.txt
+
 python manage.py hippie_update --rescore-all
 python manage.py update_tissue_data \
     --gct-path              data/GTEx_Analysis_*_gene_reads.gct \
@@ -164,7 +169,13 @@ docker compose exec web python manage.py load_experiment_types \
     --csv_path data/techniques_scoring_04-05-26.csv
 docker compose exec web python manage.py hippie_update --rescore-all
 
-# 4. Load tissue information
+# 4. Load homology / orthology data
+docker compose exec web python manage.py update_homology_data \
+    --homology_file      data/ORTHOLOGY-ALLIANCE_COMBINED.tsv \
+    --ncbi_gene_info_file data/Homo_sapiens.gene_info \
+    --intact_file        data/intact.txt
+
+# 5. Load tissue information
 # Versions change, check what version is downloaded
 docker compose exec web python manage.py update_tissue_data \
     --gct-path               data/GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct \
