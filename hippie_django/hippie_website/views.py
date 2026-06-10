@@ -28,6 +28,7 @@ from .forms import NetworkQueryForm
 from .models import (
     Interaction,
     Isoform,
+    OrthologInteraction,
     Protein,
     Tissue,
     NonInteraction,
@@ -1352,8 +1353,9 @@ def interaction_detail_view(request, pk: int):
     Uses Interaction.objects.with_full_detail() which chains:
       with_proteins()    → both protein FKs + their UniProt/Entrez IDs
       with_evidence()    → sources, publications, experiments,
-                           conserved_species, interaction_types,
+                           interaction_types,
                            cross_references (+ source + species)
+    Conserved species are resolved via OrthologInteraction on the gene pair.
       with_annotations() → go_terms, mesh_terms
     """
     interaction = get_object_or_404(
@@ -1372,6 +1374,16 @@ def interaction_detail_view(request, pk: int):
 
     p1 = interaction.protein_1
     p2 = interaction.protein_2
+
+    g1, g2 = p1.gene, p2.gene
+    lo_gene, hi_gene = (g1, g2) if g1.pk <= g2.pk else (g2, g1)
+    ortholog = (
+        OrthologInteraction.objects.filter(gene_1=lo_gene, gene_2=hi_gene)
+        .prefetch_related("ortholog_species")
+        .first()
+    )
+    conserved_species = ortholog.ortholog_species.all() if ortholog else []
+
     context = {
         "interaction": interaction,
         "p1": {
@@ -1390,7 +1402,7 @@ def interaction_detail_view(request, pk: int):
         "sources": interaction.sources.all(),
         "publications": interaction.publications.all(),
         "experiments": interaction.experiments.all().order_by("-quality_score"),
-        "species": interaction.conserved_species.all(),
+        "species": conserved_species,
         # Bait-prey detection stats.
         "bait_prey_total_tested": bait_prey_total_tested,
         "bait_prey_times_observed": bait_prey_times_observed,

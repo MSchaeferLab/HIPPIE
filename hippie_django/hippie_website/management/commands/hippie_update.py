@@ -211,6 +211,16 @@ def _load_id_mappings() -> tuple[
     return acc_map, uniprot_name_map, gene_map, dropped_accs, conflict_genes
 
 
+def get_human_gene_map() -> tuple[
+    dict[str, list[str | None, str | None]],
+    dict[str, str],
+    dict[str, str],
+]:
+    """Return (gene_map, acc_map, uniprot_name_map) for human proteins."""
+    acc_map, uniprot_name_map, gene_map, _, _ = _load_id_mappings()
+    return gene_map, acc_map, uniprot_name_map
+
+
 def suppliment_missing_entrez_id(entrez_map: dict[str, list[str | None, str | None]]):
     entrez_uniprot_conflict_genes = set()
     name_entrez_dict = dict()
