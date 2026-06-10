@@ -2,41 +2,73 @@ from .hippie_update import get_human_gene_map
 from collections.abc import Iterator
 from django.core.management.base import BaseCommand
 from hippie_website.models import Gene, Interaction, Species, OrthologInteraction
-import gzip, io, re, sys, urllib.request
+import gzip
+import io
+import re
+import sys
+import urllib.request
 
 
 TAXONS = {
-    "10116":  ("RGD",      "Rattus norvegicus"),
-    "10090":  ("MGI",      "Mus musculus"),
-    "7955":   ("ZFIN",     "Danio rerio"),
-    "8364":   ("Xenbase",  "Xenopus tropicalis"),
-    "8355":   ("Xenbase",  "Xenopus laevis"),
-    "7227":   ("FlyBase",  "Drosophila melanogaster"),
-    "6239":   ("WormBase", "Caenorhabditis elegans"),
-    "559292": ("SGD",      "Saccharomyces cerevisiae"),
+    "10116": ("RGD", "Rattus norvegicus"),
+    "10090": ("MGI", "Mus musculus"),
+    "7955": ("ZFIN", "Danio rerio"),
+    "8364": ("Xenbase", "Xenopus tropicalis"),
+    "8355": ("Xenbase", "Xenopus laevis"),
+    "7227": ("FlyBase", "Drosophila melanogaster"),
+    "6239": ("WormBase", "Caenorhabditis elegans"),
+    "559292": ("SGD", "Saccharomyces cerevisiae"),
 }
 
-INTACT_FTP_URL = "https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/intact.txt"
+INTACT_FTP_URL = (
+    "https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/intact.txt"
+)
 
 MIN_AGREEMENT_SCORE_RATIO = 0.8
 
-UNIPROT_RE = re.compile(r"\b(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})\b")
+UNIPROT_RE = re.compile(
+    r"\b(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})\b"
+)
 GENE_RE = {
-    "FlyBase":  re.compile(r"FBgn\d+"),
+    "FlyBase": re.compile(r"FBgn\d+"),
     "WormBase": re.compile(r"WBGene\d+"),
-    "SGD":      re.compile(r"\bS\d{9}\b"),
-    "ZFIN":     re.compile(r"ZDB-GENE-\d+-\d+"),
-    "MGI":      re.compile(r"MGI:\d+"),
+    "SGD": re.compile(r"\bS\d{9}\b"),
+    "ZFIN": re.compile(r"ZDB-GENE-\d+-\d+"),
+    "MGI": re.compile(r"MGI:\d+"),
 }
 SOURCES = {
-    "10116":  dict(db="RGD",      url="https://download.rgd.mcw.edu/data_release/GENES_RAT.txt", gz=0),
-    "10090":  dict(db="MGI",      url="https://www.informatics.jax.org/downloads/reports/MRK_SwissProt_TrEMBL.rpt", gz=0),
-    "7955":   dict(db="ZFIN",     url="https://zfin.org/downloads/uniprot.txt", gz=0),
-    "8364":   dict(db="Xenbase",  url="https://download.xenbase.org/xenbase/GenePageReports/xenbase_v1.2.gpi.gz", gz=1),
-    "8355":   dict(db="Xenbase",  url="https://download.xenbase.org/xenbase/GenePageReports/xenbase_v1.2.gpi.gz", gz=1),
-    "7227":   dict(db="FlyBase",  url="https://s3ftp.flybase.org/releases/current/precomputed_files/genes/fbgn_NAseq_Uniprot_fb_2026_01.tsv.gz", gz=1),
-    "6239":   dict(db="WormBase", file="data/c_elegans.PRJNA13758.WS298.xrefs.txt.gz", gz=1),
-    "559292": dict(db="SGD",      url="http://sgd-archive.yeastgenome.org/curation/chromosomal_feature/dbxref.tab", gz=0),
+    "10116": dict(
+        db="RGD", url="https://download.rgd.mcw.edu/data_release/GENES_RAT.txt", gz=0
+    ),
+    "10090": dict(
+        db="MGI",
+        url="https://www.informatics.jax.org/downloads/reports/MRK_SwissProt_TrEMBL.rpt",
+        gz=0,
+    ),
+    "7955": dict(db="ZFIN", url="https://zfin.org/downloads/uniprot.txt", gz=0),
+    "8364": dict(
+        db="Xenbase",
+        url="https://download.xenbase.org/xenbase/GenePageReports/xenbase_v1.2.gpi.gz",
+        gz=1,
+    ),
+    "8355": dict(
+        db="Xenbase",
+        url="https://download.xenbase.org/xenbase/GenePageReports/xenbase_v1.2.gpi.gz",
+        gz=1,
+    ),
+    "7227": dict(
+        db="FlyBase",
+        url="https://s3ftp.flybase.org/releases/current/precomputed_files/genes/fbgn_NAseq_Uniprot_fb_2026_01.tsv.gz",
+        gz=1,
+    ),
+    "6239": dict(
+        db="WormBase", file="data/c_elegans.PRJNA13758.WS298.xrefs.txt.gz", gz=1
+    ),
+    "559292": dict(
+        db="SGD",
+        url="http://sgd-archive.yeastgenome.org/curation/chromosomal_feature/dbxref.tab",
+        gz=0,
+    ),
 }
 
 _TAXON_LOOKUP: set[str] = set(TAXONS) | {"9606"}
@@ -47,9 +79,11 @@ _TAXID_LEN = len("taxid:")
 # MOD gene→UniProt mapping helpers (still needed to resolve species UniProt IDs)
 # ---------------------------------------------------------------------------
 
+
 def _open(url: str):
     return urllib.request.urlopen(
-        urllib.request.Request(url, headers={"User-Agent": "protein-mapper/1.0"}), timeout=120
+        urllib.request.Request(url, headers={"User-Agent": "protein-mapper/1.0"}),
+        timeout=120,
     )
 
 
@@ -58,8 +92,10 @@ def _lines(taxon: str, conf_dict: dict):
         try:
             raw = open(conf_dict["file"], "rb")
             wrap = gzip.GzipFile(fileobj=raw)
-        except FileNotFoundError as e:
-            stdout.write("Please download the wormbase file before and add it to the data folder: https://downloads.wormbase.org/releases/current-production-release/species/c_elegans/PRJNA13758/annotation/c_elegans.PRJNA13758.WS298.xrefs.txt.gz)
+        except FileNotFoundError:
+            sys.stdout.write(
+                "Please download the wormbase file before and add it to the data folder: https://downloads.wormbase.org/releases/current-production-release/species/c_elegans/PRJNA13758/annotation/c_elegans.PRJNA13758.WS298.xrefs.txt.gz"
+            )
             exit(1)
     else:
         raw = _open(conf_dict["url"])
@@ -138,6 +174,7 @@ def write_all_mapping(output_file: str) -> None:
 # Orthology helpers
 # ---------------------------------------------------------------------------
 
+
 def read_orthology_data(
     file_path: str, hgnc_to_entrez_dict: dict[str, str]
 ) -> dict[str, list[list[str]]]:
@@ -174,7 +211,9 @@ def read_orthology_data(
             if hs_gene_id not in hgnc_to_entrez_dict:
                 continue
 
-            orthology_data.setdefault(hs_gene_id, []).append([other_gene_id, other_species])
+            orthology_data.setdefault(hs_gene_id, []).append(
+                [other_gene_id, other_species]
+            )
 
     return orthology_data
 
@@ -239,6 +278,7 @@ def _build_species_to_human(
 # IntAct streaming
 # ---------------------------------------------------------------------------
 
+
 def _taxon_of(field: str) -> str | None:
     """Return the relevant taxon ID string from a MITAB taxon field, or None."""
     idx = field.find("taxid:")
@@ -295,6 +335,7 @@ def _stream_intact(source: str | None = None) -> Iterator[tuple[str, str, str, s
 # OrthologInteraction registration helper
 # ---------------------------------------------------------------------------
 
+
 def _register_edge(
     d: dict,
     key: tuple[int, int],
@@ -310,8 +351,12 @@ def _register_edge(
 # Main pipeline
 # ---------------------------------------------------------------------------
 
+
 def update_homology_data(
-    homology_file: str, ncbi_gene_info_file: str, intact_file: str | None = None, stdout=sys.stdout
+    homology_file: str,
+    ncbi_gene_info_file: str,
+    intact_file: str | None = None,
+    stdout=sys.stdout,
 ) -> None:
     """Populate OrthologInteraction and species links by streaming the full IntAct MITAB."""
 
@@ -430,7 +475,9 @@ def update_homology_data(
                     if fs not in human_pairs_set:
                         continue
                     gene_pair_id = entrez_pair_to_gene_pks[fs]
-                    _register_edge(orthointeractions_to_create, gene_pair_id, species_objs[taxon])
+                    _register_edge(
+                        orthointeractions_to_create, gene_pair_id, species_objs[taxon]
+                    )
                     n_registered += 1
                     mapped_interactions[(taxon, True)] += 1
         else:
@@ -447,13 +494,16 @@ def update_homology_data(
                                 continue
                             gene_pair_id = entrez_pair_to_gene_pks[fs]
                             _register_edge(
-                                orthointeractions_to_create, gene_pair_id, species_objs[taxon]
+                                orthointeractions_to_create,
+                                gene_pair_id,
+                                species_objs[taxon],
                             )
                             n_registered += 1
                             mapped_interactions[(taxon, False)] += 1
-                            
-    
-    log(f"\nStreaming done — {n_lines:,} lines, {len(orthointeractions_to_create):,} unique gene pairs")
+
+    log(
+        f"\nStreaming done — {n_lines:,} lines, {len(orthointeractions_to_create):,} unique gene pairs"
+    )
     log(f"{'Species':<35} {'species×human':>15} {'species×species':>16}")
     for taxon_id, (_, taxon_name) in TAXONS.items():
         sh = mapped_interactions[(taxon_id, True)]
@@ -480,7 +530,9 @@ def update_homology_data(
         if oi_pk is None:
             continue
         for species in species_set:
-            through_rows.append(Through(orthologinteraction_id=oi_pk, species_id=species.pk))
+            through_rows.append(
+                Through(orthologinteraction_id=oi_pk, species_id=species.pk)
+            )
     log(f"Writing {len(through_rows):,} species links...")
     Through.objects.bulk_create(through_rows, ignore_conflicts=True)
     log("Done.")
@@ -491,15 +543,21 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--homology_file", type=str, required=True,
+            "--homology_file",
+            type=str,
+            required=True,
             help="Path to genome alliance orthology TSV",
         )
         parser.add_argument(
-            "--ncbi_gene_info_file", type=str, required=True,
+            "--ncbi_gene_info_file",
+            type=str,
+            required=True,
             help="Path to NCBI human gene_info file",
         )
         parser.add_argument(
-            "--intact_file", type=str, default=None,
+            "--intact_file",
+            type=str,
+            default=None,
             help="Local IntAct MITAB file (.txt or .gz); if omitted, streams from FTP",
         )
 
