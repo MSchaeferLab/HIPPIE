@@ -258,30 +258,37 @@ def _stream_intact(source: str | None = None) -> Iterator[tuple[str, str, str, s
     source: local file path (plain or .gz) or None to fetch from INTACT_FTP_URL.
     """
     import os
+
     if source and os.path.exists(source):
-        raw_file = open(source, "rb")
-        raw = gzip.GzipFile(fileobj=raw_file) if source.endswith(".gz") else raw_file
+        raw: io.BufferedIOBase | gzip.GzipFile = open(source, "rb")
+        if source.endswith(".gz"):
+            raw = gzip.GzipFile(fileobj=raw)
     else:
         raw = _open(INTACT_FTP_URL)
-    for line in io.TextIOWrapper(raw, encoding="utf-8", errors="replace"):
-        if line.startswith("#") or line.startswith("ID"):
-            continue
-        parts = line.split("\t")
-        if len(parts) < 11:
-            continue
-        taxon_a = _taxon_of(parts[9])
-        taxon_b = _taxon_of(parts[10])
-        if taxon_a is None or taxon_b is None:
-            continue
-        if not (taxon_a in TAXONS or taxon_b in TAXONS):
-            continue
-        if taxon_a != taxon_b and taxon_a != "9606" and taxon_b != "9606":
-            continue
-        raw_a = parts[0].replace("uniprotkb:", "").split("-")[0]
-        raw_b = parts[1].replace("uniprotkb:", "").split("-")[0]
-        if not raw_a or not raw_b or "|" in raw_a or "|" in raw_b:
-            continue
-        yield raw_a, raw_b, taxon_a, taxon_b
+
+    text = io.TextIOWrapper(raw, encoding="utf-8", errors="replace")
+    try:
+        for line in text:
+            if line.startswith("#") or line.startswith("ID"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 11:
+                continue
+            taxon_a = _taxon_of(parts[9])
+            taxon_b = _taxon_of(parts[10])
+            if taxon_a is None or taxon_b is None:
+                continue
+            if not (taxon_a in TAXONS or taxon_b in TAXONS):
+                continue
+            if taxon_a != taxon_b and taxon_a != "9606" and taxon_b != "9606":
+                continue
+            raw_a = parts[0].replace("uniprotkb:", "").split("-")[0]
+            raw_b = parts[1].replace("uniprotkb:", "").split("-")[0]
+            if not raw_a or not raw_b or "|" in raw_a or "|" in raw_b:
+                continue
+            yield raw_a, raw_b, taxon_a, taxon_b
+    finally:
+        text.close()
 
 
 # ---------------------------------------------------------------------------
@@ -398,10 +405,8 @@ def update_homology_data(
     for raw_a, raw_b, taxon_a, taxon_b in _stream_intact(intact_file):
         n_lines += 1
         if n_lines % 100_000 == 0:
-            print(
-                f"\r  Lines: {n_lines:,}  registered: {n_registered:,}",
-                end="", flush=True,
-            )
+            stdout.write(f"\r  Lines: {n_lines:,}  registered: {n_registered:,}")
+            stdout.flush()
 
         # Canonicalize both accessions via secondary-AC map
         uniprot_a = updated_uniprot_dict.get(raw_a, raw_a)
