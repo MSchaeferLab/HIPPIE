@@ -55,8 +55,12 @@ def _open(url: str):
 
 def _lines(taxon: str, conf_dict: dict):
     if taxon == "6239":
-        raw = open(conf_dict["file"], "rb")
-        wrap = gzip.GzipFile(fileobj=raw)
+        try:
+            raw = open(conf_dict["file"], "rb")
+            wrap = gzip.GzipFile(fileobj=raw)
+        except FileNotFoundError as e:
+            stdout.write("Please download the wormbase file before and add it to the data folder: https://downloads.wormbase.org/releases/current-production-release/species/c_elegans/PRJNA13758/annotation/c_elegans.PRJNA13758.WS298.xrefs.txt.gz)
+            exit(1)
     else:
         raw = _open(conf_dict["url"])
         wrap = gzip.GzipFile(fileobj=raw) if conf_dict.get("gz") else raw
