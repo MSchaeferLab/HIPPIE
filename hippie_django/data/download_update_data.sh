@@ -15,3 +15,5 @@ curl -fsSL -O -z BIOGRID-ALL-LATEST.mitab.zip "https://downloads.thebiogrid.org/
 curl -fsSL -O -z GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt "https://storage.googleapis.com/adult-gtex/annotations/v11/metadata-files/GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt"
 curl -fsSL -O -z GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct.gz "https://storage.googleapis.com/adult-gtex/bulk-gex/v11/rna-seq/GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct.gz" && gunzip -f GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct.gz
 curl -fsSL -O -z ORTHOLOGY-ALLIANCE_COMBINED.tsv.gz "https://fms.alliancegenome.org/download/ORTHOLOGY-ALLIANCE_COMBINED.tsv.gz" && gunzip -f ORTHOLOGY-ALLIANCE_COMBINED.tsv.gz
+
+echo "Download the wormbase file in the browser and put it in the data folder: https://downloads.wormbase.org/releases/current-production-release/species/c_elegans/PRJNA13758/annotation/c_elegans.PRJNA13758.WS298.xrefs.txt.gz"
