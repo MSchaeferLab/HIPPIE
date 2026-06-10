@@ -164,10 +164,9 @@ docker compose exec web python manage.py hippie_update \
     --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt \
     --intact  data/human.txt
 
-# 3. Load experiment scoring table, then rescore
+# 3. Load experiment scoring table
 docker compose exec web python manage.py load_experiment_types \
     --csv_path data/techniques_scoring_04-05-26.csv
-docker compose exec web python manage.py hippie_update --rescore-all
 
 # 4. Load homology / orthology data
 docker compose exec web python manage.py update_homology_data \
@@ -181,6 +180,9 @@ docker compose exec web python manage.py update_tissue_data \
     --gct-path               data/GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct \
     --annotation-sample-path data/GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt \
     --entrez-homo-path       data/Homo_sapiens.gene_info
+
+# 6. Rescoring
+docker compose exec web python manage.py hippie_update --rescore-all
 ```
 
 `collectstatic` runs automatically on each `web` boot; migrations are manual
