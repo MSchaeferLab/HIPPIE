@@ -745,25 +745,15 @@ class NetworkQueryView(FormView):
         layer_1 = cd.get("layer_1", False)
         expand = "none" if (layer_0 and not layer_1) else "first_shell"
 
+        selected_types = cd.get("interaction_types")
         params = {
             "proteins": raw_proteins,
             "expand": expand,
             "include_isoforms": cd.get("include_isoforms", False),
             "score_min": cd.get("score_min") or 0.0,
-            "directionality": {
-                "none": "any",
-                "kegg": "directed",
-                "unweighted_sp": "any",
-                "weighted_sp": "any",
-            }.get(cd.get("direction", "none"), "any"),
-            "effect_type": {
-                "predicted": ["activation", "inhibition"],
-                "kegg": ["activation", "inhibition"],
-            }.get(cd.get("effect", "none"), []),
             "tissues": [cd["tissue"].name] if cd.get("tissue") else [],
             "min_rpkm": cd.get("min_rpkm", None),
-            "go_terms": cd.get("go_terms", ""),
-            "mesh_terms": cd.get("mesh_terms", ""),
+            "interaction_type_ids": [t.pk for t in selected_types] if selected_types else [],
         }
         result = _run_network_query(params)
         output_type = cd.get("output_type", "browser_vis")
@@ -819,12 +809,8 @@ def _run_network_query(params) -> dict:
         proteins        — newline-separated identifiers (gene symbols, UniProt, Entrez)
         expand          — "none" | "first_shell" | "second_shell"
         score_min       — float 0–1
-        directionality  — "any" | "directed" | "undirected"
-        effect_type     — list of "activation" | "inhibition"
         tissue_mode     — "any" | "both" | "one"  (unused: we always require both)
         tissues         — list of tissue names
-        go_terms        — comma-separated GO IDs
-        mesh_terms      — comma-separated MeSH numbers
     """
     # -- 1. Resolve seed proteins -----------------------------------------
     raw = params.get("proteins", "")
@@ -882,44 +868,21 @@ def _run_network_query(params) -> dict:
         min_rpkm=min_rpkm_val,
     ).prefetch_related("sources", "experiments")
 
+    # -- 5a. Interaction type filter --------------------------------------
+    if hasattr(params, "getlist"):
+        type_ids = [int(i) for i in params.getlist("interaction_type_ids") if i]
+    else:
+        type_ids = params.get("interaction_type_ids") or []
+    if type_ids:
+        qs = qs.of_types(type_ids)
+
     if not params.get("include_isoforms", False):
         isoform_pks = Isoform.objects.values_list("protein_ptr_id", flat=True)
         qs = qs.exclude(protein_1_id__in=isoform_pks).exclude(
             protein_2_id__in=isoform_pks
         )
 
-    # -- 6. Directionality filter -----------------------------------------
-    directionality = params.get("directionality", "any")
-    if directionality == "directed":
-        qs = qs.exclude(kegg_direction__isnull=True)
-    elif directionality == "undirected":
-        qs = qs.filter(kegg_direction__isnull=True)
-
-    # -- 7. Effect type filter --------------------------------------------
-    if hasattr(params, "getlist"):
-        effect_types = params.getlist("effect_type")
-    else:
-        effect_types = params.get("effect_type") or []
-    if effect_types:
-        effect_q = Q()
-        if "activation" in effect_types:
-            effect_q |= Q(effect_type=Interaction.EffectType.ACTIVATION)
-        if "inhibition" in effect_types:
-            effect_q |= Q(effect_type=Interaction.EffectType.INHIBITION)
-        qs = qs.filter(effect_q)
-
-    # -- 8. GO / MeSH annotation filters ----------------------------------
-    go_raw = params.get("go_terms", "")
-    go_ids = [v.strip() for v in go_raw.split(",") if v.strip()]
-    if go_ids:
-        qs = qs.filter(go_terms__id__in=go_ids).distinct()
-
-    mesh_raw = params.get("mesh_terms", "")
-    mesh_ids = [v.strip() for v in mesh_raw.split(",") if v.strip()]
-    if mesh_ids:
-        qs = qs.filter(mesh_terms__number__in=mesh_ids).distinct()
-
-    # -- 9. Serialise -----------------------------------------------------
+    # -- 6. Serialise -----------------------------------------------------
     interactions = []
     node_ids: set[int] = set()
     for ix in qs:
@@ -943,8 +906,6 @@ def _run_network_query(params) -> dict:
                 "experiment_count": len(ix.experiments.all()),
                 "uploaded_interaction": ix.protein_1_id in seen
                 and ix.protein_2_id in seen,
-                "kegg_direction": ix.kegg_direction,
-                "effect_type": ix.effect_type,
             }
         )
 
@@ -1356,7 +1317,6 @@ def interaction_detail_view(request, pk: int):
                            interaction_types,
                            cross_references (+ source + species)
     Conserved species are resolved via OrthologInteraction on the gene pair.
-      with_annotations() → go_terms, mesh_terms
     """
     interaction = get_object_or_404(
         Interaction.objects.with_full_detail(),

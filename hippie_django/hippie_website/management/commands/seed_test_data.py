@@ -215,47 +215,6 @@ SPECIES = [
     "Danio rerio",
 ]
 
-GO_TERMS = [
-    # Biological Process
-    ("GO:0008150", "biological_process", "biological_process"),
-    ("GO:0007165", "signal transduction", "biological_process"),
-    ("GO:0006468", "protein phosphorylation", "biological_process"),
-    ("GO:0006915", "apoptotic process", "biological_process"),
-    ("GO:0008283", "cell proliferation", "biological_process"),
-    ("GO:0007049", "cell cycle", "biological_process"),
-    # Cellular Component
-    ("GO:0005575", "cellular_component", "cellular_component"),
-    ("GO:0005634", "nucleus", "cellular_component"),
-    ("GO:0005737", "cytoplasm", "cellular_component"),
-    ("GO:0005886", "plasma membrane", "cellular_component"),
-    ("GO:0005829", "cytosol", "cellular_component"),
-]
-
-# parent → children mapping for GO hierarchy
-GO_HIERARCHY = {
-    "GO:0008150": [
-        "GO:0007165",
-        "GO:0006468",
-        "GO:0006915",
-        "GO:0008283",
-        "GO:0007049",
-    ],
-    "GO:0007165": ["GO:0006468"],
-    "GO:0005575": ["GO:0005634", "GO:0005737", "GO:0005886", "GO:0005829"],
-    "GO:0005737": ["GO:0005829"],
-}
-
-MESH_TERMS = [
-    ("C04", "Neoplasms"),
-    ("C04.588", "Neoplasms by Site"),
-    ("C04.588.180", "Breast Neoplasms"),
-    ("C04.588.274", "Digestive System Neoplasms"),
-    ("C04.588.274.476", "Gastrointestinal Neoplasms"),
-    ("C10", "Nervous System Diseases"),
-    ("C10.574", "Neurodegenerative Diseases"),
-]
-
-
 class Command(BaseCommand):
     help = "Populate all HIPPIE tables with interconnected test data."
 
@@ -279,12 +238,9 @@ class Command(BaseCommand):
             ExperimentType,
             InteractionType,
             Species,
-            GOSlimTerm,
-            MeSHTerm,
             Publication,
             Interaction,
             InteractionCrossReference,
-            SignalingEndpoint,
             OrthologInteraction,
             BaitPreyAssociation,
             BaitPreyTest,
@@ -298,7 +254,6 @@ class Command(BaseCommand):
                 InteractionCrossReference,
                 OrthologInteraction,
                 Interaction,
-                SignalingEndpoint,
                 GeneTissue,
                 Isoform,
                 Protein,
@@ -309,8 +264,6 @@ class Command(BaseCommand):
                 ExperimentType,
                 InteractionType,
                 Species,
-                GOSlimTerm,
-                MeSHTerm,
                 Publication,
             ]:
                 M.objects.all().delete()
@@ -333,7 +286,6 @@ class Command(BaseCommand):
         for name, url in SOURCES:
             s, _ = Source.objects.get_or_create(name=name, defaults={"url": url})
             sources[name] = s
-        # HomoMINT must be pk=6 for the HomoMINTLinkManager
         homomint_src = sources["HomoMINT"]
 
         exp_types = {}
@@ -356,38 +308,7 @@ class Command(BaseCommand):
             species_objs[name] = sp
 
         # ---------------------------------------------------------------
-        # 2. GO slim terms + hierarchy
-        # ---------------------------------------------------------------
-
-        self.stdout.write("Creating GO slim terms…")
-
-        go_objs = {}
-        for go_id, name, ns in GO_TERMS:
-            obj, _ = GOSlimTerm.objects.get_or_create(
-                id=go_id, defaults={"name": name, "namespace": ns}
-            )
-            go_objs[go_id] = obj
-
-        for parent_id, child_ids in GO_HIERARCHY.items():
-            parent = go_objs[parent_id]
-            children = [go_objs[c] for c in child_ids]
-            parent.children.set(children)
-
-        # ---------------------------------------------------------------
-        # 3. MeSH terms
-        # ---------------------------------------------------------------
-
-        self.stdout.write("Creating MeSH terms…")
-
-        mesh_objs = {}
-        for number, name in MESH_TERMS:
-            obj, _ = MeSHTerm.objects.get_or_create(
-                number=number, defaults={"name": name}
-            )
-            mesh_objs[number] = obj
-
-        # ---------------------------------------------------------------
-        # 4. Proteins + identifier mappings
+        # 2. Proteins + identifier mappings
         # ---------------------------------------------------------------
 
         self.stdout.write("Creating proteins and identifier mappings…")
@@ -490,23 +411,10 @@ class Command(BaseCommand):
             if score is None:
                 score = round(random.uniform(0.3, 0.99), 4)
 
-            # ~30% get direction/effect annotations
-            kegg_dir = random.choice([1, -1, None, None, None])
-            effect_type = None
-            effect_source = None
-            if random.random() < 0.3:
-                effect_type = random.choice([1, -1])
-                effect_source = random.choice([1, 25])
-
             obj, created = Interaction.objects.get_or_create(
                 protein_1=p1,
                 protein_2=p2,
-                defaults={
-                    "score": score,
-                    "kegg_direction": kegg_dir,
-                    "effect_type": effect_type,
-                    "effect_source": effect_source,
-                },
+                defaults={"score": score},
             )
             if created:
                 interaction_objs.append(obj)
@@ -532,12 +440,6 @@ class Command(BaseCommand):
         exp_list = list(exp_types.values())
         int_type_list = list(int_types.values())
         species_list = list(species_objs.values())
-        go_list = [
-            go_objs[gid]
-            for gid, _, ns in GO_TERMS
-            if gid not in ("GO:0008150", "GO:0005575")
-        ]
-        mesh_list = list(mesh_objs.values())
 
         for inter in interaction_objs:
             # 1–3 sources
@@ -553,11 +455,6 @@ class Command(BaseCommand):
                 inter.conserved_species.set(
                     random.sample(species_list, k=random.randint(1, 3))
                 )
-            # 1–3 GO terms
-            inter.go_terms.set(random.sample(go_list, k=random.randint(1, 3)))
-            # 0–2 MeSH terms
-            if random.random() < 0.5:
-                inter.mesh_terms.set(random.sample(mesh_list, k=random.randint(1, 2)))
 
         # Isoform-Isoform interactions (reuses the same Interaction table)
         # We pick pairs where both proteins have at least 2 isoforms
@@ -611,33 +508,7 @@ class Command(BaseCommand):
             )
 
         # ---------------------------------------------------------------
-        # 10. Signaling endpoints  (receptors + TFs for shortest path)
-        # ---------------------------------------------------------------
-
-        self.stdout.write("Creating signaling endpoints…")
-
-        receptor_symbols = ["EGFR", "ERBB2"]
-        tf_symbols = ["ELK1", "MYC", "JUN", "FOS", "TP53", "STAT3"]
-        both_symbols = ["SRC"]
-
-        for sym in receptor_symbols:
-            SignalingEndpoint.objects.get_or_create(
-                uniprot_id=UNIPROT_IDS[sym],
-                defaults={"type": "rec"},
-            )
-        for sym in tf_symbols:
-            SignalingEndpoint.objects.get_or_create(
-                uniprot_id=UNIPROT_IDS[sym],
-                defaults={"type": "tf"},
-            )
-        for sym in both_symbols:
-            SignalingEndpoint.objects.get_or_create(
-                uniprot_id=UNIPROT_IDS[sym],
-                defaults={"type": "b"},
-            )
-
-        # ---------------------------------------------------------------
-        # 11. Ortholog interactions  (one per source type)
+        # 10. Ortholog interactions  (one per source type)
         # ---------------------------------------------------------------
 
         self.stdout.write("Creating ortholog interactions…")
@@ -682,12 +553,9 @@ class Command(BaseCommand):
             ("ExperimentType", ExperimentType),
             ("InteractionType", InteractionType),
             ("Species", Species),
-            ("GOSlimTerm", GOSlimTerm),
-            ("MeSHTerm", MeSHTerm),
             ("Publication", Publication),
             ("Interaction", Interaction),
             ("InteractionCrossReference", InteractionCrossReference),
-            ("SignalingEndpoint", SignalingEndpoint),
             ("OrthologInteraction", OrthologInteraction),
             ("BaitPreyAssociation", BaitPreyAssociation),
         ]

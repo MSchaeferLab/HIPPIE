@@ -20,19 +20,6 @@ OUTPUT_CHOICES = [
     ("psimitab", "Download – PSI-MI TAB 2.5"),
 ]
 
-DIRECTION_CHOICES = [
-    ("none", "Do not show direction"),
-    ("unweighted_sp", "Unweighted shortest paths"),
-    ("weighted_sp", "Confidence-weighted shortest paths"),
-    ("kegg", "KEGG direction"),
-]
-
-EFFECT_CHOICES = [
-    ("none", "Do not show effect"),
-    ("predicted", "Show predicted effect"),
-    ("kegg", "Show KEGG effect"),
-]
-
 NEGATOME_EDGES_CHOICES = [
     ("none", "Only interactions"),
     ("exclusively", "Only non-interactions"),
@@ -133,49 +120,6 @@ class NetworkQueryForm(forms.Form):
     tissue_file = forms.FileField(
         label="…or upload a custom tissue filter",
         required=False,
-    )
-
-    go_terms = forms.CharField(
-        label="GO slim terms",
-        widget=forms.HiddenInput,
-        required=False,
-        help_text="Comma-separated GO IDs, e.g. GO:0008150,GO:0005575",
-    )
-    mesh_terms = forms.CharField(
-        label="MeSH terms",
-        widget=forms.HiddenInput,
-        required=False,
-        help_text="Comma-separated MeSH numbers, e.g. C01.252,C01.252.400",
-    )
-
-    direction = forms.ChoiceField(
-        label="Edge directionality",
-        choices=DIRECTION_CHOICES,
-        initial="none",
-        widget=forms.RadioSelect,
-    )
-    sources = forms.CharField(
-        label="Sources",
-        required=False,
-        help_text=(
-            "Space-separated gene symbols. "
-            "Leave empty to use all receptors from SignalingEndpoint."
-        ),
-    )
-    sinks = forms.CharField(
-        label="Sinks",
-        required=False,
-        help_text=(
-            "Space-separated gene symbols. "
-            "Leave empty to use all transcription factors from SignalingEndpoint."
-        ),
-    )
-
-    effect = forms.ChoiceField(
-        label="Effect display",
-        choices=EFFECT_CHOICES,
-        initial="none",
-        widget=forms.RadioSelect,
     )
 
     negatome_edges = forms.ChoiceField(
