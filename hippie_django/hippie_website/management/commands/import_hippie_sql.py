@@ -20,8 +20,6 @@ Categories:
   - column_discarded    protein2uniprot.uniprot_db_id has no home in the new
                         ProteinUniProt schema; column dropped (one summary row).
   - null_score          Interaction.score was NULL in source; imported as 0.0.
-  - effect_superseded   interaction2effect had multiple rows for the same
-                        interaction_id; last-row-wins. Superseded values logged.
   - species_unmatched   interaction2link.species text did not prefix-match any
                         Species.name; cross_reference species FK set NULL.
   - ortho_unresolved    OrthologInteraction row not found after bulk_create;
@@ -53,7 +51,7 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
@@ -65,8 +63,6 @@ from django.db import connection, transaction
 
 WANTED_TABLES: frozenset[str] = frozenset(
     {
-        "GO_slim_term",
-        "GO_slim_term2term",
         "bait_prey_assoc",
         "experiment_type",
         "homomint_interaction",
@@ -74,18 +70,13 @@ WANTED_TABLES: frozenset[str] = frozenset(
         "i2d_interaction",
         "i2d_interaction2species",
         "interaction",
-        "interaction2GO",
-        "interaction2effect",
         "interaction2experiment",
-        "interaction2keggDirection",
         "interaction2link",
-        "interaction2mesh",
         "interaction2pubmed",
         "interaction2source",
         "interaction2species",
         "interaction2type",
         "interaction_type",
-        "mesh_term",
         "ortho_interaction",
         "ortho_interaction2species",
         "protein",
@@ -93,7 +84,6 @@ WANTED_TABLES: frozenset[str] = frozenset(
         "protein2tissue",
         "protein2uniprot",
         "source",
-        "sp_analysis_end_nodes",
         "species",
         "tissue",
         "uniprot_accession2id",
@@ -403,36 +393,6 @@ def _deduplicate_protein_uniprot_mapping(
     return remap
 
 
-def _deduplicate_interaction_go_mapping(
-    data: dict[str, list[tuple]],
-) -> dict[str, str]:
-    """
-    Merge interaction-go mapping rows with the same interaction_id and term_id into one (keep lowest id).
-    Returns {joint_key: joint_key}.
-    """
-    seen: dict[str, int] = {}  # name → canonical id
-    remap: dict[str, str] = {}
-    unique_rows: list[tuple] = []
-
-    for row in data["interaction2GO"]:
-        interaction_id, term_id = int(row[0]), row[1]
-        joint_key = str(interaction_id) + ":" + term_id
-        if joint_key in seen:
-            remap[joint_key] = joint_key
-        else:
-            seen[joint_key] = 1
-            unique_rows.append(row)
-
-    if not remap:
-        return remap
-
-    # Not referenced in any other classes
-
-    data["interaction2GO"] = unique_rows
-
-    return remap
-
-
 def _deduplicate_interaction_pmid_mapping(
     data: dict[str, list[tuple]],
 ) -> dict[str, str]:
@@ -583,36 +543,6 @@ def _deduplicate_interaction_experiment_mapping(
     return remap
 
 
-def _deduplicate_interaction_effect_mapping(
-    data: dict[str, list[tuple]],
-) -> dict[str, str]:
-    """
-    Merge interaction-effect mapping rows with the same interaction_id, effect_type, and source into one (keep lowest id).
-    Returns {joint_key: joint_key}.
-    """
-    seen: dict[str, int] = {}  # name → canonical id
-    remap: dict[str, str] = {}
-    unique_rows: list[tuple] = []
-
-    for row in data["interaction2effect"]:
-        interaction_id, effect_type, source = int(row[0]), int(row[1]), int(row[2])
-        joint_key = str(interaction_id) + ":" + str(effect_type) + ":" + str(source)
-        if joint_key in seen:
-            remap[joint_key] = joint_key
-        else:
-            seen[joint_key] = 1
-            unique_rows.append(row)
-
-    if not remap:
-        return remap
-
-    # Not referenced in any other classes
-
-    data["interaction2effect"] = unique_rows
-
-    return remap
-
-
 def _deduplicate_interactions(
     data: dict[str, list[tuple]],
     log: "ImportLog",
@@ -660,12 +590,8 @@ def _deduplicate_interactions(
     ]
 
     for tbl in (
-        "interaction2GO",
-        "interaction2effect",
         "interaction2experiment",
-        "interaction2keggDirection",
         "interaction2link",
-        "interaction2mesh",
         "interaction2pubmed",
         "interaction2source",
         "interaction2species",
@@ -738,12 +664,8 @@ def _filter_orphaned_protein_refs(
     # Drop junction rows for interactions that were just removed
     valid_iids: set[int] = {int(r[0]) for r in data["interaction"]}
     for tbl in (
-        "interaction2GO",
-        "interaction2effect",
         "interaction2experiment",
-        "interaction2keggDirection",
         "interaction2link",
-        "interaction2mesh",
         "interaction2pubmed",
         "interaction2source",
         "interaction2species",
@@ -809,16 +731,12 @@ def _filter_orphaned_lookup_refs(
     valid_species = {r[0] for r in data["species"]}
     valid_exp = {r[0] for r in data["experiment_type"]}
     valid_inttype = {r[0] for r in data["interaction_type"]}
-    valid_go = {r[0] for r in data["GO_slim_term"]}
-    valid_mesh = {r[0] for r in data["mesh_term"]}
 
     _filter("protein2tissue", 1, valid_tissue, "tissue_id")
     _filter("interaction2source", 1, valid_source, "source_id")
     _filter("interaction2link", 2, valid_source, "source_id")
     _filter("interaction2experiment", 1, valid_exp, "experiment_type_id")
     _filter("interaction2type", 1, valid_inttype, "interaction_type_id")
-    _filter("interaction2GO", 1, valid_go, "go_term_id")
-    _filter("interaction2mesh", 1, valid_mesh, "mesh_term_number")
     _filter("interaction2species", 1, valid_species, "species_id")
 
     return dropped
@@ -923,11 +841,6 @@ class ImportLog:
 # ---------------------------------------------------------------------------
 
 
-def _chunked(lst: list, n: int) -> Iterator[list]:
-    for i in range(0, len(lst), n):
-        yield lst[i : i + n]
-
-
 def _bulk(
     model: Any,
     objs: list,
@@ -998,18 +911,15 @@ class Command(BaseCommand):
             BaitPreyAssociation,
             BaitPreyTest,
             ExperimentType,
-            GOSlimTerm,
             Interaction,
             InteractionCrossReference,
             InteractionPublication,
             InteractionType,
-            MeSHTerm,
             OrthologInteraction,
             GeneTissue,
             Protein,
             ProteinEntrez,
             ProteinUniProt,
-            SignalingEndpoint,
             Source,
             Species,
             Tissue,
@@ -1036,13 +946,11 @@ class Command(BaseCommand):
         _deduplicate_protein_uniprot_mapping(data)
         _deduplicate_uniprot_accession_mapping(data)
         _deduplicate_interactions(data, log)
-        _deduplicate_interaction_go_mapping(data)
         _deduplicate_interaction_pmid_mapping(data)
         _deduplicate_interaction_source_mapping(data)
         _deduplicate_interaction_species_mapping(data)
         _deduplicate_interaction_type_mapping(data)
         _deduplicate_interaction_experiment_mapping(data)
-        _deduplicate_interaction_effect_mapping(data)
 
         # Orphan filters — log per dropped row.
         _filter_orphaned_protein_refs(data, log)
@@ -1060,8 +968,6 @@ class Command(BaseCommand):
             self._import_lookup_tables(
                 data, bs, Tissue, Species, Source, ExperimentType, InteractionType
             )
-            self._import_go(data, bs, GOSlimTerm)
-            self._import_mesh(data, bs, MeSHTerm)
             self._import_proteins(
                 data,
                 log,
@@ -1072,10 +978,7 @@ class Command(BaseCommand):
                 GeneTissue,
                 UniProtAccession,
             )
-            self._import_signaling(data, bs, SignalingEndpoint)
             swapped = self._import_interactions(data, log, bs, Interaction)
-            self._update_effect(data, log, bs, swapped, Interaction)
-            self._update_kegg(data, log, bs, swapped, Interaction)
             self._import_interaction_m2m(data, bs, Interaction, InteractionPublication)
             self._import_cross_refs(data, log, bs, InteractionCrossReference, Species)
             self._import_ortholog(data, log, bs, OrthologInteraction, Species)
@@ -1172,42 +1075,6 @@ class Command(BaseCommand):
         )
         _reset_sequence(InteractionType)
         self._say(f"  interaction_type: {len(data['interaction_type']):>8,}")
-
-    def _import_go(self, data: dict, bs: int, GOSlimTerm: Any) -> None:
-        self._say("Importing GO slim terms …")
-
-        _bulk(
-            GOSlimTerm,
-            [
-                GOSlimTerm(id=r[0], name=r[1], namespace=r[2])
-                for r in data["GO_slim_term"]
-            ],
-            bs,
-        )
-        self._say(f"  GO_slim_term:     {len(data['GO_slim_term']):>8,}")
-
-        # Self-referential M2M (symmetrical=False):
-        #   from_goslimterm_id = child term (the row that "has parents")
-        #   to_goslimterm_id   = parent term
-        # Old table: (term_id=child, parent_term_id=parent)
-        Through = GOSlimTerm.parents.through
-        _bulk(
-            Through,
-            [
-                Through(from_goslimterm_id=r[0], to_goslimterm_id=r[1])
-                for r in data["GO_slim_term2term"]
-            ],
-            bs,
-            ignore_conflicts=False,
-        )
-        self._say(f"  GO_slim_term2term:{len(data['GO_slim_term2term']):>8,}")
-
-    def _import_mesh(self, data: dict, bs: int, MeSHTerm: Any) -> None:
-        self._say("Importing MeSH terms …")
-        _bulk(
-            MeSHTerm, [MeSHTerm(number=r[0], name=r[1]) for r in data["mesh_term"]], bs
-        )
-        self._say(f"  mesh_term:        {len(data['mesh_term']):>8,}")
 
     def _import_proteins(
         self,
@@ -1314,19 +1181,6 @@ class Command(BaseCommand):
         )
         self._say(f"  uniprot_acc2id:   {len(data['uniprot_accession2id']):>8,}")
 
-    def _import_signaling(self, data: dict, bs: int, SignalingEndpoint: Any) -> None:
-        self._say("Importing signaling endpoints …")
-        _bulk(
-            SignalingEndpoint,
-            [
-                SignalingEndpoint(uniprot_id=r[0], type=r[1])
-                for r in data["sp_analysis_end_nodes"]
-            ],
-            bs,
-            ignore_conflicts=False,
-        )
-        self._say(f"  sp_analysis_end_nodes: {len(data['sp_analysis_end_nodes']):>5,}")
-
     def _import_interactions(
         self,
         data: dict,
@@ -1375,93 +1229,6 @@ class Command(BaseCommand):
         )
         return swapped
 
-    def _update_effect(
-        self,
-        data: dict,
-        log: ImportLog,
-        bs: int,
-        swapped: set[int],
-        Interaction: Any,
-    ) -> None:
-        """
-        Inline interaction2effect (effect_type, effect_source) onto Interaction rows.
-        Multiple rows per interaction: last row wins; superseded rows are logged.
-        """
-        effect_map: dict[int, tuple[int, int]] = {}
-        for r in data["interaction2effect"]:
-            iid, etype, esrc = int(r[0]), int(r[1]), int(r[2])
-            if iid in effect_map:
-                prev_etype, prev_esrc = effect_map[iid]
-                log.record(
-                    "effect_superseded",
-                    "interaction2effect",
-                    {
-                        "interaction_id": iid,
-                        "superseded_effect_type": prev_etype,
-                        "superseded_effect_source": prev_esrc,
-                        "kept_effect_type": etype,
-                        "kept_effect_source": esrc,
-                    },
-                    "multiple rows for same interaction_id — last-row-wins; "
-                    "earlier (effect_type, effect_source) discarded",
-                )
-            effect_map[iid] = (etype, esrc)
-
-        if not effect_map:
-            return
-
-        total = 0
-        for batch_items in _chunked(list(effect_map.items()), bs):
-            ids = [iid for iid, _ in batch_items]
-            objs = list(
-                Interaction.objects.filter(id__in=ids).only(
-                    "id", "effect_type", "effect_source"
-                )
-            )
-            for obj in objs:
-                obj.effect_type, obj.effect_source = effect_map[obj.id]
-            Interaction.objects.bulk_update(
-                objs, ["effect_type", "effect_source"], batch_size=bs
-            )
-            total += len(objs)
-
-        self._say(f"  interaction2effect: {total:>6,} updated")
-
-    def _update_kegg(
-        self,
-        data: dict,
-        log: ImportLog,
-        bs: int,
-        swapped: set[int],
-        Interaction: Any,
-    ) -> None:
-        """
-        Inline interaction2keggDirection onto Interaction.kegg_direction.
-        Direction is inverted for any interaction whose pair was swapped during import.
-        """
-        kegg_map: dict[int, int] = {}
-        for r in data["interaction2keggDirection"]:
-            iid, direction = int(r[0]), int(r[1])
-            if iid in swapped:
-                direction = -direction
-            kegg_map[iid] = direction
-
-        if not kegg_map:
-            return
-
-        total = 0
-        for batch_items in _chunked(list(kegg_map.items()), bs):
-            ids = [iid for iid, _ in batch_items]
-            objs = list(
-                Interaction.objects.filter(id__in=ids).only("id", "kegg_direction")
-            )
-            for obj in objs:
-                obj.kegg_direction = kegg_map[obj.id]
-            Interaction.objects.bulk_update(objs, ["kegg_direction"], batch_size=bs)
-            total += len(objs)
-
-        self._say(f"  interaction2keggDir:{total:>5,} updated")
-
     def _import_interaction_m2m(
         self,
         data: dict,
@@ -1470,34 +1237,6 @@ class Command(BaseCommand):
         InteractionPublication: Any,
     ) -> None:
         self._say("Importing interaction M2M tables …")
-
-        # Through-table column naming follows Django convention:
-        #   left side  → interaction_id
-        #   right side → {lowercase_model_name}_id
-
-        Through = Interaction.go_terms.through
-        _bulk(
-            Through,
-            [
-                Through(interaction_id=r[0], goslimterm_id=r[1])
-                for r in data["interaction2GO"]
-            ],
-            bs,
-            ignore_conflicts=False,
-        )
-        self._say(f"  interaction2GO:     {len(data['interaction2GO']):>6,}")
-
-        Through = Interaction.mesh_terms.through
-        _bulk(
-            Through,
-            [
-                Through(interaction_id=r[0], meshterm_id=r[1])
-                for r in data["interaction2mesh"]
-            ],
-            bs,
-            ignore_conflicts=False,
-        )
-        self._say(f"  interaction2mesh:   {len(data['interaction2mesh']):>6,}")
 
         _bulk(
             InteractionPublication,

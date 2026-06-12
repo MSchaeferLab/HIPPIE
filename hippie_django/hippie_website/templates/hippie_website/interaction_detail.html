@@ -117,42 +117,6 @@
     </div>
   </div>
 
-  {# ── Effect / direction (if available) ── #}
-  {% if interaction.kegg_direction or interaction.effect_type %}
-  <div class="hippie-card mb-4">
-    <p class="section-label">Directionality & Effect</p>
-    <div class="d-flex gap-4 flex-wrap">
-      {% if interaction.kegg_direction %}
-        <div>
-          <dt class="text-muted-sm">KEGG Direction</dt>
-          <dd class="mono">
-            {% if interaction.kegg_direction == 1 %}
-              {{ p1.symbol }} → {{ p2.symbol }}
-            {% else %}
-              {{ p2.symbol }} → {{ p1.symbol }}
-            {% endif %}
-          </dd>
-        </div>
-      {% endif %}
-      {% if interaction.effect_type %}
-        <div>
-          <dt class="text-muted-sm">Effect</dt>
-          <dd>
-            {% if interaction.effect_type == 1 %}
-              <span style="color: var(--hippie-teal)">
-                <i class="bi bi-arrow-up-circle me-1"></i>Activation
-              </span>
-            {% else %}
-              <span style="color: var(--hippie-accent)">
-                <i class="bi bi-dash-circle me-1"></i>Inhibition
-              </span>
-            {% endif %}
-          </dd>
-        </div>
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
 
 {% endblock %}
 

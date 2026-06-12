@@ -5,19 +5,16 @@ from .models import (
     ExperimentType,
     Gene,
     GeneSynonym,
-    GOSlimTerm,
     Interaction,
     InteractionCrossReference,
     InteractionType,
     Isoform,
-    MeSHTerm,
     NonInteraction,
     OrthologInteraction,
     Protein,
     ProteinSynonym,
     GeneTissue,
     Publication,
-    SignalingEndpoint,
     Source,
     Species,
     Tissue,
@@ -121,22 +118,6 @@ class SpeciesAdmin(admin.ModelAdmin):
     ordering = ("name",)
 
 
-@admin.register(GOSlimTerm)
-class GOSlimTermAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "namespace")
-    search_fields = ("id", "name")
-    list_filter = ("namespace",)
-    ordering = ("id",)
-    autocomplete_fields = ("parents",)
-
-
-@admin.register(MeSHTerm)
-class MeSHTermAdmin(admin.ModelAdmin):
-    list_display = ("number", "name")
-    search_fields = ("number", "name")
-    ordering = ("number",)
-
-
 @admin.register(Interaction)
 class InteractionAdmin(admin.ModelAdmin):
     list_display = (
@@ -144,12 +125,8 @@ class InteractionAdmin(admin.ModelAdmin):
         "protein_1",
         "protein_2",
         "score",
-        "kegg_direction",
-        "effect_type",
-        "effect_source",
     )
     search_fields = ("=id", "protein_1__gene__entrez_name", "protein_2__gene__entrez_name")
-    list_filter = ("kegg_direction", "effect_type", "effect_source")
     ordering = ("-score", "id")
     list_select_related = ("protein_1", "protein_2")
     autocomplete_fields = ("protein_1", "protein_2")
@@ -158,8 +135,6 @@ class InteractionAdmin(admin.ModelAdmin):
         "experiments",
         "conserved_species",
         "interaction_types",
-        "go_terms",
-        "mesh_terms",
         "publications",
     )
 
@@ -184,14 +159,6 @@ class InteractionCrossReferenceAdmin(admin.ModelAdmin):
         "species",
     )
     autocomplete_fields = ("interaction", "source", "species")
-
-
-@admin.register(SignalingEndpoint)
-class SignalingEndpointAdmin(admin.ModelAdmin):
-    list_display = ("id", "uniprot_id", "type")
-    search_fields = ("uniprot_id",)
-    list_filter = ("type",)
-    ordering = ("uniprot_id",)
 
 
 @admin.register(OrthologInteraction)

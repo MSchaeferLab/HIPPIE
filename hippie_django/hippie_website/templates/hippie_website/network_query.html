@@ -235,88 +235,7 @@
         })();
       </script>
 
-      {# ── 6. Annotation filters ── #}
-      <div class="hippie-card p-3 mb-3">
-        <div class="form-section-label">Functional Annotation</div>
-
-        <div class="mb-3">
-          <label class="form-label" for="id_go_terms_input">GO terms</label>
-          <input type="text" class="form-control" id="id_go_terms_input"
-                 placeholder="e.g. GO:0006915, GO:0097553"
-                 value="{{ form.go_terms.value|default:'' }}"
-                 oninput="document.getElementById('{{ form.go_terms.id_for_label }}').value = this.value" />
-          <input type="hidden"
-                 id="{{ form.go_terms.id_for_label }}"
-                 name="{{ form.go_terms.html_name }}"
-                 value="{{ form.go_terms.value|default:'' }}" />
-        </div>
-
-        <div class="mb-0">
-          <label class="form-label" for="id_mesh_terms_input">MeSH terms</label>
-          <input type="text" class="form-control" id="id_mesh_terms_input"
-                 placeholder="e.g. C01.252, C01.252.400"
-                 value="{{ form.mesh_terms.value|default:'' }}"
-                 oninput="document.getElementById('{{ form.mesh_terms.id_for_label }}').value = this.value" />
-          <input type="hidden"
-                 id="{{ form.mesh_terms.id_for_label }}"
-                 name="{{ form.mesh_terms.html_name }}"
-                 value="{{ form.mesh_terms.value|default:'' }}" />
-        </div>
-      </div>
-
-      {# ── 7. Edge directionality ── #}
-      <div class="hippie-card p-3 mb-3">
-        <div class="form-section-label">Edge Directionality</div>
-
-        {% for choice in form.direction %}
-          <div class="form-check">
-            {{ choice.tag }}
-            <label class="form-check-label" for="{{ choice.id_for_label }}">
-              {{ choice.choice_label }}
-            </label>
-          </div>
-        {% endfor %}
-
-        <div class="mt-3 mb-2">
-          <label class="form-label" for="{{ form.sources.id_for_label }}">
-            {{ form.sources.label }}
-          </label>
-          <input type="text" class="form-control"
-                 id="{{ form.sources.id_for_label }}"
-                 name="{{ form.sources.html_name }}"
-                 value="{{ form.sources.value|default:'' }}"
-                 placeholder="e.g. EGFR FGFR1" />
-          <div class="form-text">{{ form.sources.help_text }}</div>
-        </div>
-
-        <div class="mb-0">
-          <label class="form-label" for="{{ form.sinks.id_for_label }}">
-            {{ form.sinks.label }}
-          </label>
-          <input type="text" class="form-control"
-                 id="{{ form.sinks.id_for_label }}"
-                 name="{{ form.sinks.html_name }}"
-                 value="{{ form.sinks.value|default:'' }}"
-                 placeholder="e.g. TP53 MYC" />
-          <div class="form-text">{{ form.sinks.help_text }}</div>
-        </div>
-      </div>
-
-      {# ── 8. Effect display ── #}
-      <div class="hippie-card p-3 mb-3">
-        <div class="form-section-label">Effect Display</div>
-
-        {% for choice in form.effect %}
-          <div class="form-check">
-            {{ choice.tag }}
-            <label class="form-check-label" for="{{ choice.id_for_label }}">
-              {{ choice.choice_label }}
-            </label>
-          </div>
-        {% endfor %}
-      </div>
-
-      {# ── 9. Negatome edges ── #}
+      {# ── 6. Negatome edges ── #}
       <div class="hippie-card p-3 mb-3">
         <div class="form-section-label">{{ form.negatome_edges.label }}</div>
 
@@ -597,8 +516,6 @@
       source:   row.protein_a,
       target:   row.protein_b,
       score:    row.score,
-      directed: row.kegg_direction !== null,
-      effect:   row.effect_type,   /* 1=activation, -1=inhibition, null */
       isSeed:   row.uploaded_interaction,
     }});
   });

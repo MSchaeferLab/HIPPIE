@@ -181,16 +181,9 @@ class InteractionQuerySet(models.QuerySet):
             "bait_prey__tests_performed",
         )
 
-    def with_annotations(self) -> "InteractionQuerySet":
-        """Prefetch GO and MeSH annotations (needed for functional filtering)."""
-        return self.prefetch_related(
-            "go_terms",
-            "mesh_terms",
-        )
-
     def with_full_detail(self) -> "InteractionQuerySet":
         """Combine all prefetches — for the single-interaction detail page."""
-        return self.with_proteins().with_evidence().with_annotations()
+        return self.with_proteins().with_evidence()
 
     # ------------------------------------------------------------------
     # Protein-centric queries  (mirrors getInteractorsWithBlackList)
@@ -251,21 +244,6 @@ class InteractionQuerySet(models.QuerySet):
         return self.filter(interaction_types__id__in=type_ids).distinct()
 
     # ------------------------------------------------------------------
-    # Directed / effect helpers
-    # ------------------------------------------------------------------
-
-    def with_kegg_direction(self) -> "InteractionQuerySet":
-        """Annotate with kegg_direction (already inlined on the model)."""
-        return self.exclude(kegg_direction__isnull=True)
-
-    def with_effect(self, source: int | None = None) -> "InteractionQuerySet":
-        """Filter to interactions that have an effect annotation."""
-        qs = self.exclude(effect_type__isnull=True)
-        if source is not None:
-            qs = qs.filter(effect_source=source)
-        return qs
-
-    # ------------------------------------------------------------------
     # Convenience: fully-loaded results page query
     # ------------------------------------------------------------------
 
@@ -278,7 +256,6 @@ class InteractionQuerySet(models.QuerySet):
         tissue_ids: list[int] | None = None,
         min_rpkm: float | None = None,
         type_ids: list[int] | None = None,
-        load_annotations: bool = False,
     ) -> "InteractionQuerySet":
         """
         One-call equivalent of the PHP fast_query_tissue.php logic.
@@ -290,7 +267,6 @@ class InteractionQuerySet(models.QuerySet):
         score_threshold : minimum confidence score
         tissue_ids : if given, both partners must be expressed
         type_ids : PSI-MI interaction type filter
-        load_annotations : prefetch GO / MeSH terms (slower)
         """
         if layer == 0:
             qs = self.between_proteins(protein_ids)
@@ -306,12 +282,7 @@ class InteractionQuerySet(models.QuerySet):
         if type_ids:
             qs = qs.of_types(type_ids)
 
-        qs = qs.with_proteins().order_by("-score")
-
-        if load_annotations:
-            qs = qs.with_annotations()
-
-        return qs
+        return qs.with_proteins().order_by("-score")
 
 
 class InteractionManager(models.Manager):
@@ -332,3 +303,4 @@ class InteractionManager(models.Manager):
 
     def network_query(self, protein_ids, **kwargs):
         return self.get_queryset().network_query(protein_ids, **kwargs)
+

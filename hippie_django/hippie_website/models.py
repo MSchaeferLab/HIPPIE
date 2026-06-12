@@ -290,67 +290,6 @@ class Species(models.Model):
 
 
 # =============================================================================
-# Ontology tables
-# =============================================================================
-
-
-class GOSlimTerm(models.Model):
-    """
-    GO slim term definitions with namespace.
-    Primary key is the GO ID string (e.g. "GO:0008150").
-    """
-
-    class Namespace(models.TextChoices):
-        BIOLOGICAL_PROCESS = "biological_process", "Biological Process"
-        CELLULAR_COMPONENT = "cellular_component", "Cellular Component"
-        MOLECULAR_FUNCTION = "molecular_function", "Molecular Function"
-
-    id = models.CharField(max_length=20, primary_key=True)
-    name = models.CharField(max_length=255)
-    namespace = models.CharField(max_length=30, choices=Namespace.choices)
-
-    parents = models.ManyToManyField(
-        "self", related_name="children", symmetrical=False, db_table="GO_slim_term2term"
-    )
-
-    class Meta:
-        db_table = "GO_slim_term"
-        constraints = [
-            models.CheckConstraint(
-                condition=models.Q(
-                    namespace__in=[
-                        "biological_process",
-                        "cellular_component",
-                        "molecular_function",
-                    ]
-                ),
-                name="go_slim_term_namespace_valid",
-            )
-        ]
-
-    def __str__(self):
-        return f"{self.id} {self.name}"
-
-
-class MeSHTerm(models.Model):
-    """
-    MeSH term definitions.
-    Hierarchy is encoded in the `number` field via string prefix
-    matching (e.g. "C01.252.400" is a child of "C01.252").
-    Django's `__startswith` lookup maps to the same SQL pattern.
-    """
-
-    number = models.CharField(max_length=255, primary_key=True)
-    name = models.CharField(max_length=512, db_index=True)
-
-    class Meta:
-        db_table = "mesh_term"
-
-    def __str__(self):
-        return f"{self.number} {self.name[:60]}"
-
-
-# =============================================================================
 # Core interaction
 # =============================================================================
 
@@ -360,22 +299,7 @@ class Interaction(models.Model):
     Central interaction table — the heart of HIPPIE.
 
     Every row always has `protein_1` and `protein_2` set.
-
-    `kegg_direction` and `effect_type`/`effect_source` are inlined from
-    the old `interaction2keggDirection` and `interaction2effect` tables.
     """
-
-    class EffectType(models.IntegerChoices):
-        ACTIVATION = 1, "Activation"
-        INHIBITION = -1, "Inhibition"
-
-    class EffectSource(models.IntegerChoices):
-        SURATANEE = 1, "Suratanee"
-        KEGG = 25, "KEGG"
-
-    class DirectionType(models.IntegerChoices):
-        FORWARD = 1, "protein_1 -> protein_2"
-        BACKWARD = -1, "protein_2 -> protein_1"
 
     # -- Required: protein-level interactors
     protein_1 = models.ForeignKey(
@@ -398,23 +322,6 @@ class Interaction(models.Model):
     # full table. Refreshed by `recompute_interaction_flags`.
     involves_isoform = models.BooleanField(default=False, db_index=True)
 
-    # -- Inlined from interaction2keggDirection
-    #    1 = protein_1 → protein_2, -1 = protein_2 → protein_1
-    kegg_direction = models.SmallIntegerField(
-        choices=DirectionType.choices, null=True, blank=True
-    )
-
-    # -- Inlined from interaction2effect
-    effect_type = models.SmallIntegerField(
-        choices=EffectType.choices, null=True, blank=True
-    )
-    effect_source = models.SmallIntegerField(
-        choices=EffectSource.choices,
-        null=True,
-        blank=True,
-        help_text="Source of effect prediction: 1=Suratanee, 25=KEGG",
-    )
-
     sources = models.ManyToManyField(
         Source, related_name="interactions", db_table="interaction2source"
     )
@@ -429,12 +336,6 @@ class Interaction(models.Model):
     )
     interaction_types = models.ManyToManyField(
         InteractionType, related_name="interactions", db_table="interaction2type"
-    )
-    go_terms = models.ManyToManyField(
-        GOSlimTerm, related_name="interactions", db_table="interaction2GO"
-    )
-    mesh_terms = models.ManyToManyField(
-        MeSHTerm, related_name="interactions", db_table="interaction2mesh"
     )
 
     objects = InteractionManager()
@@ -520,11 +421,6 @@ class NonInteraction(models.Model):
 # =============================================================================
 
 
-class HomoMINTLinkManager(models.Manager):
-    def get_queryset(self):
-        return super().get_queryset().filter(source_id=6)
-
-
 class InteractionCrossReference(models.Model):
     """
     External database cross-references for interactions.
@@ -545,8 +441,7 @@ class InteractionCrossReference(models.Model):
         Species, on_delete=models.CASCADE, related_name="cross_references", null=True
     )
 
-    objects = models.Manager()  # default manager — all rows
-    homomint = HomoMINTLinkManager()  # filtered manager — source_id=6 only
+    objects = models.Manager()
 
     class Meta:
         db_table = "interaction2link"
@@ -556,36 +451,6 @@ class InteractionCrossReference(models.Model):
 
     def __str__(self):
         return f"{self.interaction_id} is referenced by {self.link}"
-
-
-# =============================================================================
-# Shortest path support
-# =============================================================================
-
-
-class SignalingEndpoint(models.Model):
-    """
-    Pre-computed receptor / transcription factor classification for
-    shortest path analysis.
-
-    Used by the shortest path algorithm to identify default sources
-    (receptors) and sinks (transcription factors).
-    """
-
-    class Types(models.TextChoices):
-        RECEPTOR = "rec", "Receptor"
-        TRANSCRIPTION_FACTOR = "tf", "Transcription factor"
-        BOTH = "b", "Both"
-
-    # TODO: Foreign Key to ProteinUniProt or Protein?
-    uniprot_id = models.CharField(max_length=16, unique=True)
-    type = models.CharField(max_length=3, choices=Types.choices)
-
-    class Meta:
-        db_table = "sp_analysis_end_nodes"
-
-    def __str__(self):
-        return f"{self.uniprot_id} ({self.get_type_display()})"
 
 
 # =============================================================================
