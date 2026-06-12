@@ -208,6 +208,7 @@ class Source(models.Model):
 
     name = models.CharField(max_length=100, unique=True)
     url = models.URLField(blank=True, default="")
+    n_connected_interactions = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "source"

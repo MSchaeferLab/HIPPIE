@@ -33,6 +33,7 @@ from hippie_website.models import (
     OrthologInteraction,
     Isoform,
     Protein,
+    ProteinSynonym,
     Publication,
     Source,
 )
@@ -937,6 +938,72 @@ def _upsert(
 
 
 # ---------------------------------------------------------------------------
+# Secondary UniProt accessions
+# ---------------------------------------------------------------------------
+
+
+def _refresh_secondary_accessions() -> None:
+    """
+    Populate ProteinSynonym rows for secondary UniProt accessions.
+
+    sec_ac.txt maps secondary → primary accessions (all organisms).
+    We only add entries for primaries already present in the DB.
+    """
+    secondary_to_primary: dict[str, str] = {}
+    past_header = False
+    with open("data/sec_ac.txt", "r") as f:
+        for line in f:
+            if line.startswith("_"):
+                past_header = True
+                continue
+            if not past_header:
+                continue
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                secondary_to_primary[parts[0]] = parts[-1]
+
+    primary_accs = set(secondary_to_primary.values())
+    protein_by_acc: dict[str, int] = {
+        acc: pk
+        for acc, pk in Protein.objects.filter(
+            uniprot_accession__in=primary_accs
+        ).values_list("uniprot_accession", "pk")
+    }
+
+    pending: list[ProteinSynonym] = [
+        ProteinSynonym(
+            protein_id=protein_by_acc[primary],
+            synonym=secondary,
+            additional_information="secondary_uniprot_accession",
+        )
+        for secondary, primary in secondary_to_primary.items()
+        if primary in protein_by_acc
+    ]
+    ProteinSynonym.objects.bulk_create(
+        pending, batch_size=50_000, ignore_conflicts=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# Source interaction count
+# ---------------------------------------------------------------------------
+
+
+def _recompute_source_interaction_counts() -> None:
+    """Set Source.n_connected_interactions to the count of linked Interactions."""
+    from django.db.models import Count
+
+    counts: dict[int, int] = {
+        row["pk"]: row["cnt"]
+        for row in Source.objects.annotate(cnt=Count("interactions")).values("pk", "cnt")
+    }
+    objs = [
+        Source(pk=pk, n_connected_interactions=cnt) for pk, cnt in counts.items()
+    ]
+    Source.objects.bulk_update(objs, ["n_connected_interactions"], batch_size=1_000)
+
+
+# ---------------------------------------------------------------------------
 # Rescoring
 # ---------------------------------------------------------------------------
 
@@ -1136,4 +1203,8 @@ class Command(BaseCommand):
         call_command("recompute_protein_stats")
         self.stdout.write("Refreshing interaction isoform flags.")
         call_command("recompute_interaction_flags")  # also bumps the browse cache epoch
+        self.stdout.write("Recomputing source interaction counts.")
+        _recompute_source_interaction_counts()
+        self.stdout.write("Refreshing secondary UniProt accessions.")
+        _refresh_secondary_accessions()
         self.stdout.write("Done.")

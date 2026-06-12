@@ -531,7 +531,9 @@ function App() {
                   <thead>
                     <tr>
                       <th style={{cursor:"default"}}>Protein A</th>
+                      <th style={{cursor:"default"}}>Accession A</th>
                       <th style={{cursor:"default"}}>Protein B</th>
+                      <th style={{cursor:"default"}}>Accession B</th>
                       <th onClick={() => { setIntSortDir(d => d === "asc" ? "desc" : "asc"); setPage(1); }}
                           className={`sorted-${intSortDir}`}>Score</th>
                       <th style={{cursor:"default"}}>Sources</th>
@@ -548,12 +550,14 @@ function App() {
                                  target="_blank" rel="noopener noreferrer"><strong>{row.protein_a.symbol}</strong></a>
                             : <strong>{row.protein_a.symbol}</strong>}
                         </td>
+                        <td className="mono">{row.protein_a.uniprot_id || ""}</td>
                         <td>
                           {row.protein_b.uniprot_id
                             ? <a href={`https://www.uniprot.org/uniprot/${row.protein_b.uniprot_id}`}
                                  target="_blank" rel="noopener noreferrer"><strong>{row.protein_b.symbol}</strong></a>
                             : <strong>{row.protein_b.symbol}</strong>}
                         </td>
+                        <td className="mono">{row.protein_b.uniprot_id || ""}</td>
                         <td><span className={`score-badge ${scoreClass(row.score)}`}>{row.score.toFixed(4)}</span></td>
                         <td><span className="tag-chip">{row.source_count}</span></td>
                         <td><span className="tag-chip">{row.experiment_count}</span></td>
