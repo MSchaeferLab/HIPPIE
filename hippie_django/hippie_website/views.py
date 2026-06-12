@@ -1180,7 +1180,7 @@ def browse_export_api(request):
     if mode == "interactions":
         qs = _filtered_interaction_qs(request)
         total = qs.count()
-        header = ["Protein A", "Protein B", "Score", "Sources", "Experiments"]
+        header = ["Protein A", "Accession A", "Protein B", "Accession B", "Score", "Sources", "Experiments"]
         page = qs.prefetch_related("sources", "experiments")[:EXPORT_CAP]
 
         def rows():
@@ -1189,7 +1189,9 @@ def browse_export_api(request):
                 yield _tsv_line(
                     [
                         ix.protein_1.gene.entrez_name or ix.protein_1.uniprot_name,
+                        ix.protein_1.uniprot_accession,
                         ix.protein_2.gene.entrez_name or ix.protein_2.uniprot_name,
+                        ix.protein_2.uniprot_accession,
                         round(ix.score, 4),
                         len(ix.sources.all()),
                         len(ix.experiments.all()),
@@ -1294,7 +1296,11 @@ def browse_filter_meta(request):
     from .models import Tissue, Source, ExperimentType
 
     tissues = list(Tissue.objects.order_by("name").values("id", "name"))
-    sources = list(Source.objects.order_by("name").values("id", "name"))
+    sources = list(
+        Source.objects.filter(n_connected_interactions__gt=0)
+        .order_by("name")
+        .values("id", "name")
+    )
     experiments = list(ExperimentType.objects.order_by("name").values("id", "name"))
     return JsonResponse(
         {"tissues": tissues, "sources": sources, "experiments": experiments}
@@ -1536,7 +1542,11 @@ def _ml_filter_meta() -> dict:
 
     return {
         "tissues": list(Tissue.objects.order_by("name").values("id", "name")),
-        "sources": list(Source.objects.order_by("name").values("id", "name")),
+        "sources": list(
+            Source.objects.filter(n_connected_interactions__gt=0)
+            .order_by("name")
+            .values("id", "name")
+        ),
         "experiments": list(
             ExperimentType.objects.order_by("name").values("id", "name")
         ),
