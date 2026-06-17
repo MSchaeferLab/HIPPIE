@@ -23,16 +23,9 @@ hippie_django/staticfiles/
 hippie_django/media/
 staticfiles/
 
-# Large reference data files (bind-mounted at runtime, not baked into image)
-hippie_django/data/*.txt
-hippie_django/data/*.dat
-hippie_django/data/*.gz
-hippie_django/data/*.zip
-hippie_django/data/*.sql
-hippie_django/data/BIOGRID-*
-hippie_django/data/human*
-hippie_django/data/*.gct
-hippie_django/data/*.gene_info
+# Ignore large reference data files (bind-mounted at runtime, not baked into image)
+hippie_django/data/*
+!hippie_django/data/download_update_data.sh
 hippie_django/logs/
 
 # IDE / OS
