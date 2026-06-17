@@ -4,9 +4,10 @@
 
     LimitRequestBody 52428800
 
-    # Static + media served directly by Apache.
-    Alias ${APACHE_PUBLISHED_PATH}/static/ /vol/static/
-    Alias ${APACHE_PUBLISHED_PATH}/media/  /vol/media/
+    # Static + media + downloads served directly by Apache.
+    Alias ${APACHE_PUBLISHED_PATH}/static/    /vol/static/
+    Alias ${APACHE_PUBLISHED_PATH}/media/     /vol/media/
+    Alias ${APACHE_PUBLISHED_PATH}/downloads/ /vol/downloads/
 
     <Directory /vol/static/>
         Require all granted
@@ -18,13 +19,21 @@
         Options -Indexes
     </Directory>
 
+    <Directory /vol/downloads/>
+        Require all granted
+        Options -Indexes
+        # Force download instead of inline render (large .txt/.tsv release files).
+        Header set Content-Disposition attachment
+    </Directory>
+
     # Reverse proxy to gunicorn. Exclude static/media so they hit the
     # Alias above instead of being forwarded.
     ProxyPreserveHost On
     ProxyRequests Off
 
-    ProxyPass        ${APACHE_PUBLISHED_PATH}/static/ !
-    ProxyPass        ${APACHE_PUBLISHED_PATH}/media/  !
+    ProxyPass        ${APACHE_PUBLISHED_PATH}/static/    !
+    ProxyPass        ${APACHE_PUBLISHED_PATH}/media/     !
+    ProxyPass        ${APACHE_PUBLISHED_PATH}/downloads/ !
     ProxyPass        ${APACHE_PUBLISHED_PATH}/ http://web:8000/ timeout=120
     ProxyPassReverse ${APACHE_PUBLISHED_PATH}/ http://web:8000/
 

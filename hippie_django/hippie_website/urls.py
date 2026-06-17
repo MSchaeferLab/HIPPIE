@@ -10,6 +10,11 @@ urlpatterns = [
     path("browse/", views.browse_view, name="browse"),
     # ── Utility pages ──────────────────────────────────────────
     path("download/", views.download_view, name="download"),
+    path(
+        "downloads/<str:filename>",
+        views.download_dataset,
+        name="download_dataset",
+    ),
     path("information/", views.information_view, name="information"),
     path("machine-learning/", views.machine_learning_view, name="machine_learning"),
     # ── Detail pages ───────────────────────────────────────────
