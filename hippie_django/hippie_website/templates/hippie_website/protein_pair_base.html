@@ -53,7 +53,7 @@
             <dt>Entrez</dt>
             <dd>
               {% if p1.gene_id %}
-                <a href="https://www.ncbi.nlm.nih.gov/gene/{{ p1.gene_id }}" target="_blank" rel="noopener">
+                <a href="https://www.ncbi.nlm.nih.gov/datasets/gene/{{ p1.gene_id }}" target="_blank" rel="noopener">
                   {{ p1.gene_id }}
                 </a>
               {% else %}—{% endif %}
@@ -81,7 +81,7 @@
             <dt>Entrez</dt>
             <dd>
               {% if p2.gene_id %}
-                <a href="https://www.ncbi.nlm.nih.gov/gene/{{ p2.gene_id }}" target="_blank" rel="noopener">
+                <a href="https://www.ncbi.nlm.nih.gov/datasets/gene/{{ p2.gene_id }}" target="_blank" rel="noopener">
                   {{ p2.gene_id }}
                 </a>
               {% else %}—{% endif %}

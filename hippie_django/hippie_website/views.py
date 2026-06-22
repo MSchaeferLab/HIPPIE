@@ -16,9 +16,11 @@ All database access goes through the custom managers defined in managers.py:
 
 import hashlib
 import json
+import os
+from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Exists, OuterRef, Q, Subquery
-from django.http import FileResponse, JsonResponse, StreamingHttpResponse
+from django.http import FileResponse, Http404, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
@@ -753,7 +755,9 @@ class NetworkQueryView(FormView):
             "score_min": cd.get("score_min") or 0.0,
             "tissues": [cd["tissue"].name] if cd.get("tissue") else [],
             "min_rpkm": cd.get("min_rpkm", None),
-            "interaction_type_ids": [t.pk for t in selected_types] if selected_types else [],
+            "interaction_type_ids": [t.pk for t in selected_types]
+            if selected_types
+            else [],
         }
         result = _run_network_query(params)
         output_type = cd.get("output_type", "browser_vis")
@@ -1180,7 +1184,15 @@ def browse_export_api(request):
     if mode == "interactions":
         qs = _filtered_interaction_qs(request)
         total = qs.count()
-        header = ["Protein A", "Accession A", "Protein B", "Accession B", "Score", "Sources", "Experiments"]
+        header = [
+            "Protein A",
+            "Accession A",
+            "Protein B",
+            "Accession B",
+            "Score",
+            "Sources",
+            "Experiments",
+        ]
         page = qs.prefetch_related("sources", "experiments")[:EXPORT_CAP]
 
         def rows():
@@ -1474,6 +1486,29 @@ def protein_detail_view(request, pk: int):
 @require_GET
 def download_view(request):
     return render(request, "hippie_website/download.html", {})
+
+
+# Directory holding the downloadable HIPPIE release files (server-only).
+HIPPIE_VERSIONS_DIR = settings.BASE_DIR / "data" / "hippie_versions"
+
+
+@require_GET
+def download_dataset(request, filename):
+    """Serve a HIPPIE release file from ``data/hippie_versions`` as an attachment.
+
+    ``filename`` is collapsed to a single path component and the resolved path
+    must live directly inside ``HIPPIE_VERSIONS_DIR`` — guards against directory
+    traversal (``..``) and absolute paths.
+    """
+    safe_name = os.path.basename(filename)
+    file_path = (HIPPIE_VERSIONS_DIR / safe_name).resolve()
+    if (
+        safe_name != filename
+        or file_path.parent != HIPPIE_VERSIONS_DIR.resolve()
+        or not file_path.is_file()
+    ):
+        raise Http404("File not found")
+    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=safe_name)
 
 
 @require_GET

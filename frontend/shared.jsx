@@ -7,7 +7,7 @@ export function scoreClass(s) {
 }
 
 export const uniprotUrl = (id) => id ? `https://www.uniprot.org/uniprot/${id}` : null;
-export const entrezUrl  = (id) => id ? `https://www.ncbi.nlm.nih.gov/gene/${id}` : null;
+export const entrezUrl  = (id) => id ? `https://www.ncbi.nlm.nih.gov/datasets/gene/${id}` : null;
 
 export function ScoreBadge({ score }) {
   if (score < 0) return <span className="tag-chip" style={{color:"var(--hippie-accent)"}}>Not found</span>;

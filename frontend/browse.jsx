@@ -505,7 +505,7 @@ function App() {
                         </td>
                         <td>
                           {row.entrez_id
-                            ? <a href={`https://www.ncbi.nlm.nih.gov/gene/${row.entrez_id}`}
+                            ? <a href={`https://www.ncbi.nlm.nih.gov/datasets/gene/${row.entrez_id}`}
                                  target="_blank" rel="noopener noreferrer"
                                  onClick={e => e.stopPropagation()}>
                                 <span className="mono">{row.entrez_id}</span></a>
