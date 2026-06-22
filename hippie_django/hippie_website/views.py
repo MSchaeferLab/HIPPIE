@@ -1490,25 +1490,24 @@ def download_view(request):
 
 # Directory holding the downloadable HIPPIE release files (server-only).
 HIPPIE_VERSIONS_DIR = settings.BASE_DIR / "data" / "hippie_versions"
-
+TECH_SCORING_VIEW_DIR = settings.BASE_DIR / "data" / "technique_scores"
 
 @require_GET
-def download_dataset(request, filename):
-    """Serve a HIPPIE release file from ``data/hippie_versions`` as an attachment.
+def download_dataset(request, filename: str):
+    """Serve a downloadable file as an attachment.
 
-    ``filename`` is collapsed to a single path component and the resolved path
-    must live directly inside ``HIPPIE_VERSIONS_DIR`` — guards against directory
-    traversal (``..``) and absolute paths.
+    Searches ``HIPPIE_VERSIONS_DIR`` then ``TECH_SCORING_VIEW_DIR``.
+    ``filename`` is collapsed to a single path component to guard against
+    directory traversal (``..``) and absolute paths.
     """
     safe_name = os.path.basename(filename)
-    file_path = (HIPPIE_VERSIONS_DIR / safe_name).resolve()
-    if (
-        safe_name != filename
-        or file_path.parent != HIPPIE_VERSIONS_DIR.resolve()
-        or not file_path.is_file()
-    ):
+    if safe_name != filename:
         raise Http404("File not found")
-    return FileResponse(open(file_path, "rb"), as_attachment=True, filename=safe_name)
+    for directory in (HIPPIE_VERSIONS_DIR, TECH_SCORING_VIEW_DIR):
+        file_path = (directory / safe_name).resolve()
+        if file_path.parent == directory.resolve() and file_path.is_file():
+            return FileResponse(open(file_path, "rb"), as_attachment=True, filename=safe_name)
+    raise Http404("File not found")
 
 
 @require_GET

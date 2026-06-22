@@ -311,12 +311,6 @@
           <td>~1.1 million interactions total; 71,000 isoform-specific interactions added</td>
         </tr>
         <tr>
-          <td>2.4</td><td>04/09/26</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v2_4.txt' %}">HIPPIE v2.4 TAB</a></td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-2.4.mitab.txt' %}">HIPPIE v2.4 MITAB</a></td>
-          <td>275,000 new interactions</td>
-        </tr>
-        <tr>
           <td>2.3</td><td>04/29/22</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v2_3.txt' %}">HIPPIE v2.3 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-2.3.mitab.txt' %}">HIPPIE v2.3 MITAB</a></td>
@@ -397,9 +391,12 @@
 <div class="hippie-card mb-4">
   <span class="section-label section-label--inline">Experimental scores</span>
   <p class="text-muted-sm mt-2 mb-0">
-    <a href="{% url 'hippie_website:download_dataset' 'experimental_scores.tsv' %}">List of scores</a>
-    assigned to experimental techniques (used to score the interactions in HIPPIE).
+    Scores assigned to experimental techniques (used to score the interactions in HIPPIE).
   </p>
+  <ul class="mt-1 mb-0" style="font-size:.875rem;">
+    <li><a href="{% url 'hippie_website:download_dataset' 'techniques_scoring_3.0.tsv' %}">Technique scores v3.0</a> (TSV)</li>
+    <li><a href="{% url 'hippie_website:download_dataset' 'techniques_scoring_2.3.tsv' %}">Technique scores v2.3</a> (TSV)</li>
+  </ul>
 </div>
 
 {# ── Versioning ── #}
@@ -407,7 +404,6 @@
   <span class="section-label section-label--inline">Release Notes</span>
   <div class="mt-2" style="font-size:.875rem; color:var(--hippie-ink-muted); line-height:1.8;">
     <div><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v3.0</strong> — Current release. Expanded to ~1.1 million interactions total; added 71,000 isoform-specific interactions.</div>
-    <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.4</strong> — Updated source integration with BioGRID 4.4, IntAct, MINT. Added 275,000 new interactions.</div>
     <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.3</strong> — Added tissue expression data from GTEx v8.</div>
     <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.2</strong> — Revised confidence scoring formula. See <a href="{% url 'hippie_website:information' %}">documentation</a>.</div>
   </div>
