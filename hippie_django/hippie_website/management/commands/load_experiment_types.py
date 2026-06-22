@@ -44,7 +44,7 @@ class Command(BaseCommand):
             for line_number, row in enumerate(reader, start=2):
                 psi_mi_code = row[0].strip()
                 name = row[1].strip()
-                new_score = row[4].strip()
+                new_score = row[2].strip()
 
                 try:
                     quality_score = float(new_score)
