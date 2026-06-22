@@ -41,6 +41,11 @@ python manage.py update_homology_data \
     --intact_file data/intact.txt
 
 python manage.py hippie_update --rescore-all
+
+# Import bait-prey association and negative interaction (non-interaction) data
+# Requires data/POD_flat.pq — place the file in hippie_django/data/ before running
+python manage.py import_pod_data --file data/POD_flat.pq
+
 python manage.py update_tissue_data \
     --gct-path              data/GTEx_Analysis_*_gene_reads.gct \
     --annotation-sample-path data/GTEx_Analysis_*_SampleAttributesDS.txt \
@@ -190,6 +195,10 @@ docker compose exec web python manage.py update_tissue_data \
 
 # 6. Rescoring
 docker compose exec web python manage.py hippie_update --rescore-all
+
+# 7. Import bait-prey association and negative interaction (non-interaction) data
+# Requires data/POD_flat.pq — place the file in hippie_django/data/ before running
+docker compose exec web python manage.py import_pod_data --file data/POD_flat.pq
 ```
 
 `collectstatic` runs automatically on each `web` boot; migrations are manual

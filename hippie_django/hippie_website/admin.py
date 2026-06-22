@@ -18,7 +18,6 @@ from .models import (
     Source,
     Species,
     Tissue,
-    BaitPreyTest,
 )
 
 
@@ -171,14 +170,14 @@ class OrthologInteractionAdmin(admin.ModelAdmin):
 
 @admin.register(BaitPreyAssociation)
 class BaitPreyAssociationAdmin(admin.ModelAdmin):
-    list_display = ("id", "interaction", "direction")
+    list_display = ("id", "interaction", "number_of_tests", "number_of_observed")
     search_fields = (
         "=interaction__id",
         "interaction__protein_1__gene__entrez_name",
         "interaction__protein_2__gene__entrez_name",
-        "=tests_performed__publication__pmid",
+        "=publications__pmid",
     )
-    list_filter = ("direction",)
+    list_filter = ("noninteraction",)
     list_select_related = (
         "interaction",
         "interaction__protein_1",
@@ -194,12 +193,3 @@ class NonInteractionAdmin(admin.ModelAdmin):
     ordering = ("-score", "id")
     list_select_related = ("protein_1", "protein_2")
     autocomplete_fields = ("protein_1", "protein_2")
-
-
-@admin.register(BaitPreyTest)
-class BaitPreyTestAdmin(admin.ModelAdmin):
-    list_display = ("id", "detection", "publication", "method")
-    search_fields = ("detection", "=publication__pmid", "method")
-    list_filter = ("detection",)
-    ordering = ("-publication__pmid",)
-    autocomplete_fields = ("publication",)

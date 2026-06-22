@@ -965,9 +965,8 @@ def _refresh_secondary_accessions() -> None:
     primary_accs = set(secondary_to_primary.values())
     protein_by_acc: dict[str, int] = {
         acc: pk
-        for acc, pk in Protein.objects.filter(
-            uniprot_accession__in=primary_accs
-        ).values_list("uniprot_accession", "pk")
+        for acc, pk in Protein.objects.values_list("uniprot_accession", "pk")
+        if acc in primary_accs
     }
 
     pending: list[ProteinSynonym] = [
