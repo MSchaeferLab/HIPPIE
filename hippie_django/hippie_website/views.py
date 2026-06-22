@@ -1342,13 +1342,8 @@ def interaction_detail_view(request, pk: int):
     )
 
     # Compute bait-prey detection stats from prefetched data (no extra queries).
-    all_tests = [
-        test
-        for assoc in interaction.bait_prey.all()
-        for test in assoc.tests_performed.all()
-    ]
-    bait_prey_total_tested = len(all_tests)
-    bait_prey_times_observed = sum(1 for t in all_tests if t.detection)
+    bait_prey_total_tested = sum(assoc.number_of_tests for assoc in interaction.bait_prey.all())
+    bait_prey_times_observed = sum(assoc.number_of_observed for assoc in interaction.bait_prey.all())
 
     p1 = interaction.protein_1
     p2 = interaction.protein_2
@@ -1407,18 +1402,12 @@ def noninteraction_detail_view(request, pk: int):
             "protein_1", "protein_1__gene", "protein_2", "protein_2__gene"
         ).prefetch_related(
             "bait_prey",
-            "bait_prey__tests_performed",
         ),
         pk=pk,
     )
 
-    all_tests = [
-        test
-        for assoc in noninteraction.bait_prey.all()
-        for test in assoc.tests_performed.all()
-    ]
-    bait_prey_total_tested = len(all_tests)
-    bait_prey_times_observed = sum(1 for t in all_tests if t.detection)
+    bait_prey_total_tested = sum(assoc.number_of_tests for assoc in noninteraction.bait_prey.all())
+    bait_prey_times_observed = sum(assoc.number_of_observed for assoc in noninteraction.bait_prey.all())
 
     p1 = noninteraction.protein_1
     p2 = noninteraction.protein_2

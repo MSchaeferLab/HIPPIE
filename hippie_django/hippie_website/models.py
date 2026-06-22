@@ -493,33 +493,7 @@ class OrthologInteraction(models.Model):
         return f"{self.gene_1.entrez_name}–{self.gene_2.entrez_name}"
 
 
-class BaitPreyTest(models.Model):
-    detection = models.BooleanField(
-        help_text="True if bait-prey association is detected, False if tested but not detected"
-    )
-    publication = models.ForeignKey(
-        Publication, on_delete=models.CASCADE, related_name="bait_prey_tests"
-    )
-    method = models.ForeignKey(ExperimentType, on_delete=models.CASCADE)
-
-    class Meta:
-        db_table = "bait_prey_test"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["detection", "publication", "method"],
-                name="bait_prey_test_unique",
-            ),
-        ]
-
-    def __str__(self):
-        return f"PMID:{self.publication} {self.method.name} detected={self.detection}"
-
-
 class BaitPreyAssociation(models.Model):
-    class Directions(models.IntegerChoices):
-        PROTEIN_ONE_BAIT = 1, "Protein 1 Bait"
-        PROTEIN_TWO_BAIT = -1, "Protein 2 Bait"
-
     interaction = models.ForeignKey(
         Interaction,
         on_delete=models.CASCADE,
@@ -535,23 +509,27 @@ class BaitPreyAssociation(models.Model):
         null=True,
         blank=True,
     )
-    direction = models.SmallIntegerField(
-        choices=Directions.choices,
-        help_text="1 = protein_1 is bait, -1 = protein_2 is bait",
-    )
-
-    tests_performed = models.ManyToManyField(
-        BaitPreyTest,
+    
+    publications = models.ManyToManyField(
+        Publication,
         related_name="bait_prey_associations",
-        db_table="bait_prey_assoc2test",
+        db_table="bait_prey_assoc2publication",
     )
+    number_of_observed = models.PositiveIntegerField(default=0)
+    number_of_tests = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "bait_prey_assoc"
         constraints = [
             models.UniqueConstraint(
-                fields=["interaction", "direction"],
-                name="bait_pray_unique",
+                fields=["interaction"],
+                condition=models.Q(interaction__isnull=False),
+                name="bait_prey_unique_interaction",
+            ),
+            models.UniqueConstraint(
+                fields=["noninteraction"],
+                condition=models.Q(noninteraction__isnull=False),
+                name="bait_prey_unique_noninteraction",
             ),
             models.CheckConstraint(
                 condition=models.Q(interaction__isnull=True)
@@ -561,7 +539,7 @@ class BaitPreyAssociation(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.interaction} direction={self.get_direction_display()} tests={self.tests_performed.count()}"
+        return f"{self.interaction} number_of_tests={self.number_of_tests}"
 
 
 class SplitJob(models.Model):

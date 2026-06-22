@@ -33,7 +33,6 @@ from django.urls import reverse
 
 from .models import (
     BaitPreyAssociation,
-    BaitPreyTest,
     Gene,
     Interaction,
     Isoform,
@@ -726,14 +725,12 @@ class NoninteractionDetailViewTest(HippieTestCase):
         super().setUpTestData()
         cls.ni = make_noninteraction(cls.brca1, cls.tp53, score=0.25)
         pub = Publication.objects.create(pmid=99001)
-        cls.bp_test = BaitPreyTest.objects.create(
-            detection=True, publication=pub, method=cls.exp
-        )
         cls.bp_assoc = BaitPreyAssociation.objects.create(
             noninteraction=cls.ni,
-            direction=BaitPreyAssociation.Directions.PROTEIN_ONE_BAIT,
+            number_of_tests=1,
+            number_of_observed=1,
         )
-        cls.bp_assoc.tests_performed.add(cls.bp_test)
+        cls.bp_assoc.publications.add(pub)
 
     def test_200(self):
         r = self.client.get(
@@ -1221,7 +1218,7 @@ class NetworkQueryFilterTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 21. BaitPreyTest / BaitPreyAssociation models
+# 21. BaitPreyAssociation model
 # ---------------------------------------------------------------------------
 
 
@@ -1231,28 +1228,18 @@ class BaitPreyModelTest(HippieTestCase):
         super().setUpTestData()
         pub1 = Publication.objects.create(pmid=55555)
         pub2 = Publication.objects.create(pmid=55556)
-        cls.bp_test = BaitPreyTest.objects.create(
-            detection=True, publication=pub1, method=cls.exp
-        )
-        cls.bp_test_neg = BaitPreyTest.objects.create(
-            detection=False, publication=pub2, method=cls.exp
-        )
         cls.ni = make_noninteraction(cls.brca1, cls.tp53, score=0.2)
         cls.bp_assoc = BaitPreyAssociation.objects.create(
             noninteraction=cls.ni,
-            direction=BaitPreyAssociation.Directions.PROTEIN_ONE_BAIT,
+            number_of_tests=2,
+            number_of_observed=1,
         )
-        cls.bp_assoc.tests_performed.add(cls.bp_test, cls.bp_test_neg)
-
-    def test_bait_prey_test_str(self):
-        s = str(self.bp_test)
-        self.assertIn("55555", s)
-        self.assertIn("Two-hybrid", s)
+        cls.bp_assoc.publications.add(pub1, pub2)
 
     def test_bait_prey_assoc_str(self):
         s = str(self.bp_assoc)
         self.assertIsInstance(s, str)
-        self.assertIn("Protein 1 Bait", s)
+        self.assertIn("number_of_tests", s)
 
     def test_bait_prey_assoc_linked_to_noninteraction(self):
         self.assertEqual(self.bp_assoc.noninteraction_id, self.ni.pk)

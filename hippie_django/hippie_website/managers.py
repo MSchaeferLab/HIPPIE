@@ -178,7 +178,7 @@ class InteractionQuerySet(models.QuerySet):
             "cross_references__source",
             "cross_references__species",
             "bait_prey",
-            "bait_prey__tests_performed",
+            "bait_prey__publications",
         )
 
     def with_full_detail(self) -> "InteractionQuerySet":
