@@ -20,12 +20,6 @@ OUTPUT_CHOICES = [
     ("psimitab", "Download – PSI-MI TAB 2.5"),
 ]
 
-NEGATOME_EDGES_CHOICES = [
-    ("none", "Only interactions"),
-    ("exclusively", "Only non-interactions"),
-    ("both", "Any edges"),
-]
-
 
 # ---------------------------------------------------------------------------
 # Form
@@ -122,12 +116,6 @@ class NetworkQueryForm(forms.Form):
         required=False,
     )
 
-    negatome_edges = forms.ChoiceField(
-        label="Return experimental non-interactions",
-        choices=NEGATOME_EDGES_CHOICES,
-        initial="none",
-        widget=forms.RadioSelect,
-    )
 
     def clean(self):
         cleaned = super().clean()
