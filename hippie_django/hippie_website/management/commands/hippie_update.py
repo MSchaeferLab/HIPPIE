@@ -994,12 +994,38 @@ def _recompute_source_interaction_counts() -> None:
 
     counts: dict[int, int] = {
         row["pk"]: row["cnt"]
-        for row in Source.objects.annotate(cnt=Count("interactions")).values("pk", "cnt")
+        for row in Source.objects.annotate(cnt=Count("interactions")).values(
+            "pk", "cnt"
+        )
     }
-    objs = [
-        Source(pk=pk, n_connected_interactions=cnt) for pk, cnt in counts.items()
-    ]
+    objs = [Source(pk=pk, n_connected_interactions=cnt) for pk, cnt in counts.items()]
     Source.objects.bulk_update(objs, ["n_connected_interactions"], batch_size=1_000)
+
+
+# ---------------------------------------------------------------------------
+# Source homepage URLs
+# ---------------------------------------------------------------------------
+
+
+def _assign_source_urls() -> None:
+    """
+    Backfill Source.url from the known-homepage registry.
+
+    Idempotent and run on every invocation: fills only sources whose url is
+    still blank, so manually-edited URLs (e.g. via the admin) are preserved.
+    Covers both freshly imported sources and pre-existing rows from earlier
+    runs that predate URL assignment.
+    """
+    from hippie_website.source_links import homepage_url
+
+    objs: list[Source] = []
+    for source in Source.objects.filter(url=""):
+        url = homepage_url(source.name)
+        if url:
+            source.url = url
+            objs.append(source)
+    if objs:
+        Source.objects.bulk_update(objs, ["url"], batch_size=1_000)
 
 
 # ---------------------------------------------------------------------------
@@ -1204,6 +1230,8 @@ class Command(BaseCommand):
         call_command("recompute_interaction_flags")  # also bumps the browse cache epoch
         self.stdout.write("Recomputing source interaction counts.")
         _recompute_source_interaction_counts()
+        self.stdout.write("Assigning source homepage URLs.")
+        _assign_source_urls()
         self.stdout.write("Refreshing secondary UniProt accessions.")
         _refresh_secondary_accessions()
         self.stdout.write("Done.")

@@ -1342,8 +1342,12 @@ def interaction_detail_view(request, pk: int):
     )
 
     # Compute bait-prey detection stats from prefetched data (no extra queries).
-    bait_prey_total_tested = sum(assoc.number_of_tests for assoc in interaction.bait_prey.all())
-    bait_prey_times_observed = sum(assoc.number_of_observed for assoc in interaction.bait_prey.all())
+    bait_prey_total_tested = sum(
+        assoc.number_of_tests for assoc in interaction.bait_prey.all()
+    )
+    bait_prey_times_observed = sum(
+        assoc.number_of_observed for assoc in interaction.bait_prey.all()
+    )
 
     p1 = interaction.protein_1
     p2 = interaction.protein_2
@@ -1356,6 +1360,16 @@ def interaction_detail_view(request, pk: int):
         .first()
     )
     conserved_species = ortholog.ortholog_species.all() if ortholog else []
+
+    # Annotate each source with a per-pair "all evidence" link where one is
+    # known (e.g. IntAct pairwise search); None otherwise. See source_links.py.
+    from hippie_website.source_links import pair_search_url
+
+    sources = list(interaction.sources.all())
+    for source in sources:
+        source.pair_url = pair_search_url(
+            source.name, p1.uniprot_accession, p2.uniprot_accession
+        )
 
     context = {
         "interaction": interaction,
@@ -1372,7 +1386,7 @@ def interaction_detail_view(request, pk: int):
             "symbol": p2.gene.entrez_name or p2.uniprot_name,
         },
         # All prefetched — .all() hits the cache.
-        "sources": interaction.sources.all(),
+        "sources": sources,
         "publications": interaction.publications.all(),
         "experiments": interaction.experiments.all().order_by("-quality_score"),
         "species": conserved_species,
@@ -1406,8 +1420,12 @@ def noninteraction_detail_view(request, pk: int):
         pk=pk,
     )
 
-    bait_prey_total_tested = sum(assoc.number_of_tests for assoc in noninteraction.bait_prey.all())
-    bait_prey_times_observed = sum(assoc.number_of_observed for assoc in noninteraction.bait_prey.all())
+    bait_prey_total_tested = sum(
+        assoc.number_of_tests for assoc in noninteraction.bait_prey.all()
+    )
+    bait_prey_times_observed = sum(
+        assoc.number_of_observed for assoc in noninteraction.bait_prey.all()
+    )
 
     p1 = noninteraction.protein_1
     p2 = noninteraction.protein_2
@@ -1481,6 +1499,7 @@ def download_view(request):
 HIPPIE_VERSIONS_DIR = settings.BASE_DIR / "data" / "hippie_versions"
 TECH_SCORING_VIEW_DIR = settings.BASE_DIR / "data" / "technique_scores"
 
+
 @require_GET
 def download_dataset(request, filename: str):
     """Serve a downloadable file as an attachment.
@@ -1495,7 +1514,9 @@ def download_dataset(request, filename: str):
     for directory in (HIPPIE_VERSIONS_DIR, TECH_SCORING_VIEW_DIR):
         file_path = (directory / safe_name).resolve()
         if file_path.parent == directory.resolve() and file_path.is_file():
-            return FileResponse(open(file_path, "rb"), as_attachment=True, filename=safe_name)
+            return FileResponse(
+                open(file_path, "rb"), as_attachment=True, filename=safe_name
+            )
     raise Http404("File not found")
 
 

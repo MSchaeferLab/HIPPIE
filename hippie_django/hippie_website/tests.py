@@ -1376,3 +1376,68 @@ class UpdateTissueDataCommandTest(TestCase):
 
         gene_tissue.refresh_from_db()
         self.assertEqual(gene_tissue.median_rpkm, 5.0)
+
+
+# ---------------------------------------------------------------------------
+# Source homepage URLs + per-pair evidence links
+# ---------------------------------------------------------------------------
+
+
+class SourceLinkTest(HippieTestCase):
+    def test_helpers_resolve_case_insensitively(self):
+        from .source_links import homepage_url, pair_search_url
+
+        self.assertEqual(homepage_url("BioGRID"), "https://thebiogrid.org/")
+        self.assertEqual(homepage_url("biogrid"), "https://thebiogrid.org/")
+        self.assertEqual(homepage_url("pdb"), "https://www.rcsb.org/")  # alias
+        self.assertEqual(homepage_url("no-such-db"), "")
+        self.assertEqual(
+            pair_search_url("IntAct", "P04637", "Q00987"),
+            "https://www.ebi.ac.uk/intact/search?query=id:P04637%20AND%20id:Q00987%20AND%20source:intact",
+        )
+        # Scoped to the source DB (matches a confirmed-working IntAct URL).
+        self.assertEqual(
+            pair_search_url("DIP", "P42858", "Q13501"),
+            "https://www.ebi.ac.uk/intact/search?query=id:P42858%20AND%20id:Q13501%20AND%20source:dip",
+        )
+        # Hyphenated source token is quoted (MIQL treats a bare '-' as NOT).
+        self.assertTrue(
+            pair_search_url("bhf-ucl", "A", "B").endswith(
+                "%20AND%20source:%22bhf-ucl%22"
+            )
+        )
+        self.assertIsNone(pair_search_url("BioGRID", "P04637", "Q00987"))
+        self.assertIsNone(pair_search_url("IntAct", None, "Q00987"))
+
+    def test_detail_view_annotates_pair_url(self):
+        intact = Source.objects.create(
+            name="IntAct", url="https://www.ebi.ac.uk/intact/"
+        )
+        self.ix.sources.add(intact)
+        r = self.client.get(
+            reverse("hippie_website:interaction_detail", args=[self.ix.pk])
+        )
+        by_name = {s.name: s for s in r.context["sources"]}
+        url = by_name["IntAct"].pair_url
+        self.assertTrue(url.startswith("https://www.ebi.ac.uk/intact/search?query="))
+        self.assertIn("id:P38398", url)
+        self.assertIn("id:P04637", url)
+        self.assertIn("source:intact", url)
+        # BioGRID has no key-free pairwise web URL → homepage-only.
+        self.assertIsNone(by_name["BioGRID"].pair_url)
+
+    def test_assign_source_urls_backfills_blank_only(self):
+        from .management.commands.hippie_update import _assign_source_urls
+
+        blank = Source.objects.create(name="dip", url="")
+        manual = Source.objects.create(name="mint", url="https://manual.example/")
+        unknown = Source.objects.create(name="no-such-db", url="")
+
+        _assign_source_urls()
+
+        blank.refresh_from_db()
+        manual.refresh_from_db()
+        unknown.refresh_from_db()
+        self.assertEqual(blank.url, "https://dip.doe-mbi.ucla.edu/")
+        self.assertEqual(manual.url, "https://manual.example/")  # preserved
+        self.assertEqual(unknown.url, "")  # unknown name stays blank

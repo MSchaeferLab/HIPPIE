@@ -230,7 +230,7 @@ function App() {
   return (
     <div>
       <div className="hippie-hero">
-        <h1>Query Protein<br /><em style={{color:"var(--hippie-teal)"}}>Interactions</em></h1>
+        <h1>Protein<br /><em style={{color:"var(--hippie-teal)"}}>Query</em></h1>
         <p>Enter a UniProt ID, UniProt accession, Entrez gene ID, or gene symbol to retrieve
            all known human protein–protein interactions and their confidence scores.</p>
       </div>
