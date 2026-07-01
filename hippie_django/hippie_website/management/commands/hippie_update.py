@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections import defaultdict
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -110,13 +111,29 @@ def _parse_pmid(field_val: str) -> tuple[int | None, bool]:
     return None, True
 
 
+_CV_NAME_RE = re.compile(r"\((.*)\)")
+
+
+def _extract_cv_name(field_val: str) -> str:
+    """Extract a PSI-MI CV term's display name from a MITAB field.
+
+    Matches from the first '(' to the last ')' (regex backtracking, not
+    str.split) so a name containing its own literal parens — e.g. IntAct's
+    'proteinchip(r) on a surface-enhanced laser desorption/ionization' —
+    isn't truncated mid-word. Also strips the extra literal quote-wrapping
+    IntAct sometimes adds: psi-mi:"MI:0095"("proteinchip(r) ...").
+    """
+    match = _CV_NAME_RE.search(field_val)
+    name = match.group(1) if match else field_val
+    return name.strip('"')
+
+
 def _parse_interaction_type(field_val: str) -> str | None:
-    interaction_type = field_val.split("(")[-1].rstrip(")")
-    return interaction_type
+    return _extract_cv_name(field_val)
 
 
 def _parse_tech(field_val: str) -> tuple[tuple[str, str] | None, bool]:
-    name = field_val.split("(")[-1].rstrip(")")
+    name = _extract_cv_name(field_val)
     name = _TECH_NORM.get(name, name)
     if name in _SKIP_TECHS:
         return None, True
@@ -139,7 +156,7 @@ def _parse_uniprot_acc(field_val: str) -> str | None:
 
 
 def _parse_source(field_val: str) -> str:
-    return field_val.split("(")[-1].rstrip(")")
+    return _extract_cv_name(field_val)
 
 
 def _parse_links(field_val: str) -> set[tuple[str, str]]:

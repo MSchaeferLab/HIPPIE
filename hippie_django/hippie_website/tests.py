@@ -1441,3 +1441,62 @@ class SourceLinkTest(HippieTestCase):
         self.assertEqual(blank.url, "https://dip.doe-mbi.ucla.edu/")
         self.assertEqual(manual.url, "https://manual.example/")  # preserved
         self.assertEqual(unknown.url, "")  # unknown name stays blank
+
+
+class MitabCvNameParsingTest(TestCase):
+    """Regression test: PSI-MI CV names with embedded parens/quotes.
+
+    IntAct's raw MITAB field for MI:0095 is
+    psi-mi:"MI:0095"("proteinchip(r) on a surface-enhanced laser
+    desorption/ionization"). The old `field_val.split("(")[-1].rstrip(")")`
+    logic split on the LAST "(" (inside the name's own "(r)") instead of
+    the first, and only stripped trailing ")" chars, producing the
+    corrupted 'r) on a surface-enhanced laser desorption/ionization"'.
+    """
+
+    def test_parse_tech_handles_embedded_parens_and_quotes(self):
+        from .management.commands.hippie_update import _parse_tech
+
+        field = (
+            'psi-mi:"MI:0095"("proteinchip(r) on a surface-enhanced '
+            'laser desorption/ionization")'
+        )
+        result, skip = _parse_tech(field)
+        self.assertFalse(skip)
+        assert result is not None
+        mi_code, name = result
+        self.assertEqual(mi_code, "MI:0095")
+        self.assertEqual(
+            name, "proteinchip(r) on a surface-enhanced laser desorption/ionization"
+        )
+
+    def test_parse_tech_plain_name_unaffected(self):
+        from .management.commands.hippie_update import _parse_tech
+
+        result, skip = _parse_tech('psi-mi:"MI:0018"(two hybrid)')
+        self.assertFalse(skip)
+        assert result is not None
+        _, name = result
+        self.assertEqual(name, "Two-hybrid")  # normalized via _TECH_NORM
+
+    def test_parse_interaction_type_handles_embedded_parens(self):
+        from .management.commands.hippie_update import _parse_interaction_type
+
+        itype = _parse_interaction_type(
+            'psi-mi:"MI:0095"("proteinchip(r) on a surface-enhanced '
+            'laser desorption/ionization")'
+        )
+        self.assertEqual(
+            itype, "proteinchip(r) on a surface-enhanced laser desorption/ionization"
+        )
+
+    def test_parse_source_handles_embedded_parens(self):
+        from .management.commands.hippie_update import _parse_source
+
+        source = _parse_source(
+            'psi-mi:"MI:0095"("proteinchip(r) on a surface-enhanced '
+            'laser desorption/ionization")'
+        )
+        self.assertEqual(
+            source, "proteinchip(r) on a surface-enhanced laser desorption/ionization"
+        )
