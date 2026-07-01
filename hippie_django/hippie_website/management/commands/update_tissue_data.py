@@ -4,6 +4,7 @@ import numpy as np
 from django.core.management.base import BaseCommand, CommandError
 
 from hippie_website.models import Gene, GeneTissue, Tissue
+from ._sources import data_path
 
 MIN_MEDIAN_RPKM = 1.0
 
@@ -50,20 +51,18 @@ class Command(BaseCommand):
     def add_arguments(self, parser) -> None:
         parser.add_argument(
             "--gct-path",
-            help="Path to the GTEx gct file",
-            required=True,
+            default=str(data_path("gtex_gene_reads")),
+            help="Path to the GTEx gct file (default: from data/sources.json)",
         )
         parser.add_argument(
             "--entrez-homo-path",
-            default=str(
-                Path(__file__).resolve().parents[3] / "data" / "Homo_sapiens.gene_info"
-            ),
-            help="Path to the entrez gene-file",
+            default=str(data_path("gene_info")),
+            help="Path to the entrez gene-file (default: from data/sources.json)",
         )
         parser.add_argument(
             "--annotation-sample-path",
-            help="Path to the GTEx sample annotation-file",
-            required=True,
+            default=str(data_path("gtex_sample_attrs")),
+            help="Path to the GTEx sample annotation-file (default: from data/sources.json)",
         )
 
     def handle(self, **options) -> None:
