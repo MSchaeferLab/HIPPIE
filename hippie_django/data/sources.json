@@ -6,26 +6,26 @@
       "filename": "sec_ac.txt",
       "decompress": "none",
       "version": "current",
-      "fetched": null,
-      "last_modified": null,
-      "etag": null
+      "fetched": "2026-07-01",
+      "last_modified": "Wed, 10 Jun 2026 20:00:00 GMT",
+      "etag": "\"2f345a3-653ebb0451000\""
     },
     "human_idmapping": {
       "url": "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/HUMAN_9606_idmapping.dat.gz",
       "filename": "HUMAN_9606_idmapping.dat",
       "decompress": "gz",
       "version": "current_release",
-      "fetched": null,
-      "last_modified": null,
-      "etag": null
+      "fetched": "2026-07-01",
+      "last_modified": "Wed, 10 Jun 2026 20:00:00 GMT",
+      "etag": "\"241700d-653ebb0451000\""
     },
     "gene_info": {
       "url": "https://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Mammalia/Homo_sapiens.gene_info.gz",
       "filename": "Homo_sapiens.gene_info",
       "decompress": "gz",
       "version": "current",
-      "fetched": null,
-      "last_modified": null,
+      "fetched": "2026-07-01",
+      "last_modified": "Wed, 01 Jul 2026 12:18:55 GMT",
       "etag": null
     },
     "intact_human": {
@@ -33,9 +33,9 @@
       "filename": "human.txt",
       "decompress": "zip",
       "version": "current",
-      "fetched": null,
-      "last_modified": null,
-      "etag": null
+      "fetched": "2026-07-01",
+      "last_modified": "Wed, 14 Jan 2026 11:58:40 GMT",
+      "etag": "\"45cda05b-64857d43803b2\""
     },
     "intact_full": {
       "url": "https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/intact.zip",
@@ -43,17 +43,19 @@
       "filename": "intact.txt",
       "decompress": "zip",
       "version": "current",
-      "fetched": null,
-      "last_modified": null,
-      "etag": null
+      "fetched": "2026-07-01",
+      "last_modified": "Wed, 14 Jan 2026 11:51:57 GMT",
+      "etag": "\"50836a8b-64857bc3f8ba1\""
     },
     "biogrid": {
       "url": "https://downloads.thebiogrid.org/Download/BioGRID/Latest-Release/BIOGRID-ALL-LATEST.mitab.zip",
-      "filename": "BIOGRID-ALL-LATEST.mitab.txt",
+      "filename": "BIOGRID-ALL-5.0.258.mitab.txt",
       "decompress": "zip",
-      "version": "LATEST",
-      "fetched": null,
-      "last_modified": null,
+      "track_extracted": true,
+      "version_regex": "BIOGRID-ALL-(.+)\\.mitab\\.txt",
+      "version": "5.0.258",
+      "fetched": "2026-07-01",
+      "last_modified": "Wed, 01 Jul 2026 12:44:18 GMT",
       "etag": null
     },
     "gtex_sample_attrs": {
@@ -61,37 +63,39 @@
       "filename": "GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt",
       "decompress": "none",
       "version": "v11",
-      "fetched": null,
-      "last_modified": null,
-      "etag": null
+      "fetched": "2026-07-01",
+      "last_modified": "Thu, 15 Jan 2026 18:59:33 GMT",
+      "etag": "\"4c45e25c3fc5ec92a97da0d4bcba1207\""
     },
     "gtex_gene_reads": {
       "url": "https://storage.googleapis.com/adult-gtex/bulk-gex/v11/rna-seq/GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct.gz",
       "filename": "GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct",
       "decompress": "gz",
       "version": "v11_2025-08-22",
-      "fetched": null,
-      "last_modified": null,
-      "etag": null
+      "fetched": "2026-07-01",
+      "last_modified": "Thu, 15 Jan 2026 19:04:13 GMT",
+      "etag": "\"93ae0d49692e5afaa34411ea754c2742\""
     },
     "orthology_alliance": {
       "url": "https://fms.alliancegenome.org/download/ORTHOLOGY-ALLIANCE_COMBINED.tsv.gz",
       "filename": "ORTHOLOGY-ALLIANCE_COMBINED.tsv",
       "decompress": "gz",
       "version": "current",
-      "fetched": null,
+      "fetched": "2026-07-01",
       "last_modified": null,
       "etag": null
     },
     "wormbase": {
-      "url": "https://downloads.wormbase.org/releases/current-production-release/species/c_elegans/PRJNA13758/annotation/c_elegans.PRJNA13758.WS298.xrefs.txt.gz",
+      "url_dir": "https://downloads.wormbase.org/releases/current-production-release/species/c_elegans/PRJNA13758/annotation/",
       "filename": "c_elegans.PRJNA13758.WS298.xrefs.txt.gz",
+      "filename_glob": "c_elegans.PRJNA13758.WS*.xrefs.txt.gz",
       "decompress": "none",
       "manual": true,
       "taxon": "6239",
       "db": "WormBase",
       "gz": 1,
       "version": "WS298",
+      "_note": "Host is behind Cloudflare (curl gets a 403 JS challenge) so this must be downloaded in a browser. filename_glob lets the pipeline pick up any WS release you drop in without editing this entry.",
       "fetched": null,
       "last_modified": null,
       "etag": null
@@ -180,10 +184,10 @@
       "_note": "Intermediate MOD UniProt->gene map written by update_homology_data; no upstream URL."
     },
     "techniques_scoring": {
-      "filename": "techniques_scoring_04-05-26.csv",
+      "filename": "technique_scores/techniques_scoring_3.0.tsv",
       "local": true,
-      "version": "04-05-26",
-      "_note": "Manually curated experiment-technique scoring TSV consumed by load_experiment_types."
+      "version": "3.0",
+      "_note": "Manually curated experiment-technique scoring TSV consumed by load_experiment_types. Lives in data/technique_scores/; bump filename+version when promoting a new revision."
     },
     "pod_flat": {
       "filename": "POD_flat.pq",

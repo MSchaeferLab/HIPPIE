@@ -317,6 +317,8 @@ hippie_django/data/BIOGRID-*
 hippie_django/data/human*
 hippie_django/data/*.gct
 hippie_django/data/*.gene_info
+hippie_django/data/*.tsv
+hippie_django/data/*.pq
 hippie_django/data/species/*.zip
 hippie_django/data/species/*.txt
 hippie_django/data/species/*.tsv

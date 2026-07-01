@@ -66,13 +66,35 @@ def _entry(key: str) -> dict[str, Any]:
         ) from None
 
 
-def data_path(key: str) -> Path:
-    """Absolute path to the local file for ``key`` inside the ``data/`` directory."""
+def resolve_local(key: str) -> Path:
+    """
+    Best local path for ``key`` inside ``data/``.
+
+    Returns ``data/<filename>`` if it exists. Otherwise, if the entry declares a
+    ``filename_glob`` (e.g. version-bearing names like WormBase's
+    ``c_elegans.PRJNA13758.WS*.xrefs.txt.gz``), returns the highest-sorting match so a
+    new release dropped in is picked up without editing the config. Falls back to the
+    declared ``filename`` path (so a missing-file error still points somewhere sensible).
+    """
     entry = _entry(key)
     filename = entry.get("filename")
     if not filename:
         raise KeyError(f"Source {key!r} has no 'filename' (it is fetched at runtime).")
-    return DATA_DIR / filename
+    exact = DATA_DIR / filename
+    # When a glob is declared it is authoritative: pick the newest match present, so a
+    # freshly dropped release wins even if an older declared filename is still around.
+    # (sorted() works for WormBase's zero-padded 3-digit WS### names.)
+    pattern = entry.get("filename_glob")
+    if pattern:
+        hits = sorted(DATA_DIR.glob(pattern))
+        if hits:
+            return hits[-1]
+    return exact
+
+
+def data_path(key: str) -> Path:
+    """Absolute path to the local file for ``key`` inside the ``data/`` directory."""
+    return resolve_local(key)
 
 
 def source_url(key: str) -> str:
@@ -105,13 +127,14 @@ def mod_sources() -> dict[str, dict[str, Any]]:
     (``manual``) resolves to a local ``file`` path; the rest carry their live ``url``.
     """
     out: dict[str, dict[str, Any]] = {}
-    for entry in load_sources().values():
+    for key, entry in load_sources().items():
         taxon = entry.get("taxon")
         if not taxon:
             continue
         conf: dict[str, Any] = {"db": entry["db"], "gz": entry.get("gz", 0)}
         if entry.get("manual"):
-            conf["file"] = str(DATA_DIR / entry["filename"])
+            # resolve by glob so any WS release dropped in data/ is picked up
+            conf["file"] = str(resolve_local(key))
         else:
             conf["url"] = entry["url"]
         out[taxon] = conf
