@@ -308,13 +308,15 @@ function App() {
             <h3 className="mb-3">About HIPPIE</h3>
             <p className="mb-2">
               HIPPIE (<strong>H</strong>uman <strong>I</strong>ntegrated <strong>P</strong>rotein–<strong>P</strong>rotein
-              <strong> I</strong>nteraction r<strong>E</strong>ference) is a resource providing confidence-scored,
-              functionally annotated human protein–protein interactions aggregated from multiple experimental databases.
+              <strong> I</strong>nteraction r<strong>E</strong>ference) is a resource of confidence-scored, functionally
+              annotated human protein–protein interactions aggregated from multiple experimental databases. You can query
+              single proteins, construct interaction networks, or browse the entire HIPPIE proteome.
             </p>
-            <p className="mb-0 text-muted-sm">
-              Confidence scores range from 0 to 1 and are computed as a weighted sum of experimental technique quality,
-              number of supporting studies, and cross-species conservation.
-              Scores ≥ 0.72 are considered <em>high confidence</em>; ≥ 0.63 <em>medium confidence</em>.
+            <p className="mb-0">
+              Every interaction carries a confidence score from 0 to 1, computed as a weighted sum of experimental
+              technique quality, the number of supporting studies, and cross-species conservation. An interaction
+              mentioned at least once in the literature receives a score of ≥ 0.49, so 0.49 is the minimum interaction
+              score in the database. Scores ≥ 0.63 are considered <em>medium confidence</em>; ≥ 0.72 <em>high confidence</em>.
             </p>
           </div>
         </div>

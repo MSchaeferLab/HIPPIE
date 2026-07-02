@@ -18,7 +18,7 @@ Abdeckung:
   - protein_query_api show=noninteractions / show=both
   - interaction_query_api show=noninteractions / show=both
   - InteractionQuerySet: between_proteins, above_score, in_tissues
-  - BaitPreyTest / BaitPreyAssociation Modelle
+  - BaitPreyAssociation Modell
   - _safe_int / _safe_float Helpers
 """
 

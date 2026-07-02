@@ -18,8 +18,6 @@ All `manage.py` commands run from `hippie_django/`:
 - Make migrations: `python manage.py makemigrations`
 - Run tests: `python manage.py test`
 - Start dev server: `python manage.py runserver`
-- Seed dev data: `python manage.py seed_test_data`
-- Test bait/prey import: `python manage.py test_import_bait_prey`
 - Create superuser: `python manage.py createsuperuser`
 
 ## Setup (first run)
@@ -27,8 +25,6 @@ All `manage.py` commands run from `hippie_django/`:
 python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
 cd hippie_django
 python manage.py migrate
-python manage.py seed_test_data
-python manage.py test_import_bait_prey
 python manage.py createsuperuser
 python manage.py runserver
 ```
@@ -77,7 +73,7 @@ python manage.py runserver
 hippie_django/
   hippie/           # Django project settings, urls, wsgi
   hippie_website/   # Main app: models, views, forms, migrations
-    management/commands/  # seed_test_data, test_import_bait_prey
+    management/commands/  # hippie_update, import_pod_data, export_downloads, …
     migrations/     # squash carefully — schema is sensitive
 data/               # raw import data lives here
 ```
