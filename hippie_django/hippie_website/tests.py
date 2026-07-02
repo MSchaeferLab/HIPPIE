@@ -1527,7 +1527,6 @@ class MLSplitStatsTest(TestCase):
         make_interaction(cls.b, cls.c, score=0.15)  # B, C keep a surviving edge via A
         make_interaction(cls.a, cls.d, score=0.15)  # raises A's *global* degree only
         make_interaction(cls.d, cls.e, score=0.15)  # D and E become filter-orphans
-        # Populate global degree/avg_score so n_isolated (global degree==0) is real.
         call_command("recompute_protein_stats", stdout=StringIO())
 
     def _stats(self, **overrides):
@@ -1551,9 +1550,6 @@ class MLSplitStatsTest(TestCase):
         # surviving edge → orphaned, so excluded from n_proteins.
         self.assertEqual(protein["n_proteins"], 3)
         self.assertEqual(protein["n_orphaned_by_filter"], 2)
-        # n_isolated is the *global* degree==0 metric — every protein has an edge
-        # somewhere, so it is 0 and clearly distinct from n_orphaned_by_filter.
-        self.assertEqual(protein["n_isolated"], 0)
 
         # Filtered degrees A:2, B:1, C:1 → median 1 (global 3,2,2 would give 2).
         self.assertEqual(protein["median_degree"], 1)

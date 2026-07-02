@@ -306,6 +306,7 @@ hippie_django/staticfiles/
 .claude/
 .mcp.json
 .pre-commit-config.yaml
+.gstack/
 
 # Data loading — large reference/download files, never commit these
 hippie_django/data/*
