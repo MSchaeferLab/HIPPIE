@@ -560,7 +560,7 @@ function App() {
         <h1>Generate<br /><em style={{color:TEAL}}>ML Splits</em></h1>
         <p>Configure the protein- and interaction-level filters, preview how restrictive they are
            with “Calculate Statistics”, then partition the resulting HIPPIE interaction graph into
-           train / val / test splits (Kernighan–Lin bisection with balanced negative sampling).</p>
+           train / validation / test splits (Kernighan–Lin bisection with balanced negative sampling).</p>
       </div>
 
       {/* Protein filters + stats */}
@@ -587,7 +587,7 @@ function App() {
         </button>
         {!statsFresh && !statsLoading && (
           <span className="text-muted-sm" style={{color:GREY}}>
-            Tip: calculate statistics before generating.
+            Tip: Calculate statistics before generating your split!
           </span>
         )}
       </div>

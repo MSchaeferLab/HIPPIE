@@ -139,7 +139,7 @@ function FilterPanel({ filters, onChange }) {
     <div className="filter-panel mb-3">
       <div className="row g-4">
         <div className="col-md-7">
-          <div className="filter-section-label">Show Results</div>
+          <div className="filter-section-label">Show Results - Non-interactions shown with grey background</div>
           <div className="mode-toggle">
             <button className={filters.showMode === "interactions" ? "active" : ""}
                     onClick={() => onChange({ ...filters, showMode: "interactions" })}>Interactions</button>
@@ -232,7 +232,7 @@ function App() {
       <div className="hippie-hero">
         <h1>Protein<br /><em style={{color:"var(--hippie-teal)"}}>Query</em></h1>
         <p>Enter a UniProt ID, UniProt accession, Entrez gene ID, or gene symbol to retrieve
-           all known human protein–protein interactions and their confidence scores.</p>
+           all known human protein–protein interactions (or non-interactions) and their HIPPIE confidence scores.</p>
       </div>
 
       <div className="hippie-card mb-3">
