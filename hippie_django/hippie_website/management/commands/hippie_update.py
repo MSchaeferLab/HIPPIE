@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections import defaultdict
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -110,13 +111,29 @@ def _parse_pmid(field_val: str) -> tuple[int | None, bool]:
     return None, True
 
 
+_CV_NAME_RE = re.compile(r"\((.*)\)")
+
+
+def _extract_cv_name(field_val: str) -> str:
+    """Extract a PSI-MI CV term's display name from a MITAB field.
+
+    Matches from the first '(' to the last ')' (regex backtracking, not
+    str.split) so a name containing its own literal parens — e.g. IntAct's
+    'proteinchip(r) on a surface-enhanced laser desorption/ionization' —
+    isn't truncated mid-word. Also strips the extra literal quote-wrapping
+    IntAct sometimes adds: psi-mi:"MI:0095"("proteinchip(r) ...").
+    """
+    match = _CV_NAME_RE.search(field_val)
+    name = match.group(1) if match else field_val
+    return name.strip('"')
+
+
 def _parse_interaction_type(field_val: str) -> str | None:
-    interaction_type = field_val.split("(")[-1].rstrip(")")
-    return interaction_type
+    return _extract_cv_name(field_val)
 
 
 def _parse_tech(field_val: str) -> tuple[tuple[str, str] | None, bool]:
-    name = field_val.split("(")[-1].rstrip(")")
+    name = _extract_cv_name(field_val)
     name = _TECH_NORM.get(name, name)
     if name in _SKIP_TECHS:
         return None, True
@@ -139,7 +156,7 @@ def _parse_uniprot_acc(field_val: str) -> str | None:
 
 
 def _parse_source(field_val: str) -> str:
-    return field_val.split("(")[-1].rstrip(")")
+    return _extract_cv_name(field_val)
 
 
 def _parse_links(field_val: str) -> set[tuple[str, str]]:
@@ -994,12 +1011,38 @@ def _recompute_source_interaction_counts() -> None:
 
     counts: dict[int, int] = {
         row["pk"]: row["cnt"]
-        for row in Source.objects.annotate(cnt=Count("interactions")).values("pk", "cnt")
+        for row in Source.objects.annotate(cnt=Count("interactions")).values(
+            "pk", "cnt"
+        )
     }
-    objs = [
-        Source(pk=pk, n_connected_interactions=cnt) for pk, cnt in counts.items()
-    ]
+    objs = [Source(pk=pk, n_connected_interactions=cnt) for pk, cnt in counts.items()]
     Source.objects.bulk_update(objs, ["n_connected_interactions"], batch_size=1_000)
+
+
+# ---------------------------------------------------------------------------
+# Source homepage URLs
+# ---------------------------------------------------------------------------
+
+
+def _assign_source_urls() -> None:
+    """
+    Backfill Source.url from the known-homepage registry.
+
+    Idempotent and run on every invocation: fills only sources whose url is
+    still blank, so manually-edited URLs (e.g. via the admin) are preserved.
+    Covers both freshly imported sources and pre-existing rows from earlier
+    runs that predate URL assignment.
+    """
+    from hippie_website.source_links import homepage_url
+
+    objs: list[Source] = []
+    for source in Source.objects.filter(url=""):
+        url = homepage_url(source.name)
+        if url:
+            source.url = url
+            objs.append(source)
+    if objs:
+        Source.objects.bulk_update(objs, ["url"], batch_size=1_000)
 
 
 # ---------------------------------------------------------------------------
@@ -1204,6 +1247,8 @@ class Command(BaseCommand):
         call_command("recompute_interaction_flags")  # also bumps the browse cache epoch
         self.stdout.write("Recomputing source interaction counts.")
         _recompute_source_interaction_counts()
+        self.stdout.write("Assigning source homepage URLs.")
+        _assign_source_urls()
         self.stdout.write("Refreshing secondary UniProt accessions.")
         _refresh_secondary_accessions()
         self.stdout.write("Done.")
