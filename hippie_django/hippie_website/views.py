@@ -1677,8 +1677,7 @@ def _protein_stats(
     reflect only surviving edges), not the denormalized global ``Protein.degree``
     / ``Protein.avg_score`` columns. A protein that passes the protein-level
     filter but has zero surviving edges is an orphan: excluded from the medians
-    and counted in ``n_orphaned_by_filter``. ``n_isolated`` stays global
-    (``degree == 0`` anywhere in the DB) — a different, still-valid question."""
+    and counted in ``n_orphaned_by_filter``."""
     import statistics
 
     from .models import GeneTissue, Isoform
@@ -1696,7 +1695,6 @@ def _protein_stats(
     # instead of iterating every protein row. .distinct() on pk collapses
     # tissue-join duplicates when a tissue filter is active.
     n_pass_protein_filter = pqs.values("pk").distinct().count()
-    n_isolated = pqs.filter(degree=0).values("pk").distinct().count()
 
     # Isoform / tissue coverage without a giant ``pk IN (...20k ids...)`` clause:
     # intersect surviving pks with isoform pks in Python; count tissues over the
@@ -1719,7 +1717,6 @@ def _protein_stats(
         "median_avg_score": (
             round(statistics.median(avg_scores), 4) if avg_scores else None
         ),
-        "n_isolated": n_isolated,
         "n_orphaned_by_filter": n_pass_protein_filter - n_surviving,
         "tissue_coverage": tissue_coverage,
         "n_isoforms": n_isoforms,
@@ -1802,12 +1799,6 @@ def _interaction_stats(iqs) -> tuple[dict, dict[int, int], dict[int, float]]:
                 median_score = round((i + 0.5) / 100, 4)
                 break
 
-    n_sources = (
-        Interaction.sources.through.objects.filter(interaction__in=iqs)
-        .values("source_id")
-        .distinct()
-        .count()
-    )
     n_experiments = (
         Interaction.experiments.through.objects.filter(interaction__in=iqs)
         .values("experimenttype_id")
@@ -1825,7 +1816,6 @@ def _interaction_stats(iqs) -> tuple[dict, dict[int, int], dict[int, float]]:
                 {"label": f"{i / 10:.1f}", "count": c} for i, c in enumerate(score_hist)
             ],
             "median_score": median_score,
-            "n_sources": n_sources,
             "n_experiments": n_experiments,
         },
         degree_by_node,

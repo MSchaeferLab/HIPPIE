@@ -29,7 +29,7 @@
 {#   Tier 1 — white top bar                                #}
 {#   ===================================================== #}
 <div class="hippie-topbar">
-  <div class="container d-flex justify-content-between align-items-center py-1" style="max-width:1000px">
+  <div class="container d-flex justify-content-between align-items-center py-1">
 
     <a class="navbar-brand hippie-topbar d-flex align-items-center gap-2 text-decoration-none"
        href="{% url 'hippie_website:index' %}">
@@ -60,7 +60,7 @@
 {#   Tier 2 — green nav bar                                #}
 {#   ===================================================== #}
 <div class="hippie-navbar">
-  <div class="container" style="max-width:1000px">
+  <div class="container">
     <nav class="d-flex gap-1 py-1">
       <a class="nav-link {% block nav_protein_query %}{% endblock %}"
          href="{% url 'hippie_website:index' %}">
@@ -91,7 +91,7 @@
 {#   Main content                                          #}
 {#   ===================================================== #}
 <main class="hippie-main">
-  <div class="container" style="max-width:1000px">
+  <div class="container">
     {% block content %}{% endblock %}
   </div>
 </main>
@@ -100,8 +100,7 @@
 {#   Footer                                                #}
 {#   ===================================================== #}
 <footer class="hippie-footer">
-  <div class="container d-flex flex-wrap justify-content-between align-items-center gap-2"
-       style="max-width:1000px">
+  <div class="container d-flex flex-wrap justify-content-between align-items-center gap-2">
     <span>
       <strong>HIPPIE</strong> — Human Integrated Protein–Protein Interaction rEference
     </span>
