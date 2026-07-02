@@ -166,64 +166,6 @@ def test_partition_respects_disjoint_node_sets():
     assert a.isdisjoint(b) and b.isdisjoint(c) and a.isdisjoint(c), "Overlapping nodes!"
 
 
-def test_prune_drops_orphan_node_causing_count_divergence():
-    """A node with zero surviving edges in a split's positive graph gets
-    dropped by ``drop_exclusive_nodes()`` — proving pre-partition node count
-    (``interaction_graph.number_of_nodes()``) diverges from the post-prune
-    sum of per-split node counts. This is the precondition Fix 2's
-    ``SplitSummary.n_proteins`` fix depends on."""
-    p = EdgePartition.__new__(EdgePartition)  # skip __init__
-    p.params = SplitParams(seed=1)
-    p.interaction_graph = nx.Graph()
-    p.interaction_graph.add_edges_from([(1, 2), (3, 4)])
-    p.interaction_graph.add_node(5)  # orphan present pre-partition
-    p.non_interaction_graph = nx.Graph()
-    p.node_sets = []
-    p.discarded_edges = []
-    p.discarded_nodes = set()
-
-    pos_G = nx.Graph()
-    pos_G.add_edges_from([(1, 2), (3, 4)])
-    pos_G.add_node(5)  # zero-degree orphan in this split's positive graph
-    neg_G = nx.Graph()
-    neg_G.add_edges_from([(1, 3), (2, 4)])  # balanced negative, no node 5
-
-    p.selected_sets = [(pos_G, neg_G)]
-
-    p.drop_exclusive_nodes()
-
-    assert p.discarded_nodes == {5}
-    total_before = p.interaction_graph.number_of_nodes()
-    total_after = sum(pos.number_of_nodes() for pos, _ in p.selected_sets)
-    assert total_after != total_before, (
-        "Fixture failed to trigger pruning — Fix 2's bug precondition not met"
-    )
-
-
-def test_all_pks_union_covers_every_edge_endpoint_for_csv_writer():
-    """``generate_splits()`` computes ``all_pks`` as the union of pos_G/neg_G
-    *nodes* across every split, then does a single accession lookup keyed by
-    pk. If any edge endpoint written to CSV weren't in that union, the
-    writer would KeyError on ``accession_by_pk[u]``. This proves the union
-    is always a superset of every edge endpoint the write loop iterates."""
-    splits = [
-        (nx.Graph([(1, 2), (2, 3)]), nx.Graph([(1, 3)])),
-        (nx.Graph([(10, 11)]), nx.Graph([(10, 12), (11, 12)])),
-    ]
-
-    all_pks = set()
-    for pos_G, neg_G in splits:
-        all_pks |= set(pos_G.nodes()) | set(neg_G.nodes())
-
-    for pos_G, neg_G in splits:
-        for u, v, _data in pos_G.edges(data=True):
-            assert u in all_pks and v in all_pks
-        for u, v in neg_G.edges():
-            assert u in all_pks and v in all_pks
-
-    assert all_pks == {1, 2, 3, 10, 11, 12}
-
-
 class EdgePartition:
     def __init__(self, params: SplitParams):
         self.params = params
@@ -253,42 +195,36 @@ class EdgePartition:
 
     @staticmethod
     def _get_random_node(node_idx, cumulative_deg, max_degree_sum):
+        # Degree-weighted pick: draw a point in [0, sum-of-degrees) and binary-
+        # search the cumulative-degree array for the owning node — O(log V)
+        # instead of a linear scan. side="left" reproduces the old behaviour of
+        # returning the first node whose cumulative degree reaches idx.
         idx = np.random.randint(0, max_degree_sum)
-        for i, val in enumerate(cumulative_deg):
-            if val >= idx:
-                return node_idx[i]
-        raise ValueError("Degree selected is larger than maximum!")
+        return node_idx[int(np.searchsorted(cumulative_deg, idx, side="left"))]
 
     def get_random_balanced_negative_complement(self, current_node_set):
         c_subgraph = self.interaction_graph.subgraph(current_node_set)
-        degrees = c_subgraph.degree()
-        node_idx, obs_degrees = zip(*degrees)
+        node_idx, obs_degrees = zip(*c_subgraph.degree())
         cumulative_deg = np.cumsum(obs_degrees)
+        max_degree_sum = int(cumulative_deg[-1])
         n_edges = c_subgraph.number_of_edges()
-        n_selected_edges = 0
 
-        positive_edge_tuples = [sorted((u, v)) for u, v in c_subgraph.edges()]
-        selected_edges = []
+        # Sorted (u, v) tuples so undirected duplicates collapse; sets give O(1)
+        # membership — the old list scans made this sampling loop O(E^2).
+        positive_edges = {tuple(sorted(e)) for e in c_subgraph.edges()}
+        selected_edges: set[tuple[int, int]] = set()
         tries_until_failure = 1000
         tries = 0
 
-        while n_selected_edges < n_edges:
+        # Draw degree-weighted node pairs until there are as many negatives as
+        # positives, rejecting self-loops, duplicates, and true positive edges.
+        while len(selected_edges) < n_edges:
             tries += 1
-            random_edge = sorted(
-                (
-                    self._get_random_node(
-                        node_idx, cumulative_deg, int(cumulative_deg[-1])
-                    )
-                    for _ in range(2)
-                )
-            )  # sorted as internal ids are always A > B
-            if (
-                random_edge[0] != random_edge[1]
-                and random_edge not in selected_edges
-                and random_edge not in positive_edge_tuples
-            ):
-                selected_edges.append(random_edge)
-                n_selected_edges += 1
+            u = self._get_random_node(node_idx, cumulative_deg, max_degree_sum)
+            v = self._get_random_node(node_idx, cumulative_deg, max_degree_sum)
+            edge = (u, v) if u <= v else (v, u)
+            if u != v and edge not in selected_edges and edge not in positive_edges:
+                selected_edges.add(edge)
                 tries = 0
             if tries > tries_until_failure:
                 raise ValueError(

@@ -28,7 +28,7 @@ from io import StringIO
 from pathlib import Path
 
 from django.core.management import CommandError, call_command
-from django.test import TestCase, Client
+from django.test import TestCase, Client, SimpleTestCase
 from django.urls import reverse
 
 from .models import (
@@ -1500,3 +1500,248 @@ class MitabCvNameParsingTest(TestCase):
         self.assertEqual(
             source, "proteinchip(r) on a surface-enhanced laser desorption/ionization"
         )
+
+
+# ---------------------------------------------------------------------------
+# ML Splits — orphan-aware stats, filter-aware medians, accession-based CSVs
+# ---------------------------------------------------------------------------
+
+
+class MLSplitStatsTest(TestCase):
+    """Fix 1: a protein whose edges are ALL removed by the interaction-level
+    filter (but which passes the protein-level filter) is an orphan — dropped
+    from ``n_proteins`` and the medians, counted in ``n_orphaned_by_filter``.
+    ``median_degree`` / ``median_avg_score`` reflect only surviving edges."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.a = make_protein("A", accession="ACC_A")
+        cls.b = make_protein("B", accession="ACC_B")
+        cls.c = make_protein("C", accession="ACC_C")
+        cls.d = make_protein("D", accession="ACC_D")
+        cls.e = make_protein("E", accession="ACC_E")
+        # Survive min_score=0.5:
+        make_interaction(cls.a, cls.b, score=0.85)
+        make_interaction(cls.a, cls.c, score=0.85)
+        # Filtered out at min_score=0.5:
+        make_interaction(cls.b, cls.c, score=0.15)  # B, C keep a surviving edge via A
+        make_interaction(cls.a, cls.d, score=0.15)  # raises A's *global* degree only
+        make_interaction(cls.d, cls.e, score=0.15)  # D and E become filter-orphans
+        # Populate global degree/avg_score so n_isolated (global degree==0) is real.
+        call_command("recompute_protein_stats", stdout=StringIO())
+
+    def _stats(self, **overrides):
+        from .services.generate_splits import SplitParams, build_interaction_queryset
+        from .views import _interaction_stats, _protein_stats
+
+        params = SplitParams(**overrides)
+        interaction, degree_by_node, score_sum_by_node = _interaction_stats(
+            build_interaction_queryset(params)
+        )
+        protein = _protein_stats(params, degree_by_node, score_sum_by_node)
+        return interaction, protein
+
+    def test_orphans_excluded_and_medians_are_filter_aware(self):
+        interaction, protein = self._stats(min_score=0.5)
+
+        # Only A–B and A–C survive.
+        self.assertEqual(interaction["n_interactions"], 2)
+
+        # A, B, C survive; D and E pass the (empty) protein filter but have no
+        # surviving edge → orphaned, so excluded from n_proteins.
+        self.assertEqual(protein["n_proteins"], 3)
+        self.assertEqual(protein["n_orphaned_by_filter"], 2)
+        # n_isolated is the *global* degree==0 metric — every protein has an edge
+        # somewhere, so it is 0 and clearly distinct from n_orphaned_by_filter.
+        self.assertEqual(protein["n_isolated"], 0)
+
+        # Filtered degrees A:2, B:1, C:1 → median 1 (global 3,2,2 would give 2).
+        self.assertEqual(protein["median_degree"], 1)
+        # Filtered avg is 0.85 for every survivor; the global avg (mixing the
+        # 0.15 edges) would be lower — proving the median is filter-aware.
+        self.assertEqual(protein["median_avg_score"], 0.85)
+
+    def test_interaction_histogram_and_median_from_group_by(self):
+        # Locks the DB GROUP-BY rework of _interaction_stats against the old
+        # per-edge Python scan, on the unfiltered fixture (all 5 edges).
+        interaction, _ = self._stats()
+        self.assertEqual(interaction["n_interactions"], 5)
+        # scores: 0.85, 0.85, 0.15, 0.15, 0.15 → median lands in the [0.1, 0.2) bin.
+        self.assertTrue(0.1 <= interaction["median_score"] < 0.2)
+        hist = {b["label"]: b["count"] for b in interaction["score_histogram"]}
+        self.assertEqual(hist["0.1"], 3)
+        self.assertEqual(hist["0.8"], 2)
+
+    def test_self_loop_counts_toward_degree_twice(self):
+        # A self-loop (protein_1 == protein_2) lands in both GROUP-BY sides,
+        # reproducing the old loop that incremented both endpoints.
+        from .services.generate_splits import SplitParams, build_interaction_queryset
+        from .views import _interaction_stats
+
+        f = make_protein("F", accession="ACC_F")
+        make_interaction(f, f, score=0.9)  # self-loop, survives the filter
+        _, degree_by_node, _sum = _interaction_stats(
+            build_interaction_queryset(SplitParams(min_score=0.5))
+        )
+        self.assertEqual(degree_by_node[f.pk], 2)
+
+    def test_stats_endpoint_wires_through(self):
+        resp = self.client.post(
+            reverse("hippie_website:browse_splits_stats"),
+            data=json.dumps({"min_score": 0.5}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["protein"]["n_proteins"], 3)
+        self.assertEqual(payload["protein"]["n_orphaned_by_filter"], 2)
+        self.assertEqual(payload["protein"]["median_avg_score"], 0.85)
+        self.assertEqual(payload["interaction"]["n_interactions"], 2)
+
+
+class MLSplitPruneUnitTest(SimpleTestCase):
+    """Fix 2 mechanism: ``drop_exclusive_nodes`` removes a split's zero-degree
+    nodes, so the post-prune per-split node-count sum diverges from the
+    pre-partition node count — exactly what ``SplitSummary.n_proteins`` now
+    sums post-prune instead of reading pre-prune."""
+
+    def test_prune_drops_orphan_and_diverges_from_pre_prune_count(self):
+        import networkx as nx
+
+        from .services.generate_splits import EdgePartition, SplitParams
+
+        p = EdgePartition.__new__(EdgePartition)  # skip __init__ (no DB access)
+        p.params = SplitParams(seed=1)
+        p.interaction_graph = nx.Graph()
+        p.interaction_graph.add_edges_from([(1, 2), (3, 4)])
+        p.interaction_graph.add_node(5)  # orphan present pre-partition
+        p.discarded_nodes = set()
+
+        pos_G = nx.Graph()
+        pos_G.add_edges_from([(1, 2), (3, 4)])
+        pos_G.add_node(5)  # zero-degree in this split's positive graph
+        neg_G = nx.Graph()
+        neg_G.add_edges_from([(1, 3), (2, 4)])
+        p.selected_sets = [(pos_G, neg_G)]
+
+        p.drop_exclusive_nodes()
+
+        self.assertEqual(p.discarded_nodes, {5})
+        pre_prune = p.interaction_graph.number_of_nodes()  # 5
+        post_prune = sum(pos.number_of_nodes() for pos, _ in p.selected_sets)  # 4
+        self.assertNotEqual(post_prune, pre_prune)
+
+
+class MLSplitNegativeSamplerTest(SimpleTestCase):
+    """Perf rewrite: the degree-weighted sampler must still return exactly
+    ``n_edges`` valid negatives — no self-loops, duplicates, or real positives."""
+
+    def test_sampler_returns_valid_balanced_negatives(self):
+        import networkx as nx
+        import numpy as np
+
+        from .services.generate_splits import EdgePartition, SplitParams
+
+        np.random.seed(0)  # the sampler draws from np.random directly
+        ep = EdgePartition.__new__(EdgePartition)
+        ep.params = SplitParams(seed=1)
+        # Sparse path graph: 6 nodes, 5 edges → 10 non-edges to sample from.
+        ep.interaction_graph = nx.Graph([(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)])
+        node_set = set(ep.interaction_graph.nodes())
+
+        pos_copy, neg = ep.get_random_balanced_negative_complement(node_set)
+
+        positives = {tuple(sorted(e)) for e in ep.interaction_graph.edges()}
+        neg_edges = {tuple(sorted(e)) for e in neg.edges()}
+        self.assertEqual(neg.number_of_edges(), ep.interaction_graph.number_of_edges())
+        self.assertTrue(neg_edges.isdisjoint(positives))  # never reuses a positive
+        self.assertFalse(any(u == v for u, v in neg_edges))  # no self-loops
+        # pos_copy is a mutable copy of the positive subgraph.
+        self.assertEqual(
+            pos_copy.number_of_edges(), ep.interaction_graph.number_of_edges()
+        )
+
+
+class MLSplitGenerateTest(TestCase):
+    """Fix 2 + Fix 3 end-to-end: run a real split job on a small sparse graph
+    and check the summary count is post-prune-consistent and the CSVs use
+    UniProt accessions (never internal PKs)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        # 24 proteins wired as a cycle + a chord ring: connected but sparse
+        # (avg degree ~4), so every balanced partition keeps internal edges AND
+        # leaves non-edges for negative sampling.
+        cls.proteins = [
+            make_protein(f"P{i}", accession=f"ACC{i:03d}") for i in range(24)
+        ]
+        seen: set[tuple[int, int]] = set()
+        for i in range(24):
+            for j in ((i + 1) % 24, (i + 5) % 24):
+                a, b = sorted((i, j))
+                if a != b and (a, b) not in seen:
+                    seen.add((a, b))
+                    make_interaction(cls.proteins[a], cls.proteins[b], score=0.8)
+        cls.accessions = {p.uniprot_accession for p in cls.proteins}
+
+    def test_generate_writes_accession_csvs_and_consistent_summary(self):
+        import numpy as np
+
+        from .services.generate_splits import (
+            SplitParams,
+            generate_splits,
+            get_interaction_graph,
+        )
+
+        np.random.seed(0)  # negative sampling draws from np.random
+        params = SplitParams(seed=1)
+        with tempfile.TemporaryDirectory() as td:
+            work_dir = Path(td)
+            summary = generate_splits(params, work_dir, lambda step, frac: None)
+
+            # Fix 2: top-level count == sum of per-split (post-prune) counts.
+            self.assertEqual(
+                summary.n_proteins, sum(s["n_proteins"] for s in summary.splits)
+            )
+            if summary.n_discarded_nodes > 0:
+                pre_prune = get_interaction_graph(params).number_of_nodes()
+                self.assertLess(summary.n_proteins, pre_prune)
+
+            for name in ("train", "val", "test"):
+                pos = (work_dir / f"{name}_pos.csv").read_text().splitlines()
+                neg = (work_dir / f"{name}_neg.csv").read_text().splitlines()
+                self.assertEqual(
+                    pos[0], "protein_1_accession,protein_2_accession,score"
+                )
+                self.assertEqual(neg[0], "protein_1_accession,protein_2_accession")
+                # Fix 3: every endpoint is a known accession string, never a PK.
+                for row in pos[1:]:
+                    a, b, _score = row.split(",")
+                    self.assertIn(a, self.accessions)
+                    self.assertIn(b, self.accessions)
+                for row in neg[1:]:
+                    a, b = row.split(",")
+                    self.assertIn(a, self.accessions)
+                    self.assertIn(b, self.accessions)
+
+            # Sampler balances each split: n_neg == n_pos.
+            for s in summary.splits:
+                self.assertEqual(s["n_neg"], s["n_pos"])
+
+    def test_isoform_accession_resolves_via_inherited_field(self):
+        # Fix 3 for isoforms: MTI shares the pk, so the accession lookup returns
+        # the isoform-specific "-2" accession, not the canonical parent's.
+        from .models import Protein
+
+        canonical = self.proteins[0]
+        iso = Isoform.objects.create(
+            gene=canonical.gene,
+            uniprot_accession="ACC000-2",
+            general_protein=canonical,
+        )
+        mapping = dict(
+            Protein.objects.filter(pk__in=[iso.pk]).values_list(
+                "pk", "uniprot_accession"
+            )
+        )
+        self.assertEqual(mapping[iso.pk], "ACC000-2")
