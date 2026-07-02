@@ -232,6 +232,7 @@ function ProteinStatsBox({ stats, loading, error }) {
             <Metric label="Median avg score"
                     value={stats.median_avg_score == null ? "—" : stats.median_avg_score} />
             <Metric label="Isolated (deg 0)" value={stats.n_isolated.toLocaleString()} />
+            <Metric label="Orphaned by filter" value={stats.n_orphaned_by_filter.toLocaleString()} />
             <Metric label="Tissue coverage" value={stats.tissue_coverage.toLocaleString()} />
             <Metric label="Isoforms" value={stats.n_isoforms.toLocaleString()} />
           </div>

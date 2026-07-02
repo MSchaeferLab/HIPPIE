@@ -166,6 +166,64 @@ def test_partition_respects_disjoint_node_sets():
     assert a.isdisjoint(b) and b.isdisjoint(c) and a.isdisjoint(c), "Overlapping nodes!"
 
 
+def test_prune_drops_orphan_node_causing_count_divergence():
+    """A node with zero surviving edges in a split's positive graph gets
+    dropped by ``drop_exclusive_nodes()`` — proving pre-partition node count
+    (``interaction_graph.number_of_nodes()``) diverges from the post-prune
+    sum of per-split node counts. This is the precondition Fix 2's
+    ``SplitSummary.n_proteins`` fix depends on."""
+    p = EdgePartition.__new__(EdgePartition)  # skip __init__
+    p.params = SplitParams(seed=1)
+    p.interaction_graph = nx.Graph()
+    p.interaction_graph.add_edges_from([(1, 2), (3, 4)])
+    p.interaction_graph.add_node(5)  # orphan present pre-partition
+    p.non_interaction_graph = nx.Graph()
+    p.node_sets = []
+    p.discarded_edges = []
+    p.discarded_nodes = set()
+
+    pos_G = nx.Graph()
+    pos_G.add_edges_from([(1, 2), (3, 4)])
+    pos_G.add_node(5)  # zero-degree orphan in this split's positive graph
+    neg_G = nx.Graph()
+    neg_G.add_edges_from([(1, 3), (2, 4)])  # balanced negative, no node 5
+
+    p.selected_sets = [(pos_G, neg_G)]
+
+    p.drop_exclusive_nodes()
+
+    assert p.discarded_nodes == {5}
+    total_before = p.interaction_graph.number_of_nodes()
+    total_after = sum(pos.number_of_nodes() for pos, _ in p.selected_sets)
+    assert total_after != total_before, (
+        "Fixture failed to trigger pruning — Fix 2's bug precondition not met"
+    )
+
+
+def test_all_pks_union_covers_every_edge_endpoint_for_csv_writer():
+    """``generate_splits()`` computes ``all_pks`` as the union of pos_G/neg_G
+    *nodes* across every split, then does a single accession lookup keyed by
+    pk. If any edge endpoint written to CSV weren't in that union, the
+    writer would KeyError on ``accession_by_pk[u]``. This proves the union
+    is always a superset of every edge endpoint the write loop iterates."""
+    splits = [
+        (nx.Graph([(1, 2), (2, 3)]), nx.Graph([(1, 3)])),
+        (nx.Graph([(10, 11)]), nx.Graph([(10, 12), (11, 12)])),
+    ]
+
+    all_pks = set()
+    for pos_G, neg_G in splits:
+        all_pks |= set(pos_G.nodes()) | set(neg_G.nodes())
+
+    for pos_G, neg_G in splits:
+        for u, v, _data in pos_G.edges(data=True):
+            assert u in all_pks and v in all_pks
+        for u, v in neg_G.edges():
+            assert u in all_pks and v in all_pks
+
+    assert all_pks == {1, 2, 3, 10, 11, 12}
+
+
 class EdgePartition:
     def __init__(self, params: SplitParams):
         self.params = params
@@ -240,7 +298,9 @@ class EdgePartition:
         g_negative = nx.Graph()
         g_negative.add_edges_from(selected_edges)
 
-        return c_subgraph, g_negative
+        # c_subgraph is a read-only NetworkX subgraph view (frozen); return a
+        # mutable copy since drop_exclusive_nodes() removes nodes from it.
+        return c_subgraph.copy(), g_negative
 
     def drop_exclusive_nodes(self):
         assert len(self.selected_sets) != 0, (
@@ -308,18 +368,29 @@ def generate_splits(params: SplitParams, work_dir: Path, cb) -> SplitSummary:
     ep.set_discarded_edges()
 
     cb("writing_files", 0.90)
+
+    all_pks = set()
+    for pos_G, neg_G in ep.selected_sets:
+        all_pks |= set(pos_G.nodes()) | set(neg_G.nodes())
+
+    from hippie_website.models import Protein
+
+    accession_by_pk = dict(
+        Protein.objects.filter(pk__in=all_pks).values_list("pk", "uniprot_accession")
+    )
+
     split_stats = []
     for i, (pos_G, neg_G) in enumerate(ep.selected_sets):
         name = SPLIT_NAMES[i]
         with open(work_dir / f"{name}_pos.csv", "w") as f:
-            f.write("protein_1_id,protein_2_id,score\n")
+            f.write("protein_1_accession,protein_2_accession,score\n")
             for u, v, data in pos_G.edges(data=True):
                 score = data.get("score", data.get("weight", ""))
-                f.write(f"{u},{v},{score}\n")
+                f.write(f"{accession_by_pk[u]},{accession_by_pk[v]},{score}\n")
         with open(work_dir / f"{name}_neg.csv", "w") as f:
-            f.write("protein_1_id,protein_2_id\n")
+            f.write("protein_1_accession,protein_2_accession\n")
             for u, v in neg_G.edges():
-                f.write(f"{u},{v}\n")
+                f.write(f"{accession_by_pk[u]},{accession_by_pk[v]}\n")
         split_stats.append(
             {
                 "name": name,
@@ -330,7 +401,7 @@ def generate_splits(params: SplitParams, work_dir: Path, cb) -> SplitSummary:
         )
 
     summary = SplitSummary(
-        n_proteins=ep.interaction_graph.number_of_nodes(),
+        n_proteins=sum(s["n_proteins"] for s in split_stats),
         n_positive_total=sum(s["n_pos"] for s in split_stats),
         n_negative_total=sum(s["n_neg"] for s in split_stats),
         n_discarded_edges=len(ep.discarded_edges),

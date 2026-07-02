@@ -1660,7 +1660,14 @@ def _protein_filtered_qs(params):
     return pqs
 
 
-def _protein_stats(params) -> dict:
+def _protein_stats(params, degree_by_node: dict[int, int]) -> dict:
+    """``degree_by_node`` = per-protein edge count under the full interaction
+    filter (from ``_interaction_stats``); its keys are proteins with >=1
+    surviving edge. A protein can pass the protein-level filters below yet
+    have zero surviving edges — it's excluded from the degree/score medians
+    and counted in ``n_orphaned_by_filter`` instead. ``median_degree`` uses
+    this filtered count, not the denormalized global ``Protein.degree``
+    column, so it reflects the active interaction-level filter."""
     import statistics
 
     from .models import GeneTissue
@@ -1670,26 +1677,32 @@ def _protein_stats(params) -> dict:
     degrees: list[int] = []
     scores: list[float] = []
     n_isolated = 0
+    n_pass_protein_filter = 0
     # pk in the row keeps tissue-join duplicates from collapsing distinct
     # proteins that happen to share (degree, avg_score).
-    for _pk, deg, avg in (
+    for pk, deg, avg in (
         pqs.values_list("pk", "degree", "avg_score")
         .distinct()
         .iterator(chunk_size=10_000)
     ):
-        degrees.append(deg)
+        n_pass_protein_filter += 1
         if deg == 0:
             n_isolated += 1
+        filtered_deg = degree_by_node.get(pk)
+        if filtered_deg is None:
+            continue
+        degrees.append(filtered_deg)
         if avg is not None:
             scores.append(avg)
 
+    surviving_pqs = pqs.filter(pk__in=degree_by_node.keys())
     n_isoforms = (
         0
         if not params.include_isoforms
-        else pqs.filter(isoform__isnull=False).values("pk").distinct().count()
+        else surviving_pqs.filter(isoform__isnull=False).values("pk").distinct().count()
     )
     tissue_coverage = (
-        GeneTissue.objects.filter(gene__proteins__in=pqs)
+        GeneTissue.objects.filter(gene__proteins__in=surviving_pqs)
         .values("tissue_id")
         .distinct()
         .count()
@@ -1700,6 +1713,7 @@ def _protein_stats(params) -> dict:
         "median_degree": statistics.median(degrees) if degrees else 0,
         "median_avg_score": round(statistics.median(scores), 4) if scores else None,
         "n_isolated": n_isolated,
+        "n_orphaned_by_filter": n_pass_protein_filter - len(degrees),
         "tissue_coverage": tissue_coverage,
         "n_isoforms": n_isoforms,
     }
@@ -1729,7 +1743,7 @@ def _bucket_degrees(degree_by_node: dict) -> list:
     return [{"label": _DEGREE_BUCKETS[i][0], "count": c} for i, c in enumerate(counts)]
 
 
-def _interaction_stats(iqs) -> dict:
+def _interaction_stats(iqs) -> tuple[dict, dict[int, int]]:
     from .models import Interaction
 
     degree_by_node: dict[int, int] = {}
@@ -1779,7 +1793,7 @@ def _interaction_stats(iqs) -> dict:
         "median_score": median_score,
         "n_sources": n_sources,
         "n_experiments": n_experiments,
-    }
+    }, degree_by_node
 
 
 @require_POST
@@ -1791,10 +1805,13 @@ def browse_splits_stats(request):
 
     body = json.loads(request.body)
     params = SplitParams(**_validate_split_params(body))
+    interaction_stats, degree_by_node = _interaction_stats(
+        build_interaction_queryset(params)
+    )
     return JsonResponse(
         {
-            "protein": _protein_stats(params),
-            "interaction": _interaction_stats(build_interaction_queryset(params)),
+            "protein": _protein_stats(params, degree_by_node),
+            "interaction": interaction_stats,
         }
     )
 
