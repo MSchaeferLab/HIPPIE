@@ -25,6 +25,24 @@
 
 <body>
 
+{# Active-release confidence thresholds — consumed by React via window.HIPPIE_RELEASE. #}
+{% if current_release %}
+<script>
+  window.HIPPIE_RELEASE = {
+    intMedian: {{ current_release.int_median|default:0.63 }},
+    intQ3: {{ current_release.int_q3|default:0.72 }},
+    nonintMedian: {{ current_release.nonint_median|default:0.63 }},
+    nonintQ3: {{ current_release.nonint_q3|default:0.72 }},
+    bothMedian: {{ current_release.both_median|default:0.63 }},
+    bothQ3: {{ current_release.both_q3|default:0.72 }}
+  };
+</script>
+{% else %}
+<script>
+  window.HIPPIE_RELEASE = { intMedian: 0.63, intQ3: 0.72, nonintMedian: 0.63, nonintQ3: 0.72, bothMedian: 0.63, bothQ3: 0.72 };
+</script>
+{% endif %}
+
 {#   ===================================================== #}
 {#   Tier 1 — white top bar                                #}
 {#   ===================================================== #}

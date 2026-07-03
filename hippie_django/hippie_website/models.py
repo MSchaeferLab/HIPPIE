@@ -67,6 +67,9 @@ class Protein(models.Model):
     uniprot_name = models.CharField(
         max_length=16, db_index=True, default="", blank=True
     )
+    # True for reviewed Swiss-Prot entries, False for TrEMBL. Defaults True;
+    # populated by the update routine (not yet wired), so TrEMBL is empty for now.
+    is_swissprot = models.BooleanField(default=True, db_index=True)
 
     # Denormalised browse stats — refreshed by `recompute_protein_stats`.
     # degree = number of interactions touching this protein (either side);
@@ -509,7 +512,7 @@ class BaitPreyAssociation(models.Model):
         null=True,
         blank=True,
     )
-    
+
     publications = models.ManyToManyField(
         Publication,
         related_name="bait_prey_associations",
@@ -559,3 +562,77 @@ class SplitJob(models.Model):
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+
+
+class ReleaseMeta(models.Model):
+    """
+    Metadata for one HIPPIE data release.
+
+    Holds the release version/date, the per-dataset score quartiles used to
+    derive the *medium* (Q2 / median) and *high* (Q3) confidence thresholds, and
+    a free-form map of integrated resource versions. The most recent release
+    (``current()``) drives the app-wide dynamic thresholds and the /information/
+    "Resource Versions" block.
+
+    Quartiles are stored per dataset: ``int_*`` (interactions), ``nonint_*``
+    (non-interactions), ``both_*`` (union of both). All are nullable so a partial
+    release (e.g. before non-interaction scoring exists) can still be recorded.
+    """
+
+    release_number = models.PositiveIntegerField(default=0, db_index=True)
+    version_label = models.CharField(max_length=32, blank=True, default="")
+    release_date = models.DateField(null=True, blank=True, db_index=True)
+
+    int_q1 = models.FloatField(null=True, blank=True)
+    int_median = models.FloatField(null=True, blank=True)
+    int_q3 = models.FloatField(null=True, blank=True)
+
+    nonint_q1 = models.FloatField(null=True, blank=True)
+    nonint_median = models.FloatField(null=True, blank=True)
+    nonint_q3 = models.FloatField(null=True, blank=True)
+
+    both_q1 = models.FloatField(null=True, blank=True)
+    both_median = models.FloatField(null=True, blank=True)
+    both_q3 = models.FloatField(null=True, blank=True)
+
+    resource_versions = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "release_meta"
+        ordering = ["-release_date", "-release_number"]
+
+    def __str__(self) -> str:
+        return self.version_label or f"release {self.release_number}"
+
+    @classmethod
+    def current(cls) -> "ReleaseMeta | None":
+        """Most recent release by date (then number), or None if none exist."""
+        return cls.objects.order_by("-release_date", "-release_number").first()
+
+    def set_quartiles(self, dataset: str, stats: dict[str, float]) -> None:
+        """
+        Store q1/median/q3 for one dataset from a ``compute_quartiles`` dict.
+
+        ``dataset`` is one of ``"int"``, ``"nonint"``, ``"both"``. Does not save.
+        """
+        if dataset not in ("int", "nonint", "both"):
+            raise ValueError(f"unknown dataset {dataset!r}")
+        setattr(self, f"{dataset}_q1", stats["q1"])
+        setattr(self, f"{dataset}_median", stats["median"])
+        setattr(self, f"{dataset}_q3", stats["q3"])
+
+    @classmethod
+    def record_resources(cls, mapping: dict[str, str]) -> "ReleaseMeta | None":
+        """
+        Merge ``mapping`` into the current release's ``resource_versions`` and
+        save. No-op (returns None) when no release row exists yet.
+        """
+        rel = cls.current()
+        if rel is None:
+            return None
+        rel.resource_versions = {**(rel.resource_versions or {}), **mapping}
+        rel.save(update_fields=["resource_versions", "updated_at"])
+        return rel

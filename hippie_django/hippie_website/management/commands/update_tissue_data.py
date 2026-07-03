@@ -150,9 +150,7 @@ class Command(BaseCommand):
         #     ]
         # )
         # gene_cache.update({g.entrez_id: g for g in new_genes})
-        self.stdout.write(
-            f"          Genes — {len(existing_genes):,} existing"
-        )
+        self.stdout.write(f"          Genes — {len(existing_genes):,} existing")
 
         tissues = set(sample_to_verbose.values())
         existing_tissues = Tissue.objects.filter(name__in=tissues)
@@ -212,4 +210,14 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 f"Done — {created:,} GeneTissue rows created, {updated:,} updated."
             )
+        )
+
+        # Record GTEx / gene-info source versions on the current release.
+        from hippie_website.models import ReleaseMeta
+
+        ReleaseMeta.record_resources(
+            {
+                "GTEx": path_cgt.name,
+                "NCBI Gene": path_homo_entrez.name,
+            }
         )

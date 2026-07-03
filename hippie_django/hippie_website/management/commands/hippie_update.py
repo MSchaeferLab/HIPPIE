@@ -31,13 +31,16 @@ from hippie_website.models import (
     Interaction,
     InteractionCrossReference,
     InteractionType,
+    NonInteraction,
     OrthologInteraction,
     Isoform,
     Protein,
     ProteinSynonym,
     Publication,
+    ReleaseMeta,
     Source,
 )
+from hippie_website.stats_utils import compute_quartiles
 
 # ---------------------------------------------------------------------------
 # Scoring constants (from DB.java)
@@ -1251,4 +1254,26 @@ class Command(BaseCommand):
         _assign_source_urls()
         self.stdout.write("Refreshing secondary UniProt accessions.")
         _refresh_secondary_accessions()
+
+        self.stdout.write("Recording release metadata.")
+        int_scores = list(Interaction.objects.values_list("score", flat=True))
+        nonint_scores = list(NonInteraction.objects.values_list("score", flat=True))
+        rel = ReleaseMeta.current() or ReleaseMeta.objects.create()
+        rel.set_quartiles("int", compute_quartiles(int_scores))
+        rel.set_quartiles("both", compute_quartiles(int_scores + nonint_scores))
+        rel.resource_versions = {
+            **(rel.resource_versions or {}),
+            **{
+                key: val
+                for key, val in {
+                    "BioGRID": Path(biogrid_path).name if biogrid_path else "",
+                    "IntAct": Path(intact_path).name if intact_path else "",
+                    "UniProt (idmapping)": "HUMAN_9606_idmapping.dat",
+                    "UniProt (sec_ac)": "sec_ac.txt",
+                    "NCBI Gene": "Homo_sapiens.gene_info",
+                }.items()
+                if val
+            },
+        }
+        rel.save()
         self.stdout.write("Done.")

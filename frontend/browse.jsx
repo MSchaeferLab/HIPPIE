@@ -19,7 +19,10 @@ const PROTEIN_DEFAULTS = { tissue: [], source: [], minDegree: 0, minScore: 0, mi
 const INTERACTION_DEFAULTS = { minScore: 0, maxScore: 1, source: [], experiment: [], includeIsoforms: false };
 
 function scoreClass(s) {
-  return s >= 0.72 ? "score-high" : s >= 0.63 ? "score-med" : "score-low";
+  const rel = (typeof window !== "undefined" && window.HIPPIE_RELEASE) || {};
+  const med = rel.intMedian ?? 0.63;
+  const high = rel.intQ3 ?? 0.72;
+  return s >= high ? "score-high" : s >= med ? "score-med" : "score-low";
 }
 
 // ── Copy / TSV export of ALL matching rows (server-side, capped) ────────────

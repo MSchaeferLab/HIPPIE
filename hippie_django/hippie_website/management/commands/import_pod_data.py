@@ -41,7 +41,6 @@ class Command(BaseCommand):
             help="Rows per parquet read batch (default: 10000)",
         )
 
-
     def handle(self, *args: object, **options: object) -> None:
         import pyarrow.parquet as pq
         from django.db import transaction
@@ -68,15 +67,19 @@ class Command(BaseCommand):
         self.stdout.write(f"Loaded {len(protein_map):,} proteins")
 
         interactions: dict[tuple[int, int], Interaction] = {
-            (r.protein_1_id, r.protein_2_id): r
-            for r in Interaction.objects.all()
+            (r.protein_1_id, r.protein_2_id): r for r in Interaction.objects.all()
         }
         interaction_pairs: set[tuple[int, int]] = set(interactions.keys())
         self.stdout.write(f"Loaded {len(interactions):,} interactions")
 
         # --- Phase 2: Stream parquet, accumulate only qualifying pairs ---
         groups: dict[tuple[int, int], dict[str, object]] = defaultdict(
-            lambda: {"interaction": False, "n_tested": 0, "n_observed": 0, "pmids": set()}
+            lambda: {
+                "interaction": False,
+                "n_tested": 0,
+                "n_observed": 0,
+                "pmids": set(),
+            }
         )
 
         rows_read = 0
@@ -96,21 +99,19 @@ class Command(BaseCommand):
                     skipped_missing_protein += 1
                     continue
 
-                
                 key = tuple(sorted([bait_pk, prey_pk]))
                 p1_id, p2_id = key
-                
-                
+
                 entry = groups[key]
                 if key in interaction_pairs:
                     entry["n_tested"] = int(row.n_tested)
                     entry["n_observed"] = int(row.n_observed)
-                    entry["pmids"] |= _parse_pmids(row.pubmed_id)  
+                    entry["pmids"] |= _parse_pmids(row.pubmed_id)
                     entry["interaction"] = True
                 elif int(row.n_observed) == 0 and int(row.n_tested) >= min_tests:
                     entry["n_tested"] = int(row.n_tested)
                     entry["n_observed"] = int(row.n_observed)
-                    entry["pmids"] |= _parse_pmids(row.pubmed_id)  
+                    entry["pmids"] |= _parse_pmids(row.pubmed_id)
                 else:
                     del groups[key]
                     skipped_rejected += 1
@@ -205,6 +206,18 @@ class Command(BaseCommand):
                 pubs = [pub_map[p] for p in pmids if p in pub_map]
                 if pubs:
                     assoc.publications.add(*pubs)
+
+        # Refresh the current release's non-interaction + combined score quartiles.
+        from hippie_website.models import Interaction, NonInteraction, ReleaseMeta
+        from hippie_website.stats_utils import compute_quartiles
+
+        rel = ReleaseMeta.current()
+        if rel is not None:
+            nonint_scores = list(NonInteraction.objects.values_list("score", flat=True))
+            int_scores = list(Interaction.objects.values_list("score", flat=True))
+            rel.set_quartiles("nonint", compute_quartiles(nonint_scores))
+            rel.set_quartiles("both", compute_quartiles(int_scores + nonint_scores))
+            rel.save()
 
         self.stdout.write(
             self.style.SUCCESS(

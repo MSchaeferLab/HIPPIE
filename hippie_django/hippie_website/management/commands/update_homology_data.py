@@ -568,3 +568,15 @@ class Command(BaseCommand):
             intact_file=options["intact_file"],
             stdout=self.stdout,
         )
+
+        # Record homology source version tokens on the current release.
+        from hippie_website.models import ReleaseMeta
+
+        tokens: dict[str, str] = {}
+        for meta in SOURCES.values():
+            ref = meta.get("url") or meta.get("file") or ""
+            match = re.search(r"(fb_\d{4}_\d{2}|WS\d+|v\d+\.\d+)", ref)
+            if match:
+                tokens[meta["db"]] = match.group(1)
+        if tokens:
+            ReleaseMeta.record_resources(tokens)

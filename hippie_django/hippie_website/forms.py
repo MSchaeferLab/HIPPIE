@@ -1,17 +1,24 @@
 from django import forms
-from .models import Tissue, InteractionType
+from .models import Tissue, InteractionType, ReleaseMeta
 
 
 # ---------------------------------------------------------------------------
 # Choice constants
 # ---------------------------------------------------------------------------
 
-SCORE_PRESETS = [
-    ("", "Custom"),
-    ("0", "No filter (0.0)"),
-    ("0.63", "Medium (0.63)"),
-    ("0.72", "High (0.72)"),
-]
+
+def score_presets() -> list[tuple[str, str]]:
+    """Score-filter presets using the current release's medium/high thresholds."""
+    rel = ReleaseMeta.current()
+    med = rel.int_median if rel and rel.int_median is not None else 0.63
+    high = rel.int_q3 if rel and rel.int_q3 is not None else 0.72
+    return [
+        ("", "Custom"),
+        ("0", "No filter (0.0)"),
+        (f"{med:.2f}", f"Medium ({med:.2f})"),
+        (f"{high:.2f}", f"High ({high:.2f})"),
+    ]
+
 
 OUTPUT_CHOICES = [
     ("browser_text", "Browser – plain text"),
@@ -80,7 +87,7 @@ class NetworkQueryForm(forms.Form):
 
     score_preset = forms.ChoiceField(
         label="Score filter preset",
-        choices=SCORE_PRESETS,
+        choices=[],
         required=False,
     )
     score_min = forms.FloatField(
@@ -116,6 +123,9 @@ class NetworkQueryForm(forms.Form):
         required=False,
     )
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["score_preset"].choices = score_presets()
 
     def clean(self):
         cleaned = super().clean()

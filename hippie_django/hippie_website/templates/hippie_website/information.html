@@ -56,6 +56,7 @@
       <li><a href="#download">Download the repository.</a></li>
       <li><a href="#example">Example of a HIPPIE workflow.</a></li>
       <li><a href="#sources">Sources.</a></li>
+      <li><a href="#resources">Resource versions.</a></li>
       <li><a href="#api">HIPPIE API.</a></li>
       <li><a href="#remarks">General technical remarks.</a></li>
       <li><a href="#cite">Citation.</a></li>
@@ -201,8 +202,8 @@
     <h5 id="score" class="section-label section-label--inline mt-3">Score filter</h5>
     <p class="mt-2">
       A threshold on the HIPPIE confidence score can be chosen. The user can either specify a custom
-      value between 0 and 1 or choose a predefined confidence level: medium confidence (0.63 - second
-      quartile of the HIPPIE score distribution) or high confidence (0.73 - third quartile). If both
+      value between 0 and 1 or choose a predefined confidence level: medium confidence ({{ current_release.int_median|default:0.63|floatformat:2 }} - second
+      quartile of the HIPPIE score distribution) or high confidence ({{ current_release.int_q3|default:0.72|floatformat:2 }} - third quartile). If both
       custom and predefined thresholds are selected, the higher one is applied.
     </p>
     <p>Note, that the confidence filter is not applied to interactions uploaded by the user.</p>
@@ -407,6 +408,34 @@
       is a high-throughput study. The bar plot was created using
       <a href="http://code.google.com/apis/chart/" target="_blank" rel="noopener">Google chart tools</a>.
     </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Resource versions ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="resources" class="section-label">Resource versions</h4>
+    <p>
+      Source databases and reference resources integrated in the current HIPPIE release{% if current_release %}
+      (<strong>v{{ current_release.version_label }}</strong>{% if current_release.release_date %}, {{ current_release.release_date }}{% endif %}){% endif %}.
+    </p>
+    {% if current_release.resource_versions %}
+    <div style="overflow-x:auto;">
+      <table class="table table-sm" style="max-width:32rem;">
+        <thead>
+          <tr><th>Resource</th><th>Version</th></tr>
+        </thead>
+        <tbody>
+          {% for name, version in current_release.resource_versions.items %}
+          <tr><td>{{ name }}</td><td><code>{{ version }}</code></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted-sm">No resource version information is available for the current release.</p>
+    {% endif %}
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>
