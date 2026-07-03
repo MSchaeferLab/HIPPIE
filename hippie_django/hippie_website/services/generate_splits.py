@@ -195,42 +195,36 @@ class EdgePartition:
 
     @staticmethod
     def _get_random_node(node_idx, cumulative_deg, max_degree_sum):
+        # Degree-weighted pick: draw a point in [0, sum-of-degrees) and binary-
+        # search the cumulative-degree array for the owning node — O(log V)
+        # instead of a linear scan. side="left" reproduces the old behaviour of
+        # returning the first node whose cumulative degree reaches idx.
         idx = np.random.randint(0, max_degree_sum)
-        for i, val in enumerate(cumulative_deg):
-            if val >= idx:
-                return node_idx[i]
-        raise ValueError("Degree selected is larger than maximum!")
+        return node_idx[int(np.searchsorted(cumulative_deg, idx, side="left"))]
 
     def get_random_balanced_negative_complement(self, current_node_set):
         c_subgraph = self.interaction_graph.subgraph(current_node_set)
-        degrees = c_subgraph.degree()
-        node_idx, obs_degrees = zip(*degrees)
+        node_idx, obs_degrees = zip(*c_subgraph.degree())
         cumulative_deg = np.cumsum(obs_degrees)
+        max_degree_sum = int(cumulative_deg[-1])
         n_edges = c_subgraph.number_of_edges()
-        n_selected_edges = 0
 
-        positive_edge_tuples = [sorted((u, v)) for u, v in c_subgraph.edges()]
-        selected_edges = []
+        # Sorted (u, v) tuples so undirected duplicates collapse; sets give O(1)
+        # membership — the old list scans made this sampling loop O(E^2).
+        positive_edges = {tuple(sorted(e)) for e in c_subgraph.edges()}
+        selected_edges: set[tuple[int, int]] = set()
         tries_until_failure = 1000
         tries = 0
 
-        while n_selected_edges < n_edges:
+        # Draw degree-weighted node pairs until there are as many negatives as
+        # positives, rejecting self-loops, duplicates, and true positive edges.
+        while len(selected_edges) < n_edges:
             tries += 1
-            random_edge = sorted(
-                (
-                    self._get_random_node(
-                        node_idx, cumulative_deg, int(cumulative_deg[-1])
-                    )
-                    for _ in range(2)
-                )
-            )  # sorted as internal ids are always A > B
-            if (
-                random_edge[0] != random_edge[1]
-                and random_edge not in selected_edges
-                and random_edge not in positive_edge_tuples
-            ):
-                selected_edges.append(random_edge)
-                n_selected_edges += 1
+            u = self._get_random_node(node_idx, cumulative_deg, max_degree_sum)
+            v = self._get_random_node(node_idx, cumulative_deg, max_degree_sum)
+            edge = (u, v) if u <= v else (v, u)
+            if u != v and edge not in selected_edges and edge not in positive_edges:
+                selected_edges.add(edge)
                 tries = 0
             if tries > tries_until_failure:
                 raise ValueError(
@@ -240,7 +234,9 @@ class EdgePartition:
         g_negative = nx.Graph()
         g_negative.add_edges_from(selected_edges)
 
-        return c_subgraph, g_negative
+        # c_subgraph is a read-only NetworkX subgraph view (frozen); return a
+        # mutable copy since drop_exclusive_nodes() removes nodes from it.
+        return c_subgraph.copy(), g_negative
 
     def drop_exclusive_nodes(self):
         assert len(self.selected_sets) != 0, (
@@ -308,18 +304,29 @@ def generate_splits(params: SplitParams, work_dir: Path, cb) -> SplitSummary:
     ep.set_discarded_edges()
 
     cb("writing_files", 0.90)
+
+    all_pks = set()
+    for pos_G, neg_G in ep.selected_sets:
+        all_pks |= set(pos_G.nodes()) | set(neg_G.nodes())
+
+    from hippie_website.models import Protein
+
+    accession_by_pk = dict(
+        Protein.objects.filter(pk__in=all_pks).values_list("pk", "uniprot_accession")
+    )
+
     split_stats = []
     for i, (pos_G, neg_G) in enumerate(ep.selected_sets):
         name = SPLIT_NAMES[i]
         with open(work_dir / f"{name}_pos.csv", "w") as f:
-            f.write("protein_1_id,protein_2_id,score\n")
+            f.write("protein_1_accession,protein_2_accession,score\n")
             for u, v, data in pos_G.edges(data=True):
                 score = data.get("score", data.get("weight", ""))
-                f.write(f"{u},{v},{score}\n")
+                f.write(f"{accession_by_pk[u]},{accession_by_pk[v]},{score}\n")
         with open(work_dir / f"{name}_neg.csv", "w") as f:
-            f.write("protein_1_id,protein_2_id\n")
+            f.write("protein_1_accession,protein_2_accession\n")
             for u, v in neg_G.edges():
-                f.write(f"{u},{v}\n")
+                f.write(f"{accession_by_pk[u]},{accession_by_pk[v]}\n")
         split_stats.append(
             {
                 "name": name,
@@ -330,7 +337,7 @@ def generate_splits(params: SplitParams, work_dir: Path, cb) -> SplitSummary:
         )
 
     summary = SplitSummary(
-        n_proteins=ep.interaction_graph.number_of_nodes(),
+        n_proteins=sum(s["n_proteins"] for s in split_stats),
         n_positive_total=sum(s["n_pos"] for s in split_stats),
         n_negative_total=sum(s["n_neg"] for s in split_stats),
         n_discarded_edges=len(ep.discarded_edges),

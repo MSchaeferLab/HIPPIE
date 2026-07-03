@@ -134,7 +134,7 @@ function InteractionFilterPanel({ filters, onChange }) {
             onToggle={id => set({ source: toggleIn(filters.source, id) })} />
         </div>
         <div className="col-md-4">
-          <label className="form-label">Experimental system</label>
+          <label className="form-label">Experiment type</label>
           <CheckboxList items={meta.experiments} selected={filters.experiment}
             onToggle={id => set({ experiment: toggleIn(filters.experiment, id) })} />
         </div>
@@ -149,6 +149,54 @@ function InteractionFilterPanel({ filters, onChange }) {
 }
 
 // ── Statistics display primitives ───────────────────────────────────────────
+// Hover/focus (i) icon; content is an HTML string of definition list items.
+function InfoPopover({ title, html }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    const bs = window.bootstrap;
+    if (!el || !bs) return;
+    const popover = new bs.Popover(el, {
+      trigger: "hover focus",
+      placement: "bottom",
+      html: true,
+      sanitize: false,
+      title,
+      content: html,
+    });
+    return () => popover.dispose();
+  }, [title, html]);
+  return (
+    <button type="button" ref={ref} className="btn btn-link p-0 ms-1 align-baseline"
+            style={{color: GREY, fontSize: ".68rem", lineHeight: 1, border: "none"}}
+            aria-label={`About ${title}`}>
+      <i className="bi bi-info-circle"></i>
+    </button>
+  );
+}
+
+const DL = (rows) =>
+  `<dl class="mb-0" style="font-size:.78rem">${rows
+    .map(([term, def]) => `<dt>${term}</dt><dd class="mb-2">${def}</dd>`)
+    .join("")}</dl>`;
+
+const PROTEIN_STATS_HELP = DL([
+  ["Proteins", "Filtered proteins that still have at least one surviving interaction under the current interaction filter."],
+  ["Median degree", "Median number of surviving interactions per protein, counted only over edges that pass the current filter."],
+  ["Median avg score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
+  ["Orphaned by filter", "Proteins that pass the protein-level filter (tissue, RPKM, …) but lost every interaction to the score/type/source filter, leaving degree 0. Excluded from the medians above."],
+  ["Tissue coverage", "Number of distinct tissues represented among genes of the filtered proteins (includes orphans)."],
+  ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when “include isoforms” is on."],
+]);
+
+const INTERACTION_STATS_HELP = DL([
+  ["Interactions", "Number of interactions passing the current filter."],
+  ["Median score", "Median confidence score across the filtered interactions."],
+  ["Experiment types", "Number of distinct experiment types among the filtered interactions."],
+  ["Node degree distribution", "Histogram of per-protein interaction counts (degree) under the current filter."],
+  ["Score distribution", "Histogram of interaction confidence scores under the current filter."],
+]);
+
 function Metric({ label, value }) {
   return (
     <div style={{
@@ -222,7 +270,10 @@ function StatsPlaceholder({ loading, error }) {
 function ProteinStatsBox({ stats, loading, error }) {
   return (
     <div className="hippie-card mb-0" style={{height:"100%", borderTop:`3px solid ${TEAL}`}}>
-      <div className="filter-section-label">Protein Statistics</div>
+      <div className="filter-section-label">
+        Protein Statistics
+        <InfoPopover title="Protein Statistics" html={PROTEIN_STATS_HELP} />
+      </div>
       {!stats
         ? <StatsPlaceholder loading={loading} error={error} />
         : (
@@ -231,7 +282,7 @@ function ProteinStatsBox({ stats, loading, error }) {
             <Metric label="Median degree" value={stats.median_degree} />
             <Metric label="Median avg score"
                     value={stats.median_avg_score == null ? "—" : stats.median_avg_score} />
-            <Metric label="Isolated (deg 0)" value={stats.n_isolated.toLocaleString()} />
+            <Metric label="Orphaned by filter" value={stats.n_orphaned_by_filter.toLocaleString()} />
             <Metric label="Tissue coverage" value={stats.tissue_coverage.toLocaleString()} />
             <Metric label="Isoforms" value={stats.n_isoforms.toLocaleString()} />
           </div>
@@ -243,7 +294,10 @@ function ProteinStatsBox({ stats, loading, error }) {
 function InteractionStatsBox({ stats, loading, error }) {
   return (
     <div className="hippie-card mb-0" style={{height:"100%", borderTop:`3px solid ${TEAL}`}}>
-      <div className="filter-section-label">Interaction Statistics</div>
+      <div className="filter-section-label">
+        Interaction Statistics
+        <InfoPopover title="Interaction Statistics" html={INTERACTION_STATS_HELP} />
+      </div>
       {!stats
         ? <StatsPlaceholder loading={loading} error={error} />
         : (
@@ -252,8 +306,8 @@ function InteractionStatsBox({ stats, loading, error }) {
               <Metric label="Interactions" value={stats.n_interactions.toLocaleString()} />
               <Metric label="Median score"
                       value={stats.median_score == null ? "—" : stats.median_score} />
-              <Metric label="Sources / Exp."
-                      value={`${stats.n_sources} / ${stats.n_experiments}`} />
+              <Metric label="Experiment types"
+                      value={`${stats.n_experiments}`} />
             </div>
             <Histogram title="Node degree distribution" bars={stats.degree_histogram} />
             <Histogram title="Score distribution" bars={stats.score_histogram} />

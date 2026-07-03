@@ -1342,8 +1342,12 @@ def interaction_detail_view(request, pk: int):
     )
 
     # Compute bait-prey detection stats from prefetched data (no extra queries).
-    bait_prey_total_tested = sum(assoc.number_of_tests for assoc in interaction.bait_prey.all())
-    bait_prey_times_observed = sum(assoc.number_of_observed for assoc in interaction.bait_prey.all())
+    bait_prey_total_tested = sum(
+        assoc.number_of_tests for assoc in interaction.bait_prey.all()
+    )
+    bait_prey_times_observed = sum(
+        assoc.number_of_observed for assoc in interaction.bait_prey.all()
+    )
 
     p1 = interaction.protein_1
     p2 = interaction.protein_2
@@ -1356,6 +1360,16 @@ def interaction_detail_view(request, pk: int):
         .first()
     )
     conserved_species = ortholog.ortholog_species.all() if ortholog else []
+
+    # Annotate each source with a per-pair "all evidence" link where one is
+    # known (e.g. IntAct pairwise search); None otherwise. See source_links.py.
+    from hippie_website.source_links import pair_search_url
+
+    sources = list(interaction.sources.all())
+    for source in sources:
+        source.pair_url = pair_search_url(
+            source.name, p1.uniprot_accession, p2.uniprot_accession
+        )
 
     context = {
         "interaction": interaction,
@@ -1372,7 +1386,7 @@ def interaction_detail_view(request, pk: int):
             "symbol": p2.gene.entrez_name or p2.uniprot_name,
         },
         # All prefetched — .all() hits the cache.
-        "sources": interaction.sources.all(),
+        "sources": sources,
         "publications": interaction.publications.all(),
         "experiments": interaction.experiments.all().order_by("-quality_score"),
         "species": conserved_species,
@@ -1406,8 +1420,12 @@ def noninteraction_detail_view(request, pk: int):
         pk=pk,
     )
 
-    bait_prey_total_tested = sum(assoc.number_of_tests for assoc in noninteraction.bait_prey.all())
-    bait_prey_times_observed = sum(assoc.number_of_observed for assoc in noninteraction.bait_prey.all())
+    bait_prey_total_tested = sum(
+        assoc.number_of_tests for assoc in noninteraction.bait_prey.all()
+    )
+    bait_prey_times_observed = sum(
+        assoc.number_of_observed for assoc in noninteraction.bait_prey.all()
+    )
 
     p1 = noninteraction.protein_1
     p2 = noninteraction.protein_2
@@ -1481,6 +1499,7 @@ def download_view(request):
 HIPPIE_VERSIONS_DIR = settings.BASE_DIR / "data" / "hippie_versions"
 TECH_SCORING_VIEW_DIR = settings.BASE_DIR / "data" / "technique_scores"
 
+
 @require_GET
 def download_dataset(request, filename: str):
     """Serve a downloadable file as an attachment.
@@ -1495,7 +1514,9 @@ def download_dataset(request, filename: str):
     for directory in (HIPPIE_VERSIONS_DIR, TECH_SCORING_VIEW_DIR):
         file_path = (directory / safe_name).resolve()
         if file_path.parent == directory.resolve() and file_path.is_file():
-            return FileResponse(open(file_path, "rb"), as_attachment=True, filename=safe_name)
+            return FileResponse(
+                open(file_path, "rb"), as_attachment=True, filename=safe_name
+            )
     raise Http404("File not found")
 
 
@@ -1639,33 +1660,49 @@ def _protein_filtered_qs(params):
     return pqs
 
 
-def _protein_stats(params) -> dict:
+def _protein_stats(
+    params, degree_by_node: dict[int, int], score_sum_by_node: dict[int, float]
+) -> dict:
+    """Protein-side stats for the filter-preview box.
+
+    ``degree_by_node`` / ``score_sum_by_node`` come from ``_interaction_stats``:
+    per-protein surviving-edge count and score sum under the full interaction
+    filter. Because ``build_interaction_queryset`` gates every edge on BOTH
+    endpoints passing the protein-level filters, ``degree_by_node.keys()`` is a
+    subset of the protein-filtered queryset — so every surviving protein already
+    passes the protein filter, and the medians can be read straight from these
+    dicts with no second protein-table scan.
+
+    ``median_degree`` and ``median_avg_score`` are therefore filter-aware (they
+    reflect only surviving edges), not the denormalized global ``Protein.degree``
+    / ``Protein.avg_score`` columns. A protein that passes the protein-level
+    filter but has zero surviving edges is an orphan: excluded from the medians
+    and counted in ``n_orphaned_by_filter``."""
     import statistics
 
-    from .models import GeneTissue
+    from .models import GeneTissue, Isoform
 
     pqs = _protein_filtered_qs(params)
 
-    degrees: list[int] = []
-    scores: list[float] = []
-    n_isolated = 0
-    # pk in the row keeps tissue-join duplicates from collapsing distinct
-    # proteins that happen to share (degree, avg_score).
-    for _pk, deg, avg in (
-        pqs.values_list("pk", "degree", "avg_score")
-        .distinct()
-        .iterator(chunk_size=10_000)
-    ):
-        degrees.append(deg)
-        if deg == 0:
-            n_isolated += 1
-        if avg is not None:
-            scores.append(avg)
+    # Surviving proteins (>=1 edge under the full filter) drive the medians.
+    degrees = list(degree_by_node.values())
+    # Per-protein average over its SURVIVING edges (filter-aware, mirrors
+    # median_degree); degree >= 1 for every key, so no divide-by-zero.
+    avg_scores = [score_sum_by_node[pk] / deg for pk, deg in degree_by_node.items()]
+    n_surviving = len(degrees)
 
+    # Counts that genuinely need the protein table: two indexed aggregates
+    # instead of iterating every protein row. .distinct() on pk collapses
+    # tissue-join duplicates when a tissue filter is active.
+    n_pass_protein_filter = pqs.values("pk").distinct().count()
+
+    # Isoform / tissue coverage without a giant ``pk IN (...20k ids...)`` clause:
+    # intersect surviving pks with isoform pks in Python; count tissues over the
+    # clean protein-filter queryset (coverage includes orphans — acceptable).
     n_isoforms = (
-        0
-        if not params.include_isoforms
-        else pqs.filter(isoform__isnull=False).values("pk").distinct().count()
+        len(degree_by_node.keys() & set(Isoform.objects.values_list("pk", flat=True)))
+        if params.include_isoforms
+        else 0
     )
     tissue_coverage = (
         GeneTissue.objects.filter(gene__proteins__in=pqs)
@@ -1675,10 +1712,12 @@ def _protein_stats(params) -> dict:
     )
 
     return {
-        "n_proteins": len(degrees),
+        "n_proteins": n_surviving,
         "median_degree": statistics.median(degrees) if degrees else 0,
-        "median_avg_score": round(statistics.median(scores), 4) if scores else None,
-        "n_isolated": n_isolated,
+        "median_avg_score": (
+            round(statistics.median(avg_scores), 4) if avg_scores else None
+        ),
+        "n_orphaned_by_filter": n_pass_protein_filter - n_surviving,
         "tissue_coverage": tissue_coverage,
         "n_isoforms": n_isoforms,
     }
@@ -1708,21 +1747,47 @@ def _bucket_degrees(degree_by_node: dict) -> list:
     return [{"label": _DEGREE_BUCKETS[i][0], "count": c} for i, c in enumerate(counts)]
 
 
-def _interaction_stats(iqs) -> dict:
+def _interaction_stats(iqs) -> tuple[dict, dict[int, int], dict[int, float]]:
+    from django.db.models import Count, F, Sum
+    from django.db.models.functions import Floor
+
     from .models import Interaction
 
+    # Per-node degree + score-sum via DB-side GROUP BY (one per FK side), riding
+    # the (protein_1, score) / (protein_2, score) covering indexes — so we never
+    # stream the filtered edges into Python. Same pattern as
+    # recompute_protein_stats._group. A self-loop (protein_1 == protein_2) lands
+    # in both side1 and side2, so it counts twice — matching the old
+    # edge-by-edge loop that incremented both endpoints.
+    side1 = {
+        r["protein_1_id"]: (r["c"], r["s"] or 0.0)
+        for r in iqs.values("protein_1_id").annotate(c=Count("id"), s=Sum("score"))
+    }
+    side2 = {
+        r["protein_2_id"]: (r["c"], r["s"] or 0.0)
+        for r in iqs.values("protein_2_id").annotate(c=Count("id"), s=Sum("score"))
+    }
     degree_by_node: dict[int, int] = {}
-    score_hist = [0] * 10  # display: 10 bins of width 0.1
-    score_fine = [0] * 100  # internal: for a memory-safe median
+    score_sum_by_node: dict[int, float] = {}
+    for pk in side1.keys() | side2.keys():
+        c1, s1 = side1.get(pk, (0, 0.0))
+        c2, s2 = side2.get(pk, (0, 0.0))
+        degree_by_node[pk] = c1 + c2
+        score_sum_by_node[pk] = s1 + s2
+
+    # Score distribution from one GROUP BY over 100 fine bins (bin =
+    # floor(score * 100); score == 1.0 clamps into the last bin). n, the 10-bin
+    # display histogram, and the median all derive from it — no extra scan.
+    score_fine = [0] * 100
     n = 0
-    for p1, p2, score in iqs.values_list(
-        "protein_1_id", "protein_2_id", "score"
-    ).iterator(chunk_size=10_000):
-        n += 1
-        degree_by_node[p1] = degree_by_node.get(p1, 0) + 1
-        degree_by_node[p2] = degree_by_node.get(p2, 0) + 1
-        score_hist[min(int(score * 10), 9)] += 1
-        score_fine[min(int(score * 100), 99)] += 1
+    for r in (
+        iqs.annotate(_bin=Floor(F("score") * 100.0))
+        .values("_bin")
+        .annotate(c=Count("id"))
+    ):
+        score_fine[min(int(r["_bin"]), 99)] += r["c"]
+        n += r["c"]
+    score_hist = [sum(score_fine[i * 10 : i * 10 + 10]) for i in range(10)]
 
     # Median score from the fine histogram (O(1) memory).
     median_score = None
@@ -1734,12 +1799,6 @@ def _interaction_stats(iqs) -> dict:
                 median_score = round((i + 0.5) / 100, 4)
                 break
 
-    n_sources = (
-        Interaction.sources.through.objects.filter(interaction__in=iqs)
-        .values("source_id")
-        .distinct()
-        .count()
-    )
     n_experiments = (
         Interaction.experiments.through.objects.filter(interaction__in=iqs)
         .values("experimenttype_id")
@@ -1747,18 +1806,21 @@ def _interaction_stats(iqs) -> dict:
         .count()
     )
 
-    return {
-        "n_interactions": n,
-        "degree_histogram": _bucket_degrees(degree_by_node),
-        # Label = lower bin edge (e.g. "0.3" = bucket [0.3, 0.4)); short enough
-        # to read along a 10-bin X axis.
-        "score_histogram": [
-            {"label": f"{i / 10:.1f}", "count": c} for i, c in enumerate(score_hist)
-        ],
-        "median_score": median_score,
-        "n_sources": n_sources,
-        "n_experiments": n_experiments,
-    }
+    return (
+        {
+            "n_interactions": n,
+            "degree_histogram": _bucket_degrees(degree_by_node),
+            # Label = lower bin edge (e.g. "0.3" = bucket [0.3, 0.4)); short enough
+            # to read along a 10-bin X axis.
+            "score_histogram": [
+                {"label": f"{i / 10:.1f}", "count": c} for i, c in enumerate(score_hist)
+            ],
+            "median_score": median_score,
+            "n_experiments": n_experiments,
+        },
+        degree_by_node,
+        score_sum_by_node,
+    )
 
 
 @require_POST
@@ -1770,10 +1832,13 @@ def browse_splits_stats(request):
 
     body = json.loads(request.body)
     params = SplitParams(**_validate_split_params(body))
+    interaction_stats, degree_by_node, score_sum_by_node = _interaction_stats(
+        build_interaction_queryset(params)
+    )
     return JsonResponse(
         {
-            "protein": _protein_stats(params),
-            "interaction": _interaction_stats(build_interaction_queryset(params)),
+            "protein": _protein_stats(params, degree_by_node, score_sum_by_node),
+            "interaction": interaction_stats,
         }
     )
 

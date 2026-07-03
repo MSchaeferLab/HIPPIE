@@ -14,7 +14,9 @@
             {% for src in sources %}
               <li>
                 <i class="bi bi-dot" style="color: var(--hippie-teal)"></i>
-                {% if src.url %}
+                {% if src.pair_url %}
+                  <a href="{{ src.pair_url }}" target="_blank" rel="noopener">{{ src.name }}</a>
+                {% elif src.url %}
                   <a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.name }}</a>
                 {% else %}
                   {{ src.name }}
@@ -54,15 +56,19 @@
       </div>
     </div>
 
-    {# Experimental systems #}
+    {# Experiment types #}
     <div class="col-md-6 col-lg-3">
       <div class="evidence-card">
-        <h4><i class="bi bi-eyedropper me-2 text-muted"></i>Experimental Systems</h4>
+        <h4><i class="bi bi-eyedropper me-2 text-muted"></i>Experiment types</h4>
         {% if experiments %}
           <ul class="evidence-list" data-collapsible="7">
             {% for exp in experiments %}
               <li>
-                <span>{{ exp.name }}</span>
+                {% if exp.psi_mi_code %}
+                  <a href="https://www.ebi.ac.uk/ols4/ontologies/mi/classes?obo_id={{ exp.psi_mi_code }}" target="_blank" rel="noopener">{{ exp.name }}</a>
+                {% else %}
+                  <span>{{ exp.name }}</span>
+                {% endif %}
                 <span class="exp-score-pill">{{ exp.quality_score|floatformat:1 }}</span>
               </li>
             {% endfor %}
@@ -108,10 +114,12 @@
             <div class="detection-stat-value">{{ bait_prey_total_tested }}</div>
             <div class="detection-stat-label">Times Tested</div>
           </div>
+            <!--
           <div>
             <div class="detection-stat-value pending">—</div>
             <div class="detection-stat-label">Detection Score</div>
           </div>
+          -->
         </div>
       </div>
     </div>

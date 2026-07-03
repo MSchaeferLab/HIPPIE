@@ -171,7 +171,7 @@ function InteractionFilterPanel({ filters, onChange, meta }) {
             onToggle={id => onChange({ ...filters, source: toggleIn(filters.source, id) })} />
         </div>
         <div className="col-md-4">
-          <div className="filter-section-label">Experimental System</div>
+          <div className="filter-section-label">Experiment type</div>
           <label className="form-label">Detected by any selected method</label>
           <CheckboxList items={meta.experiments} selected={filters.experiment}
             onToggle={id => onChange({ ...filters, experiment: toggleIn(filters.experiment, id) })} />

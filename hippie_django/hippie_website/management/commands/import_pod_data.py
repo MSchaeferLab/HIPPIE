@@ -1,3 +1,5 @@
+# 0.45 FNR is based on 60% biological replication in bioplex, and  51% FNR of y2h in yeast (https://pmc.ncbi.nlm.nih.gov/articles/PMC2639075/)
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -21,6 +23,11 @@ def _parse_pmids(raw: str) -> set[int]:
     return pmids
 
 
+def _noninteraction_score(n_tested: int, false_negative_rate: float) -> float:
+    """1 - P(all n_tested attempts were false negatives)."""
+    return 1 - false_negative_rate**n_tested
+
+
 class Command(BaseCommand):
     help = "Import BaitPreyAssociation (and NonInteraction) records from POD_flat.pq"
 
@@ -42,9 +49,60 @@ class Command(BaseCommand):
             default=10_000,
             help="Rows per parquet read batch (default: 10000)",
         )
+        parser.add_argument(
+            "--false-negative-rate",
+            type=float,
+            default=0.45,
+            help="Per-test false negative rate used for NonInteraction score "
+            "(score = 1 - rate^n_tested; default: 0.45)",
+        )
+        parser.add_argument(
+            "--score-noninteractions",
+            action="store_true",
+            help="Recompute NonInteraction.score for all existing rows from "
+            "BaitPreyAssociation.number_of_tests already in the database, then "
+            "exit. Skips the parquet import — --file/--min-tests/--batch-size "
+            "are ignored.",
+        )
 
+
+    def _rescore_noninteractions(self, false_negative_rate: float) -> None:
+        from hippie_website.models import BaitPreyAssociation, NonInteraction
+
+        updated = 0
+        to_update: list[NonInteraction] = []
+        assocs = (
+            BaitPreyAssociation.objects.filter(noninteraction__isnull=False)
+            .select_related("noninteraction")
+            .only("number_of_tests", "noninteraction__id", "noninteraction__score")
+        )
+        for assoc in assocs.iterator(chunk_size=2_000):
+            ni = assoc.noninteraction
+            new_score = _noninteraction_score(
+                assoc.number_of_tests, false_negative_rate
+            )
+            if ni.score != new_score:
+                ni.score = new_score
+                to_update.append(ni)
+            if len(to_update) >= 2_000:
+                NonInteraction.objects.bulk_update(to_update, ["score"])
+                updated += len(to_update)
+                to_update.clear()
+        if to_update:
+            NonInteraction.objects.bulk_update(to_update, ["score"])
+            updated += len(to_update)
+
+        self.stdout.write(
+            self.style.SUCCESS(f"Rescored {updated:,} NonInteractions")
+        )
 
     def handle(self, *args: object, **options: object) -> None:
+        false_negative_rate: float = float(options["false_negative_rate"])  # type: ignore[arg-type]
+
+        if options["score_noninteractions"]:
+            self._rescore_noninteractions(false_negative_rate)
+            return
+
         import pyarrow.parquet as pq
         from django.db import transaction
         from django.db.models import F
@@ -178,7 +236,11 @@ class Command(BaseCommand):
                         ni, created_ni = NonInteraction.objects.get_or_create(
                             protein_1_id=p1_id,
                             protein_2_id=p2_id,
-                            defaults={"score": 0.0},
+                            defaults={
+                                "score": _noninteraction_score(
+                                    n_tested, false_negative_rate
+                                )
+                            },
                         )
                         if created_ni:
                             noninteractions_created += 1

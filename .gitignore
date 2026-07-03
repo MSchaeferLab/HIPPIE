@@ -306,22 +306,12 @@ hippie_django/staticfiles/
 .claude/
 .mcp.json
 .pre-commit-config.yaml
+.gstack/
 
 # Data loading — large reference/download files, never commit these
-hippie_django/data/*.sql
-hippie_django/data/*.txt
-hippie_django/data/*.dat
-hippie_django/data/*.gz
-hippie_django/data/*.zip
-hippie_django/data/BIOGRID-*
-hippie_django/data/human*
-hippie_django/data/*.gct
-hippie_django/data/*.gene_info
-hippie_django/data/*.tsv
-hippie_django/data/*.pq
-hippie_django/data/species/*.zip
-hippie_django/data/species/*.txt
-hippie_django/data/species/*.tsv
+hippie_django/data/*
+!hippie_django/data/download_update_data.sh
+!hippie_django/technique_scores/
 hippie_django/logs/*.log
 hippie_django/logs/*.json
 hippie_django/media
