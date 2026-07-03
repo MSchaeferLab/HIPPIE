@@ -105,7 +105,9 @@ class HippieTestCase(TestCase):
             "EGFR", uniprot_name="EGFR_HUMAN", gene_id=1956, accession="P00533"
         )
         cls.ix = make_interaction(cls.brca1, cls.tp53, score=0.85)
-        cls.src = Source.objects.create(name="BioGRID", url="https://thebiogrid.org/")
+        cls.src = Source.objects.create(
+            name="BioGRID", url="https://thebiogrid.org/", n_connected_interactions=1
+        )
         cls.exp = ExperimentType.objects.create(
             name="Two-hybrid", psi_mi_code="MI:0018", quality_score=5.0
         )
@@ -1703,7 +1705,7 @@ class MLSplitGenerateTest(TestCase):
                 pre_prune = get_interaction_graph(params).number_of_nodes()
                 self.assertLess(summary.n_proteins, pre_prune)
 
-            for name in ("train", "val", "test"):
+            for name in ("train", "validation", "test"):
                 pos = (work_dir / f"{name}_pos.csv").read_text().splitlines()
                 neg = (work_dir / f"{name}_neg.csv").read_text().splitlines()
                 self.assertEqual(
@@ -1741,3 +1743,118 @@ class MLSplitGenerateTest(TestCase):
             )
         )
         self.assertEqual(mapping[iso.pk], "ACC000-2")
+
+
+# ---------------------------------------------------------------------------
+# Batch 3 — shared full-parity filters on the two query APIs
+# ---------------------------------------------------------------------------
+
+
+class Batch3ProteinQueryFilterTest(HippieTestCase):
+    """protein_query_api now honours the full shared filter set; protein-level
+    filters (score/source/experiment/swissprot) apply to the partner (B) side."""
+
+    def _query(self, q, **params):
+        r = self.client.get(
+            reverse("hippie_website:protein_query_api"), {"q": q, **params}
+        )
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def test_source_filter_limits_partners(self):
+        # brca1–tp53 carries BioGRID; add brca1–egfr with no source at all.
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        self.assertEqual(len(self._query("BRCA1")["interactions"]), 2)
+        only_src = self._query("BRCA1", source=self.src.pk)
+        partners = {i["partner"]["symbol"] for i in only_src["interactions"]}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_experiment_filter_limits_partners(self):
+        make_interaction(self.brca1, self.egfr, score=0.9)  # no experiment
+        rows = self._query("BRCA1", experiment=self.exp.pk)
+        partners = {i["partner"]["symbol"] for i in rows["interactions"]}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_min_score_filter(self):
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", min_score=0.88)["interactions"]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(all(i["score"] >= 0.88 for i in rows))
+
+    def test_swissprot_trembl_excludes_all_partners(self):
+        # Every fixture protein defaults is_swissprot=True → TrEMBL → empty.
+        self.assertEqual(
+            len(self._query("BRCA1", swissprot="trembl")["interactions"]), 0
+        )
+        self.assertGreaterEqual(
+            len(self._query("BRCA1", swissprot="swissprot")["interactions"]), 1
+        )
+
+
+class Batch3InteractionQueryFilterTest(HippieTestCase):
+    """interaction_query_api now returns entrez + is_noninteraction and applies
+    the full filter set; a match that fails a filter becomes a not-found row
+    (score -1) so every input pair still yields exactly one row."""
+
+    def _post(self, pairs, **body):
+        r = self.client.post(
+            reverse("hippie_website:interaction_query_api"),
+            data=json.dumps({"pairs": pairs, **body}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)["results"]
+
+    def test_entrez_and_type_fields_present(self):
+        r = self._post([{"a": "BRCA1", "b": "TP53", "input_order": 0}])[0]
+        self.assertEqual(r["entrez_a"], 672)
+        self.assertEqual(r["entrez_b"], 7157)
+        self.assertFalse(r["is_noninteraction"])
+
+    def test_not_found_pair_has_null_entrez(self):
+        r = self._post([{"a": "FAKEPROT", "b": "TP53", "input_order": 0}])[0]
+        self.assertIsNone(r["entrez_a"])
+
+    def test_min_score_miss_becomes_not_found_row(self):
+        # brca1–tp53 = 0.85; min_score 0.9 filters it out → one not-found row.
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], min_score=0.9
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["score"], -1.0)
+
+    def test_source_filter_match_and_miss(self):
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], source=[self.src.pk]
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        other = Source.objects.create(name="OtherDB", url="")
+        miss = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], source=[other.pk]
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_isoform_both_noninteraction_yields_single_row(self):
+        # A pair that is ONLY a documented non-interaction must yield exactly one
+        # row in isoform + both mode — no spurious not-found (-1) row alongside it.
+        make_noninteraction(self.brca1, self.egfr, score=0.3)
+        results = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
+            show="both",
+            include_isoforms=True,
+        )
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0]["is_noninteraction"])
+        self.assertGreaterEqual(results[0]["score"], 0)
+
+
+class Batch3FilterMetaInteractionTypesTest(HippieTestCase):
+    def test_interaction_types_returned(self):
+        from .models import InteractionType
+
+        InteractionType.objects.create(name="direct interaction", psi_mi_code="MI:0407")
+        r = self.client.get(reverse("hippie_website:browse_filter_meta"))
+        data = json.loads(r.content)
+        self.assertIn("interaction_types", data)
+        names = [x["name"] for x in data["interaction_types"]]
+        self.assertIn("direct interaction", names)

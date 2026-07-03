@@ -116,3 +116,9 @@ export function SortableTh({ sortKey, currentKey, currentDir, onSort, children, 
   const cls = [className, currentKey === sortKey ? `sorted-${currentDir}` : ""].join(" ").trim();
   return <th className={cls} onClick={() => onSort(sortKey)}>{children}</th>;
 }
+
+// Read a cookie value by name (used for the Django CSRF token in POST fetches).
+export function getCookie(name) {
+  const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+  return m ? decodeURIComponent(m[1]) : "";
+}
