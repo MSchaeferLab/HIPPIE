@@ -74,6 +74,8 @@ class Protein(models.Model):
     degree = models.PositiveIntegerField(default=0, db_index=True)
     avg_score = models.FloatField(null=True, blank=True, db_index=True)
 
+    is_reviewed = models.BooleanField(default=False, db_index=True)
+
     objects = ProteinManager()
 
     class Meta:
@@ -509,7 +511,7 @@ class BaitPreyAssociation(models.Model):
         null=True,
         blank=True,
     )
-    
+
     publications = models.ManyToManyField(
         Publication,
         related_name="bait_prey_associations",
