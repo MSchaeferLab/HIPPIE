@@ -1889,6 +1889,57 @@ class Batch3ProteinQueryFilterTest(HippieTestCase):
             len(self._query("BRCA1", swissprot="swissprot")["interactions"]), 1
         )
 
+    def test_max_score_filter(self):
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", max_score=0.87)["interactions"]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(all(i["score"] <= 0.87 for i in rows))
+
+    def test_min_degree_filter(self):
+        # tp53's denormalised degree is 1 (its only interaction, with brca1,
+        # existed when recompute_protein_stats last ran); egfr's is 0.
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", min_degree=1)["interactions"]
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_min_avg_score_filter(self):
+        # tp53's denormalised avg_score is 0.85; egfr's is None (it had no
+        # interactions when recompute_protein_stats last ran).
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", min_avg_score=0.5)["interactions"]
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_tissue_filter(self):
+        tissue = Tissue.objects.create(name="Brain")
+        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_rpkm=1.0)
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", tissue=tissue.pk, min_rpkm=0.5)["interactions"]
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_interaction_type_filter_limits_partners(self):
+        from .models import InteractionType
+
+        itype = InteractionType.objects.create(
+            name="direct interaction", psi_mi_code="MI:0407"
+        )
+        self.ix.interaction_types.add(itype)
+        make_interaction(self.brca1, self.egfr, score=0.9)  # no interaction_type
+        rows = self._query("BRCA1", interaction_type=itype.pk)["interactions"]
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_noninteractions_excluded_when_source_like_filter_active(self):
+        # NonInteractions carry no sources, so a source filter must exclude
+        # them entirely rather than silently including every non-interaction.
+        make_noninteraction(self.brca1, self.egfr, score=0.3)
+        rows = self._query("BRCA1", show="both", source=self.src.pk)["interactions"]
+        self.assertTrue(all(not i["is_noninteraction"] for i in rows))
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
 
 class Batch3InteractionQueryFilterTest(HippieTestCase):
     """interaction_query_api now returns entrez + is_noninteraction and applies
@@ -1945,6 +1996,163 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
         self.assertEqual(len(results), 1)
         self.assertTrue(results[0]["is_noninteraction"])
         self.assertGreaterEqual(results[0]["score"], 0)
+
+    def test_max_score_filter(self):
+        # brca1-tp53 = 0.85; max_score 0.5 excludes it → not-found row.
+        miss = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], max_score=0.5
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+        hit = self._post([{"a": "BRCA1", "b": "TP53", "input_order": 0}], max_score=0.9)
+        self.assertGreater(hit[0]["score"], 0)
+
+    def test_min_score_hit_returns_found_row(self):
+        # A threshold below the fixture's actual score must still return a match.
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], min_score=0.5
+        )
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0]["is_noninteraction"])
+        self.assertGreaterEqual(results[0]["score"], 0.5)
+
+    def test_experiment_filter_match_and_miss(self):
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], experiment=[self.exp.pk]
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        other = ExperimentType.objects.create(
+            name="Affinity chromatography", psi_mi_code="MI:0004", quality_score=3.0
+        )
+        miss = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], experiment=[other.pk]
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_swissprot_filter(self):
+        Protein.objects.filter(pk=self.egfr.pk).update(is_swissprot=False)
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], swissprot="swissprot"
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        miss = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}], swissprot="swissprot"
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_min_degree_filter(self):
+        # egfr's denormalised degree is 0 (it had no interactions when
+        # recompute_protein_stats last ran).
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        hit = self._post([{"a": "BRCA1", "b": "TP53", "input_order": 0}], min_degree=1)
+        self.assertGreater(hit[0]["score"], 0)
+        miss = self._post([{"a": "BRCA1", "b": "EGFR", "input_order": 0}], min_degree=1)
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_min_avg_score_filter(self):
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], min_avg_score=0.5
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        # egfr's denormalised avg_score is None → fails the threshold.
+        miss = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}], min_avg_score=0.5
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_tissue_filter(self):
+        # Interaction-level tissue filtering requires BOTH endpoints to be
+        # expressed in the tissue, unlike the partner-only check used by
+        # protein_query_api.
+        tissue = Tissue.objects.create(name="Brain")
+        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_rpkm=1.0)
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            tissue=[tissue.pk],
+            min_rpkm=0.5,
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        # egfr's gene has no tissue expression recorded → fails the filter.
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        miss = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
+            tissue=[tissue.pk],
+            min_rpkm=0.5,
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_interaction_type_filter_match_and_miss(self):
+        from .models import InteractionType
+
+        itype = InteractionType.objects.create(
+            name="direct interaction", psi_mi_code="MI:0407"
+        )
+        self.ix.interaction_types.add(itype)
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            interaction_type=[itype.pk],
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        other = InteractionType.objects.create(
+            name="physical association", psi_mi_code="MI:0915"
+        )
+        miss = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            interaction_type=[other.pk],
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_noninteraction_excluded_by_source_like_filter(self):
+        # NonInteractions carry no sources; a source filter must exclude them
+        # rather than treating the has_source_like check as a no-op.
+        make_noninteraction(self.brca1, self.egfr, score=0.3)
+        results = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
+            show="noninteractions",
+            source=[self.src.pk],
+        )
+        self.assertEqual(results[0]["score"], -1.0)
+
+    def test_scalar_sent_as_list_and_list_sent_as_scalar(self):
+        # min_score (a scalar field) sent as a single-element list, and source
+        # (a list field) sent as a bare scalar — the JSON-body adapter must
+        # unwrap/wrap these the same way the GET adapter's querystring
+        # semantics do (repeated keys vs. a single value).
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            min_score=[0.5],
+            source=self.src.pk,
+        )
+        self.assertEqual(len(results), 1)
+        self.assertGreaterEqual(results[0]["score"], 0.5)
+
+    def test_isoform_expansion_applies_protein_level_filter_per_combo(self):
+        iso_ok = Isoform.objects.create(
+            gene=self.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-2",
+            general_protein=self.brca1,
+        )
+        iso_bad = Isoform.objects.create(
+            gene=self.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-3",
+            general_protein=self.brca1,
+        )
+        Protein.objects.filter(pk=iso_bad.pk).update(is_swissprot=False)
+        make_interaction(iso_ok, self.tp53, score=0.7)
+        make_interaction(iso_bad, self.tp53, score=0.6)
+
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            include_isoforms=True,
+            swissprot="swissprot",
+        )
+        isoform_tags = {r["isoform_uniprot_a"] for r in results}
+        self.assertIn("P38398-2", isoform_tags)
+        self.assertNotIn("P38398-3", isoform_tags)
 
 
 class Batch3FilterMetaInteractionTypesTest(HippieTestCase):

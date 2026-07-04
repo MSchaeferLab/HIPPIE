@@ -244,7 +244,7 @@ function InteractionRow({ r, showSeed }) {
   const go = () => {
     if (r.detailUrl) window.location.href = r.detailUrl;
   };
-  const rowCls = r.isNoninteraction ? "row-noninteraction" : nf ? "row-not-found" : "";
+  const rowCls = nf ? "row-not-found" : r.isNoninteraction ? "row-noninteraction" : "";
   return (
     <tr className={rowCls} onClick={go} style={{ cursor: r.detailUrl ? "pointer" : "default" }}>
       <ProteinCells p={r.a} stop={stop} />
@@ -333,11 +333,12 @@ export function InteractionTable({
         </div>
         <div className="d-flex align-items-center gap-3">
           <PageSizeSelect pageSize={st.pageSize} onChange={st.onPageSizeChange} />
-          {serverExport ? (
-            <ServerExportBar url={serverExport.url} filename={exportFilename} disabled={serverExport.disabled} />
-          ) : (
-            <ClientExportBar header={INT_TSV_HEADER} lines={exportLines} filename={exportFilename} />
-          )}
+          {!streaming &&
+            (serverExport ? (
+              <ServerExportBar url={serverExport.url} filename={exportFilename} disabled={serverExport.disabled} />
+            ) : (
+              <ClientExportBar header={INT_TSV_HEADER} lines={exportLines} filename={exportFilename} />
+            ))}
           {headerExtra}
         </div>
       </div>
