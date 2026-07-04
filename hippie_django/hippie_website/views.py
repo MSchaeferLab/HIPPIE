@@ -1458,9 +1458,10 @@ def _browse_interaction_rows(
     union = legs[0] if len(legs) == 1 else legs[0].union(legs[1], all=True)
     order_col = _INT_SORT_FIELDS.get(sort_key, "score")
     order = ("-" + order_col) if descending else order_col
-    # ``id`` is the stable pagination tiebreak and orders the union
-    # deterministically across the two source tables.
-    page = union.order_by(order, "id")[offset : offset + limit]
+    # ``Interaction`` and ``NonInteraction`` have independent, overlapping id
+    # sequences, so ``id`` alone cannot disambiguate rows across the union —
+    # ``kind`` must break the tie first to make pagination deterministic.
+    page = union.order_by(order, "kind", "id")[offset : offset + limit]
 
     rows = []
     for r in page:

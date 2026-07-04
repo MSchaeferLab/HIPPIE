@@ -110,11 +110,11 @@ function App() {
   const paramsFor = (list) => {
     const p = filtersToQuery(appliedFilters);
     if (appliedSearch.trim()) p.set("q", appliedSearch.trim());
+    p.set("sort", sort.key);
+    p.set("dir", sort.dir);
     if (list) {
       p.set("offset", (page - 1) * pageSize);
       p.set("limit", pageSize);
-      p.set("sort", sort.key);
-      p.set("dir", sort.dir);
     } else {
       p.set("mode", mode);
     }

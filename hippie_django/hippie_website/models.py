@@ -326,12 +326,15 @@ class Interaction(models.Model):
     # full table. Refreshed by `recompute_interaction_flags`.
     involves_isoform = models.BooleanField(default=False, db_index=True)
 
-    # Denormalised evidence counts — refreshed by `recompute_interaction_flags`.
-    # Let the browse interaction table sort by evidence volume with an indexed
-    # scalar column instead of a GROUP BY/Count over the M2M through tables
-    # (the browse perf guidance forbids annotating counts over the 1.15M-row
-    # table). Composite `(n_*, id)` indexes below make the ordered pages ride
-    # an index; `id` is the stable pagination tiebreak.
+    # Denormalised evidence counts — refreshed by `recompute_interaction_flags`
+    # and kept in sync on ad-hoc edits by `signals.py`. Let the browse
+    # interaction table sort by evidence volume with an indexed scalar column
+    # instead of a GROUP BY/Count over the M2M through tables (the browse perf
+    # guidance forbids annotating counts over the 1.15M-row table). Composite
+    # `(n_*, id)` indexes below speed up the per-table scan/sort on this
+    # column; they're plain ascending, so a descending sort (the browse
+    # default) or the cross-table union merge still needs a sort step — they
+    # do not guarantee an index-only ordered scan across the union.
     n_sources = models.PositiveIntegerField(default=0)
     n_experiments = models.PositiveIntegerField(default=0)
 

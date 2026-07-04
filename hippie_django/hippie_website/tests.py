@@ -1165,9 +1165,69 @@ class BrowseInteractionsApiTest(HippieTestCase):
         self.assertEqual(self._get(experiment=self.exp.pk)["total"], 1)
 
     def test_evidence_counts_denormalised(self):
+        # Symmetric 1/1 counts couldn't catch a source/experiment column
+        # swap in the response — give this interaction a second source so
+        # the two counts differ.
+        src2 = Source.objects.create(name="IntAct", url="https://www.ebi.ac.uk/intact/")
+        self.ix.sources.add(src2)
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
         row = self._get()["interactions"][0]
-        self.assertEqual(row["source_count"], 1)
+        self.assertEqual(row["source_count"], 2)
         self.assertEqual(row["experiment_count"], 1)
+
+    def test_sort_by_sources_count(self):
+        # sort=sources rides n_sources — previously untested. Give a second
+        # interaction more sources than the shared brca1-tp53 fixture (1
+        # source) and confirm both sort directions order by the count.
+        src2 = Source.objects.create(name="IntAct", url="https://www.ebi.ac.uk/intact/")
+        ix2 = make_interaction(self.tp53, self.egfr, score=0.5)
+        ix2.sources.add(self.src, src2)
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
+        asc = self._get(sort="sources", dir="asc")
+        self.assertEqual([r["id"] for r in asc["interactions"]], [self.ix.pk, ix2.pk])
+        desc = self._get(sort="sources", dir="desc")
+        self.assertEqual([r["id"] for r in desc["interactions"]], [ix2.pk, self.ix.pk])
+
+    def test_sort_by_experiments_count(self):
+        # sort=experiments rides n_experiments — previously untested.
+        exp2 = ExperimentType.objects.create(
+            name="Affinity Capture-MS", psi_mi_code="MI:0004", quality_score=3.0
+        )
+        ix2 = make_interaction(self.tp53, self.egfr, score=0.5)
+        ix2.experiments.add(self.exp, exp2)
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
+        asc = self._get(sort="experiments", dir="asc")
+        self.assertEqual([r["id"] for r in asc["interactions"]], [self.ix.pk, ix2.pk])
+        desc = self._get(sort="experiments", dir="desc")
+        self.assertEqual([r["id"] for r in desc["interactions"]], [ix2.pk, self.ix.pk])
+
+    def test_pagination_tiebreak_across_union_kinds(self):
+        # Interaction and NonInteraction have independent, overlapping id
+        # sequences — force an explicit id collision between the two tables
+        # (regression for the union pagination tiebreak fix) and confirm
+        # offset/limit pagination is deterministic: no row dropped or
+        # duplicated across the page boundary that lands on the tie.
+        tied_id = 999999
+        tied_ix = Interaction.objects.create(
+            pk=tied_id, protein_1=self.tp53, protein_2=self.egfr, score=0.5
+        )
+        tied_ni = NonInteraction.objects.create(
+            pk=tied_id, protein_1=self.tp53, protein_2=self.egfr, score=0.5
+        )
+
+        page1 = self._get(show="both", sort="score", dir="asc", offset=0, limit=2)
+        page2 = self._get(show="both", sort="score", dir="asc", offset=2, limit=2)
+        self.assertEqual(page1["total"], 4)
+
+        seen = [(r["id"], r["is_noninteraction"]) for r in page1["interactions"]]
+        seen += [(r["id"], r["is_noninteraction"]) for r in page2["interactions"]]
+        self.assertEqual(len(seen), 4)
+        self.assertEqual(len(set(seen)), 4)
+        self.assertIn((tied_ix.pk, False), seen)
+        self.assertIn((tied_ni.pk, True), seen)
 
     def test_show_noninteractions(self):
         data = self._get(show="noninteractions")
@@ -1191,10 +1251,16 @@ class BrowseInteractionsApiTest(HippieTestCase):
         self.assertFalse(data["interactions"][0]["is_noninteraction"])
 
     def test_sort_by_symbol_a_does_not_error(self):
+        # A third row with a protein_a symbol distinct from the shared
+        # brca1-* fixtures makes this order-sensitive — with only the two
+        # brca1-* rows, both canonicalize to the same protein_a and
+        # `sorted(symbols) == symbols` passed unconditionally.
+        make_noninteraction(self.tp53, self.egfr, score=0.0)
+
         data = self._get(show="both", sort="symbol_a", dir="asc")
-        self.assertEqual(data["total"], 2)
+        self.assertEqual(data["total"], 3)
         symbols = [r["protein_a"]["symbol"] for r in data["interactions"]]
-        self.assertEqual(symbols, sorted(symbols))
+        self.assertEqual(symbols, ["BRCA1", "BRCA1", "TP53"])
 
 
 # ---------------------------------------------------------------------------
