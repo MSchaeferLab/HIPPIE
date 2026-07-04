@@ -326,6 +326,15 @@ class Interaction(models.Model):
     # full table. Refreshed by `recompute_interaction_flags`.
     involves_isoform = models.BooleanField(default=False, db_index=True)
 
+    # Denormalised evidence counts — refreshed by `recompute_interaction_flags`.
+    # Let the browse interaction table sort by evidence volume with an indexed
+    # scalar column instead of a GROUP BY/Count over the M2M through tables
+    # (the browse perf guidance forbids annotating counts over the 1.15M-row
+    # table). Composite `(n_*, id)` indexes below make the ordered pages ride
+    # an index; `id` is the stable pagination tiebreak.
+    n_sources = models.PositiveIntegerField(default=0)
+    n_experiments = models.PositiveIntegerField(default=0)
+
     sources = models.ManyToManyField(
         Source, related_name="interactions", db_table="interaction2source"
     )
@@ -350,6 +359,8 @@ class Interaction(models.Model):
             models.Index(fields=["protein_1", "score"]),
             models.Index(fields=["protein_2", "score"]),
             models.Index(fields=["score", "id"]),
+            models.Index(fields=["n_sources", "id"]),
+            models.Index(fields=["n_experiments", "id"]),
         ]
         constraints = [
             models.CheckConstraint(

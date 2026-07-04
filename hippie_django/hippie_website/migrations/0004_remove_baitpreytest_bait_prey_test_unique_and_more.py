@@ -4,36 +4,39 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('hippie_website', '0003_source_n_connected_interactions'),
+        ("hippie_website", "0003_source_n_connected_interactions"),
     ]
 
     operations = [
         migrations.RemoveConstraint(
-            model_name='baitpreytest',
-            name='bait_prey_test_unique',
+            model_name="baitpreytest",
+            name="bait_prey_test_unique",
         ),
         migrations.RemoveField(
-            model_name='baitpreyassociation',
-            name='tests_performed',
+            model_name="baitpreyassociation",
+            name="tests_performed",
         ),
         migrations.AddField(
-            model_name='baitpreyassociation',
-            name='number_of_observed',
+            model_name="baitpreyassociation",
+            name="number_of_observed",
             field=models.PositiveIntegerField(default=0),
         ),
         migrations.AddField(
-            model_name='baitpreyassociation',
-            name='number_of_tests',
+            model_name="baitpreyassociation",
+            name="number_of_tests",
             field=models.PositiveIntegerField(default=0),
         ),
         migrations.AddField(
-            model_name='baitpreyassociation',
-            name='publications',
-            field=models.ManyToManyField(db_table='bait_prey_assoc2publication', related_name='bait_prey_associations', to='hippie_website.publication'),
+            model_name="baitpreyassociation",
+            name="publications",
+            field=models.ManyToManyField(
+                db_table="bait_prey_assoc2publication",
+                related_name="bait_prey_associations",
+                to="hippie_website.publication",
+            ),
         ),
         migrations.DeleteModel(
-            name='BaitPreyTest',
+            name="BaitPreyTest",
         ),
     ]

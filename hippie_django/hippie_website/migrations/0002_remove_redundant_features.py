@@ -4,47 +4,46 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('hippie_website', '0001_initial'),
+        ("hippie_website", "0001_initial"),
     ]
 
     operations = [
         migrations.RemoveConstraint(
-            model_name='goslimterm',
-            name='go_slim_term_namespace_valid',
+            model_name="goslimterm",
+            name="go_slim_term_namespace_valid",
         ),
         migrations.RemoveField(
-            model_name='interaction',
-            name='go_terms',
+            model_name="interaction",
+            name="go_terms",
         ),
         migrations.RemoveField(
-            model_name='interaction',
-            name='mesh_terms',
+            model_name="interaction",
+            name="mesh_terms",
         ),
         migrations.DeleteModel(
-            name='SignalingEndpoint',
+            name="SignalingEndpoint",
         ),
         migrations.RemoveField(
-            model_name='interaction',
-            name='effect_source',
+            model_name="interaction",
+            name="effect_source",
         ),
         migrations.RemoveField(
-            model_name='interaction',
-            name='effect_type',
+            model_name="interaction",
+            name="effect_type",
         ),
         migrations.RemoveField(
-            model_name='interaction',
-            name='kegg_direction',
+            model_name="interaction",
+            name="kegg_direction",
         ),
         migrations.RemoveField(
-            model_name='goslimterm',
-            name='parents',
+            model_name="goslimterm",
+            name="parents",
         ),
         migrations.DeleteModel(
-            name='MeSHTerm',
+            name="MeSHTerm",
         ),
         migrations.DeleteModel(
-            name='GOSlimTerm',
+            name="GOSlimTerm",
         ),
     ]

@@ -8,7 +8,7 @@ Abdeckung:
   - browse_api: Grundstruktur, Tissue-Filter, Source-Filter, Min-Degree-Filter, Min-Score-Filter, Min-RPKM-Filter
   - browse_filter_meta: Struktur der Antwort
   - network_query_view: POST mit Seeds, Score-Filter, Layer-0-Filter, Min-RPKM-Filter
-  - protein_detail_view / interaction_detail_view / noninteraction_detail_view: 200 und 404
+  - interaction_detail_view / noninteraction_detail_view: 200 und 404
   - ProteinQuerySet.resolve(): alle vier Identifier-Typen
   - Canonical ordering in Interaction und NonInteraction
   - _protein_display() Helper (inkl. isoform_uid Parameter)
@@ -155,16 +155,6 @@ class UrlSmokeTest(HippieTestCase):
     def test_information_get(self):
         r = self.client.get(reverse("hippie_website:information"))
         self.assertEqual(r.status_code, 200)
-
-    def test_protein_detail_get(self):
-        r = self.client.get(
-            reverse("hippie_website:protein_detail", args=[self.brca1.pk])
-        )
-        self.assertEqual(r.status_code, 200)
-
-    def test_protein_detail_404(self):
-        r = self.client.get(reverse("hippie_website:protein_detail", args=[99999]))
-        self.assertEqual(r.status_code, 404)
 
     def test_interaction_detail_get(self):
         r = self.client.get(
@@ -423,6 +413,19 @@ class BrowseApiTest(HippieTestCase):
         page = self._get(offset=0, limit=1)
         self.assertEqual(page["total"], all_data["total"])
 
+    def test_protein_entry_has_is_swissprot(self):
+        p = self._get()["proteins"][0]
+        self.assertIn("is_swissprot", p)
+
+    def test_swissprot_filter(self):
+        # Flip EGFR to TrEMBL; the review-status filter must partition the set.
+        Protein.objects.filter(pk=self.egfr.pk).update(is_swissprot=False)
+        sp = self._get(swissprot="swissprot")
+        tr = self._get(swissprot="trembl")
+        self.assertNotIn(self.egfr.pk, [p["id"] for p in sp["proteins"]])
+        self.assertEqual(tr["total"], 1)
+        self.assertEqual(tr["proteins"][0]["id"], self.egfr.pk)
+
 
 # ---------------------------------------------------------------------------
 # 5. browse_filter_meta
@@ -664,20 +667,6 @@ class DetailViewContextTest(HippieTestCase):
             d = ctx[side]
             for key in ("protein", "uniprot_id", "gene_id", "symbol"):
                 self.assertIn(key, d)
-
-    def test_protein_detail_context_keys(self):
-        r = self.client.get(
-            reverse("hippie_website:protein_detail", args=[self.brca1.pk])
-        )
-        ctx = r.context
-        for key in ("protein", "symbol", "uniprot_id", "gene_id", "interaction_count"):
-            self.assertIn(key, ctx)
-
-    def test_protein_detail_interaction_count(self):
-        r = self.client.get(
-            reverse("hippie_website:protein_detail", args=[self.brca1.pk])
-        )
-        self.assertEqual(r.context["interaction_count"], 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1101,7 +1090,7 @@ class InteractionQuerySetMethodsTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 19. browse_api min_score filter
+# 19. browse_api min_avg_score filter (unified CommonFilters param)
 # ---------------------------------------------------------------------------
 
 
@@ -1111,17 +1100,17 @@ class BrowseApiMinScoreTest(HippieTestCase):
         self.assertEqual(r.status_code, 200)
         return json.loads(r.content)
 
-    def test_min_score_excludes_proteins_with_low_avg(self):
+    def test_min_avg_score_excludes_proteins_with_low_avg(self):
         # BRCA1 + TP53 share a 0.85 interaction; EGFR has none (avg_score=None).
-        data = self._get(min_score=0.5)
+        data = self._get(min_avg_score=0.5)
         self.assertEqual(data["total"], 2)
         for p in data["proteins"]:
             self.assertIsNotNone(p["avg_score"])
             self.assertGreaterEqual(p["avg_score"], 0.5)
 
-    def test_min_score_zero_is_no_op(self):
+    def test_min_avg_score_zero_is_no_op(self):
         all_data = self._get()
-        zero_data = self._get(min_score=0)
+        zero_data = self._get(min_avg_score=0)
         self.assertEqual(zero_data["total"], all_data["total"])
 
 
@@ -1131,6 +1120,16 @@ class BrowseApiMinScoreTest(HippieTestCase):
 
 
 class BrowseInteractionsApiTest(HippieTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        # brca1–tp53 is the interaction (cls.ix, one source + one experiment).
+        # Add a non-interaction so the result-type toggle / union has both kinds.
+        cls.ni = make_noninteraction(cls.brca1, cls.egfr, score=0.0)
+        # Populate denormalised n_sources / n_experiments so count assertions
+        # and count-column sorting exercise real values.
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
     def _get(self, **params):
         r = self.client.get(reverse("hippie_website:browse_interactions_api"), params)
         self.assertEqual(r.status_code, 200)
@@ -1148,9 +1147,11 @@ class BrowseInteractionsApiTest(HippieTestCase):
             "score",
             "source_count",
             "experiment_count",
+            "is_noninteraction",
             "detail_url",
         ):
             self.assertIn(key, row)
+        self.assertFalse(row["is_noninteraction"])
 
     def test_score_range_filter(self):
         # The single fixture interaction scores 0.85.
@@ -1162,6 +1163,38 @@ class BrowseInteractionsApiTest(HippieTestCase):
 
     def test_experiment_filter(self):
         self.assertEqual(self._get(experiment=self.exp.pk)["total"], 1)
+
+    def test_evidence_counts_denormalised(self):
+        row = self._get()["interactions"][0]
+        self.assertEqual(row["source_count"], 1)
+        self.assertEqual(row["experiment_count"], 1)
+
+    def test_show_noninteractions(self):
+        data = self._get(show="noninteractions")
+        self.assertEqual(data["total"], 1)
+        row = data["interactions"][0]
+        self.assertTrue(row["is_noninteraction"])
+        self.assertEqual(row["source_count"], 0)
+        self.assertIn("/noninteraction/", row["detail_url"])
+
+    def test_show_both_unions_tables(self):
+        data = self._get(show="both")
+        self.assertEqual(data["total"], 2)
+        kinds = sorted(r["is_noninteraction"] for r in data["interactions"])
+        self.assertEqual(kinds, [False, True])
+
+    def test_source_filter_excludes_noninteractions_in_both(self):
+        # A source filter can never match a non-interaction → "both" collapses
+        # to interactions only.
+        data = self._get(show="both", source=self.src.pk)
+        self.assertEqual(data["total"], 1)
+        self.assertFalse(data["interactions"][0]["is_noninteraction"])
+
+    def test_sort_by_symbol_a_does_not_error(self):
+        data = self._get(show="both", sort="symbol_a", dir="asc")
+        self.assertEqual(data["total"], 2)
+        symbols = [r["protein_a"]["symbol"] for r in data["interactions"]]
+        self.assertEqual(symbols, sorted(symbols))
 
 
 # ---------------------------------------------------------------------------
