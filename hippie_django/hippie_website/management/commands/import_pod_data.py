@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from django.core.management.base import BaseCommand, CommandParser
 
+from ._sources import data_path
+
 if TYPE_CHECKING:
     pass
 
@@ -32,8 +34,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--file",
-            default="data/POD_flat.pq",
-            help="Path to parquet file, relative to manage.py (default: data/POD_flat.pq)",
+            default=str(data_path("pod_flat")),
+            help="Path to parquet file (default: from data/sources.json)",
         )
         parser.add_argument(
             "--min-tests",

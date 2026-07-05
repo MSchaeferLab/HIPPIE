@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 from hippie_website.models import ExperimentType
+from ._sources import data_path
 
 def check_if_name_exists(name):
     if ExperimentType.objects.filter(name=name).exists():
@@ -18,8 +19,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--csv_path",
             nargs="?",
-            default=str(Path(__file__).resolve().parents[3] / "data" / "techniques_scoring_04-05-26.csv"),
-            help="Path to the techniques scoring TSV (default: data/techniques_scoring_04-05-26.csv)",
+            default=str(data_path("techniques_scoring")),
+            help="Path to the techniques scoring TSV (default: from data/sources.json)",
         )
         parser.add_argument(
             "--on-conflict",

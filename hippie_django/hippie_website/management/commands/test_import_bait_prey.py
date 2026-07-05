@@ -17,8 +17,9 @@ from hippie_website.models import (
     Protein,
     Publication,
 )
+from ._sources import data_path
 
-DEFAULT_DATA_FILE = Path(__file__).resolve().parents[3] / "data" / "dummy-MI-0006.csv"
+DEFAULT_DATA_FILE = data_path("dummy_baitprey")
 
 NCBI_ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 NCBI_ESUMMARY = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"

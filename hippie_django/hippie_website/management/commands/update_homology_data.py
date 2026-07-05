@@ -1,4 +1,5 @@
 from .hippie_update import get_human_gene_map
+from ._sources import data_path, mod_sources, stream_url
 from collections.abc import Iterator
 from django.core.management.base import BaseCommand
 from hippie_website.models import Gene, Interaction, Species, OrthologInteraction
@@ -20,9 +21,7 @@ TAXONS = {
     "559292": ("SGD", "Saccharomyces cerevisiae"),
 }
 
-INTACT_FTP_URL = (
-    "https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/intact.txt"
-)
+INTACT_FTP_URL = stream_url("intact_full")
 
 MIN_AGREEMENT_SCORE_RATIO = 0.8
 
@@ -36,40 +35,9 @@ GENE_RE = {
     "ZFIN": re.compile(r"ZDB-GENE-\d+-\d+"),
     "MGI": re.compile(r"MGI:\d+"),
 }
-SOURCES = {
-    "10116": dict(
-        db="RGD", url="https://download.rgd.mcw.edu/data_release/GENES_RAT.txt", gz=0
-    ),
-    "10090": dict(
-        db="MGI",
-        url="https://www.informatics.jax.org/downloads/reports/MRK_SwissProt_TrEMBL.rpt",
-        gz=0,
-    ),
-    "7955": dict(db="ZFIN", url="https://zfin.org/downloads/uniprot.txt", gz=0),
-    "8364": dict(
-        db="Xenbase",
-        url="https://download.xenbase.org/xenbase/GenePageReports/xenbase_v1.2.gpi.gz",
-        gz=1,
-    ),
-    "8355": dict(
-        db="Xenbase",
-        url="https://download.xenbase.org/xenbase/GenePageReports/xenbase_v1.2.gpi.gz",
-        gz=1,
-    ),
-    "7227": dict(
-        db="FlyBase",
-        url="https://s3ftp.flybase.org/releases/current/precomputed_files/genes/fbgn_NAseq_Uniprot_fb_2026_01.tsv.gz",
-        gz=1,
-    ),
-    "6239": dict(
-        db="WormBase", file="data/c_elegans.PRJNA13758.WS298.xrefs.txt.gz", gz=1
-    ),
-    "559292": dict(
-        db="SGD",
-        url="http://sgd-archive.yeastgenome.org/curation/chromosomal_feature/dbxref.tab",
-        gz=0,
-    ),
-}
+# Per-species MOD gene→UniProt sources, reconstructed from data/sources.json.
+# Each entry: {db, gz, and either 'url' (live fetch) or 'file' (local path)}.
+SOURCES = mod_sources()
 
 _TAXON_LOOKUP: set[str] = set(TAXONS) | {"9606"}
 _TAXID_LEN = len("taxid:")
@@ -364,7 +332,7 @@ def update_homology_data(
         stdout.write(msg + "\n")
 
     # Build MOD UniProt→gene TSV cache
-    uni_prot_mod_map_file = "data/uniprot_to_orthology.tsv"
+    uni_prot_mod_map_file = str(data_path("uniprot_to_orthology"))
     log("Fetching MOD gene→UniProt mappings...")
     write_all_mapping(uni_prot_mod_map_file)
 
@@ -396,7 +364,7 @@ def update_homology_data(
     log(f"  {len(species_to_human):,} (taxon, species_gene) keys")
 
     log("Loading UniProt secondary AC map...")
-    updated_uniprot_dict = get_updated_uniprot_dict("data/sec_ac.txt")
+    updated_uniprot_dict = get_updated_uniprot_dict(str(data_path("sec_ac")))
     log(f"  {len(updated_uniprot_dict):,} ID updates")
 
     log("Loading human UniProt→entrez map...")
@@ -545,14 +513,14 @@ class Command(BaseCommand):
         parser.add_argument(
             "--homology_file",
             type=str,
-            required=True,
-            help="Path to genome alliance orthology TSV",
+            default=str(data_path("orthology_alliance")),
+            help="Path to genome alliance orthology TSV (default: from data/sources.json)",
         )
         parser.add_argument(
             "--ncbi_gene_info_file",
             type=str,
-            required=True,
-            help="Path to NCBI human gene_info file",
+            default=str(data_path("gene_info")),
+            help="Path to NCBI human gene_info file (default: from data/sources.json)",
         )
         parser.add_argument(
             "--intact_file",

@@ -39,6 +39,8 @@ from hippie_website.models import (
     Source,
 )
 
+from ._sources import data_path
+
 # ---------------------------------------------------------------------------
 # Scoring constants (from DB.java)
 # ---------------------------------------------------------------------------
@@ -187,7 +189,7 @@ def _load_id_mappings() -> tuple[
     """
     # Phase 1: read secondary → primary accession mapping
     acc_map: dict[str, str] = {}
-    with open("data/sec_ac.txt", "r") as f:
+    with open(data_path("sec_ac"), "r") as f:
         past_header = False
         for line in f:
             if line.startswith("_"):
@@ -202,7 +204,7 @@ def _load_id_mappings() -> tuple[
     gene_map: dict[str, list[str | None, str | None]] = {}
     isoforms: set[str] = set()
 
-    with open("data/HUMAN_9606_idmapping.dat", "r") as f:
+    with open(data_path("human_idmapping"), "r") as f:
         for line in f:
             parts = line.strip().split("\t")
             id_ = parts[0]
@@ -243,7 +245,7 @@ def suppliment_missing_entrez_id(entrez_map: dict[str, list[str | None, str | No
     entrez_uniprot_conflict_genes = set()
     name_entrez_dict = dict()
     synonyms_dict = dict()
-    with open("data/Homo_sapiens.gene_info", "r") as f:
+    with open(data_path("gene_info"), "r") as f:
         for line in f:
             line = line.split("\t")
             name_entrez_dict[line[2]] = line[1]
@@ -543,7 +545,7 @@ def _load_gene_synonyms(entrez_ids: set[int]) -> dict[int, set[str]]:
     """
     synonyms: dict[int, set[str]] = {eid: set() for eid in entrez_ids}
 
-    with open("data/Homo_sapiens.gene_info", "r") as f:
+    with open(data_path("gene_info"), "r") as f:
         for line in f:
             parts = line.strip().split("\t")
             if len(parts) < 5:
@@ -561,7 +563,7 @@ def _load_gene_synonyms(entrez_ids: set[int]) -> dict[int, set[str]]:
 
     # Two-pass over idmapping: first collect acc→entrez, then Gene_Name/Gene_Synonym.
     acc_to_entrez: dict[str, int] = {}
-    with open("data/HUMAN_9606_idmapping.dat", "r") as f:
+    with open(data_path("human_idmapping"), "r") as f:
         for line in f:
             parts = line.strip().split("\t")
             if len(parts) != 3:
@@ -575,7 +577,7 @@ def _load_gene_synonyms(entrez_ids: set[int]) -> dict[int, set[str]]:
                 except ValueError:
                     pass
 
-    with open("data/HUMAN_9606_idmapping.dat", "r") as f:
+    with open(data_path("human_idmapping"), "r") as f:
         for line in f:
             parts = line.strip().split("\t")
             if len(parts) != 3:
@@ -968,7 +970,7 @@ def _refresh_secondary_accessions() -> None:
     """
     secondary_to_primary: dict[str, str] = {}
     past_header = False
-    with open("data/sec_ac.txt", "r") as f:
+    with open(data_path("sec_ac"), "r") as f:
         for line in f:
             if line.startswith("_"):
                 past_header = True
