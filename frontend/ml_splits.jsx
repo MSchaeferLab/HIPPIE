@@ -350,19 +350,19 @@ function SamplingCard({ negRatio, setNegRatio, seed, setSeed }) {
 
 // ── Run-history cards ─────────────────────────────────────────────────────
 // Each generated run is its own self-polling card, newest on top. A card
-// transitions running → done/failed in place; ids persist in localStorage so
-// the history survives reloads, and ?jobs=id1,id2 deep-links finished runs.
+// transitions running → done/failed in place; ids persist in sessionStorage
+// so the history survives reloads, and ?jobs=id1,id2 deep-links finished runs.
 const STORAGE_KEY = "hippie.ml_splits.runs";
 const MAX_RUNS = 20;
 
 function loadStoredRuns() {
   try {
-    const arr = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    const arr = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "[]");
     return Array.isArray(arr) ? arr.filter(x => typeof x === "string") : [];
   } catch { return []; }
 }
 function saveStoredRuns(ids) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ids)); } catch { /* quota / disabled */ }
+  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(ids)); } catch { /* quota / disabled */ }
 }
 
 // One-line filter recap from the job's stored params (counts, not names — the
@@ -386,10 +386,11 @@ function paramSummary(p) {
 }
 
 const PILL = {
-  PENDING: { bg:"var(--hippie-border)", fg:GREY,   label:"Queued"  },
-  RUNNING: { bg:TEAL,                   fg:"#fff",  label:"Running" },
-  DONE:    { bg:TEAL,                   fg:"#fff",  label:"Done"    },
-  FAILED:  { bg:RED,                    fg:"#fff",  label:"Failed"  },
+  PENDING:   { bg:"var(--hippie-border)", fg:GREY,   label:"Queued"    },
+  RUNNING:   { bg:TEAL,                   fg:"#fff",  label:"Running"   },
+  DONE:      { bg:TEAL,                   fg:"#fff",  label:"Done"      },
+  FAILED:    { bg:RED,                    fg:"#fff",  label:"Failed"    },
+  NOT_FOUND: { bg:RED,                    fg:"#fff",  label:"Not Found" },
 };
 
 function StatusPill({ status }) {
@@ -444,14 +445,19 @@ function SplitCards({ summary }) {
 // terminal state, so several concurrent runs each track independently.
 function RunCard({ jobId }) {
   const [data, setData] = useState(null);
+  const [notFound, setNotFound] = useState(false);
   const timer = useRef(null);
   useEffect(() => {
     let cancelled = false;
     function tick() {
       fetch(cfg.statusBase + jobId + "/")
-        .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+        .then(r => {
+          if (r.status === 404) { if (!cancelled) setNotFound(true); return null; }
+          if (!r.ok) throw new Error(String(r.status));
+          return r.json();
+        })
         .then(d => {
-          if (cancelled) return;
+          if (cancelled || !d) return;
           setData(d);
           if (d.status !== "DONE" && d.status !== "FAILED")
             timer.current = setTimeout(tick, 1500);
@@ -462,9 +468,10 @@ function RunCard({ jobId }) {
     return () => { cancelled = true; clearTimeout(timer.current); };
   }, [jobId]);
 
-  const status = data?.status || "PENDING";
-  const running = status !== "DONE" && status !== "FAILED";
-  const border  = status === "FAILED" ? RED : status === "DONE" ? TEAL : "var(--hippie-border)";
+  const status = notFound ? "NOT_FOUND" : (data?.status || "PENDING");
+  const running = status !== "DONE" && status !== "FAILED" && status !== "NOT_FOUND";
+  const border  = status === "FAILED" || status === "NOT_FOUND" ? RED
+                : status === "DONE" ? TEAL : "var(--hippie-border)";
   const pct     = Math.round((data?.progress || 0) * 100);
   const queued  = status === "PENDING" && (data?.queue_position || 0) > 0;
   const recap   = data ? paramSummary(data.params) : null;
@@ -482,7 +489,11 @@ function RunCard({ jobId }) {
         <p className="mb-2 mono" style={{fontSize:".72rem", color:GREY}}>{recap}</p>
       )}
 
-      {!data && (
+      {notFound && (
+        <p className="mb-0 text-muted-sm">Run not found — it may have been removed.</p>
+      )}
+
+      {!data && !notFound && (
         <p className="mb-0 text-muted-sm"><span className="spinner-sm me-1"></span>Loading…</p>
       )}
 
@@ -539,7 +550,7 @@ function App() {
   const [interStats,   setInterStats]   = useState(null);
 
   // Run history — ids of generated jobs, newest first. Each renders its own
-  // self-polling RunCard. Persisted in localStorage so history survives a
+  // self-polling RunCard. Persisted in sessionStorage so history survives a
   // reload; ?jobs=id1,id2 deep-links finished runs.
   const [runIds,      setRunIds]      = useState([]);
   const [submitting,  setSubmitting]  = useState(false);
@@ -549,8 +560,9 @@ function App() {
     const jobsParam = new URLSearchParams(window.location.search).get("jobs");
     const stored = loadStoredRuns();
     if (jobsParam) {
-      // Deep-linked ids first, then any locally-saved runs not already listed.
-      const linked = jobsParam.split(",").map(s => s.trim()).filter(Boolean);
+      // Deep-linked ids first (de-duplicated), then any locally-saved runs
+      // not already listed.
+      const linked = [...new Set(jobsParam.split(",").map(s => s.trim()).filter(Boolean))];
       const merged = [...linked, ...stored.filter(x => !linked.includes(x))].slice(0, MAX_RUNS);
       saveStoredRuns(merged);
       setRunIds(merged);

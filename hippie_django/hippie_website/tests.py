@@ -1607,10 +1607,9 @@ class MLSplitStatsTest(TestCase):
         from .views import _interaction_stats, _protein_stats
 
         params = SplitParams(**overrides)
-        interaction, degree_by_node, score_sum_by_node = _interaction_stats(
-            build_interaction_queryset(params)
-        )
-        protein = _protein_stats(params, degree_by_node, score_sum_by_node)
+        iqs = build_interaction_queryset(params)
+        interaction, degree_by_node, score_sum_by_node = _interaction_stats(iqs)
+        protein = _protein_stats(params, degree_by_node, score_sum_by_node, iqs)
         return interaction, protein
 
     def test_orphans_excluded_and_medians_are_filter_aware(self):
@@ -1670,6 +1669,14 @@ class MLSplitStatsTest(TestCase):
         # interaction box.
         self.assertIn("degree_histogram", payload["protein"])
         self.assertNotIn("degree_histogram", payload["interaction"])
+        # Filtered degrees are A:2, B:1, C:1 → bucket "1" holds B and C, "2"
+        # holds A. Checks the histogram is built from degree_by_node (moved
+        # with the relocation), not an empty/wrong dict.
+        degree_hist = {
+            b["label"]: b["count"] for b in payload["protein"]["degree_histogram"]
+        }
+        self.assertEqual(degree_hist["1"], 2)
+        self.assertEqual(degree_hist["2"], 1)
 
 
 class MLSplitPruneUnitTest(SimpleTestCase):
@@ -1776,6 +1783,14 @@ class MLSplitGenerateTest(TestCase):
             self.assertEqual(
                 summary.n_proteins, sum(s["n_proteins"] for s in summary.splits)
             )
+            # Individual split sizes: catches a swapped/zeroed split, which the
+            # sum-only check above can't (e.g. a 24-0-0 split sums the same as
+            # 12-6-6). Values are deterministic for this fixture + seed=1
+            # (verified stable across repeated runs).
+            by_name = {s["name"]: s for s in summary.splits}
+            self.assertEqual(by_name["train"]["n_proteins"], 12)
+            self.assertEqual(by_name["validation"]["n_proteins"], 6)
+            self.assertEqual(by_name["test"]["n_proteins"], 6)
             if summary.n_discarded_nodes > 0:
                 pre_prune = get_interaction_graph(params).number_of_nodes()
                 self.assertLess(summary.n_proteins, pre_prune)
@@ -2177,10 +2192,9 @@ class MLSplitTissueCoverageTest(TestCase):
         from .views import _interaction_stats, _protein_stats
 
         params = SplitParams(min_score=0.5)
-        _interaction, degree_by_node, score_sum = _interaction_stats(
-            build_interaction_queryset(params)
-        )
-        protein = _protein_stats(params, degree_by_node, score_sum)
+        iqs = build_interaction_queryset(params)
+        _interaction, degree_by_node, score_sum = _interaction_stats(iqs)
+        protein = _protein_stats(params, degree_by_node, score_sum, iqs)
 
         self.assertEqual(protein["n_proteins"], 2)  # A, B survive
         self.assertEqual(protein["n_orphaned_by_filter"], 2)  # O, O2 orphaned
@@ -2226,3 +2240,104 @@ class MLSplitQueuePositionTest(TestCase):
         self.assertEqual(qpos(j_old), 0)
         # A RUNNING job always reports 0 regardless of predecessors.
         self.assertEqual(qpos(j_run), 0)
+
+    def test_queue_position_counts_all_earlier_pending_not_just_presence(self):
+        # Regression guard: a boolean "anything pending ahead" check would
+        # also report 1 here, indistinguishable from the real FIFO count.
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .models import SplitJob
+
+        base = timezone.now()
+        jobs = [SplitJob.objects.create(params={}, status="PENDING") for _ in range(4)]
+        for i, job in enumerate(jobs):
+            SplitJob.objects.filter(pk=job.pk).update(
+                created_at=base + timedelta(seconds=i)
+            )
+
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[jobs[-1].pk])
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["queue_position"], 3)
+
+    def test_queue_position_tiebreaks_identical_created_at(self):
+        # Two PENDING jobs sharing the same created_at (e.g. same-millisecond
+        # creation) must still be given a strict, deterministic order rather
+        # than both counting (or neither counting) the other.
+        from django.utils import timezone
+
+        from .models import SplitJob
+
+        now = timezone.now()
+        j1 = SplitJob.objects.create(params={}, status="PENDING")
+        j2 = SplitJob.objects.create(params={}, status="PENDING")
+        SplitJob.objects.filter(pk__in=[j1.pk, j2.pk]).update(created_at=now)
+
+        earlier, later = sorted([j1, j2], key=lambda j: j.pk)
+
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[later.pk])
+        )
+        self.assertEqual(resp.json()["queue_position"], 1)
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[earlier.pk])
+        )
+        self.assertEqual(resp.json()["queue_position"], 0)
+
+
+class MLSplitEndpointNotFoundTest(TestCase):
+    """browse_splits_status/download/create for a nonexistent or not-yet-done
+    job id must 404, not 500 or silently succeed."""
+
+    def test_status_404_for_unknown_job_id(self):
+        import uuid
+
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[uuid.uuid4()])
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_download_404_for_unknown_job_id(self):
+        import uuid
+
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_download", args=[uuid.uuid4()])
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_download_404_for_job_not_yet_done(self):
+        from .models import SplitJob
+
+        job = SplitJob.objects.create(params={}, status="PENDING")
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_download", args=[job.pk])
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_create_enqueues_job_and_returns_202(self):
+        from unittest.mock import patch
+
+        from .models import SplitJob
+
+        with patch("hippie_website.views.run_split_job.delay") as mock_delay:
+            resp = self.client.post(
+                reverse("hippie_website:browse_splits_create"),
+                data=json.dumps({}),
+                content_type="application/json",
+            )
+        self.assertEqual(resp.status_code, 202)
+        payload = resp.json()
+        self.assertEqual(payload["status"], "PENDING")
+        job = SplitJob.objects.get(pk=payload["job_id"])
+        mock_delay.assert_called_once_with(str(job.id))
+
+    def test_create_400_for_invalid_params(self):
+        resp = self.client.post(
+            reverse("hippie_website:browse_splits_create"),
+            data=json.dumps({"min_score": 2.0}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)

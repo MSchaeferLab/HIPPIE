@@ -577,6 +577,13 @@ class SplitJob(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["status", "created_at"], name="splitjob_status_created_idx"
+            ),
+        ]
+
 
 class ReleaseMeta(models.Model):
     """

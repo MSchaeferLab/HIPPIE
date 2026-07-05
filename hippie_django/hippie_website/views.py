@@ -2086,17 +2086,17 @@ def _protein_filtered_qs(params):
 
 
 def _protein_stats(
-    params, degree_by_node: dict[int, int], score_sum_by_node: dict[int, float]
+    params, degree_by_node: dict[int, int], score_sum_by_node: dict[int, float], iqs
 ) -> dict:
     """Protein-side stats for the filter-preview box.
 
-    ``degree_by_node`` / ``score_sum_by_node`` come from ``_interaction_stats``:
-    per-protein surviving-edge count and score sum under the full interaction
-    filter. Because ``build_interaction_queryset`` gates every edge on BOTH
-    endpoints passing the protein-level filters, ``degree_by_node.keys()`` is a
-    subset of the protein-filtered queryset — so every surviving protein already
-    passes the protein filter, and the medians can be read straight from these
-    dicts with no second protein-table scan.
+    ``degree_by_node`` / ``score_sum_by_node`` come from ``_interaction_stats``
+    over ``iqs``: per-protein surviving-edge count and score sum under the full
+    interaction filter. Because ``build_interaction_queryset`` gates every edge
+    on BOTH endpoints passing the protein-level filters, ``degree_by_node.keys()``
+    is a subset of the protein-filtered queryset — so every surviving protein
+    already passes the protein filter, and the medians can be read straight
+    from these dicts with no second protein-table scan.
 
     ``median_degree`` and ``median_avg_score`` are therefore filter-aware (they
     reflect only surviving edges), not the denormalized global ``Protein.degree``
@@ -2124,15 +2124,19 @@ def _protein_stats(
     # Isoforms: intersect surviving pks with isoform pks in Python (no giant
     # ``pk IN (...20k ids...)`` clause). Tissue coverage counts only SURVIVING
     # proteins (those keeping >=1 edge under the interaction filter); filter-
-    # orphans are excluded, matching the filter-aware medians above.
-    surviving_pks = list(degree_by_node.keys())
+    # orphans are excluded, matching the filter-aware medians above. Expressed
+    # via a subquery join on ``iqs`` (never materializes protein ids into the
+    # SQL text), not a giant ``pk IN (...20k ids...)`` clause.
     n_isoforms = (
         len(degree_by_node.keys() & set(Isoform.objects.values_list("pk", flat=True)))
         if params.include_isoforms
         else 0
     )
+    surviving_qs = Protein.objects.filter(
+        Q(pk__in=iqs.values("protein_1_id")) | Q(pk__in=iqs.values("protein_2_id"))
+    )
     tissue_coverage = (
-        GeneTissue.objects.filter(gene__proteins__pk__in=surviving_pks)
+        GeneTissue.objects.filter(gene__proteins__in=surviving_qs)
         .values("tissue_id")
         .distinct()
         .count()
@@ -2261,12 +2265,11 @@ def browse_splits_stats(request):
 
     body = json.loads(request.body)
     params = SplitParams(**_validate_split_params(body))
-    interaction_stats, degree_by_node, score_sum_by_node = _interaction_stats(
-        build_interaction_queryset(params)
-    )
+    iqs = build_interaction_queryset(params)
+    interaction_stats, degree_by_node, score_sum_by_node = _interaction_stats(iqs)
     return JsonResponse(
         {
-            "protein": _protein_stats(params, degree_by_node, score_sum_by_node),
+            "protein": _protein_stats(params, degree_by_node, score_sum_by_node, iqs),
             "interaction": interaction_stats,
         }
     )
@@ -2278,8 +2281,16 @@ def browse_splits_status(request, job_id):
     # Queue position = number of jobs still PENDING that were created before this
     # one (FIFO by created_at). 0 once the job is picked up (RUNNING/DONE/FAILED)
     # or when nothing precedes it. Lets each run card show its wait in line.
+    # `id` (tie-broken on) is a random UUID, not a real ordinal, but it makes
+    # the count deterministic when two jobs share a created_at tie instead of
+    # both reporting the same position.
     queue_position = (
-        SplitJob.objects.filter(status="PENDING", created_at__lt=job.created_at).count()
+        SplitJob.objects.filter(status="PENDING")
+        .filter(
+            Q(created_at__lt=job.created_at)
+            | Q(created_at=job.created_at, id__lt=job.id)
+        )
+        .count()
         if job.status == "PENDING"
         else 0
     )
