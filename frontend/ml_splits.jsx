@@ -350,19 +350,19 @@ function SamplingCard({ negRatio, setNegRatio, seed, setSeed }) {
 
 // ── Run-history cards ─────────────────────────────────────────────────────
 // Each generated run is its own self-polling card, newest on top. A card
-// transitions running → done/failed in place; ids persist in sessionStorage
+// transitions running → done/failed in place; ids persist in localStorage
 // so the history survives reloads, and ?jobs=id1,id2 deep-links finished runs.
 const STORAGE_KEY = "hippie.ml_splits.runs";
 const MAX_RUNS = 20;
 
 function loadStoredRuns() {
   try {
-    const arr = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "[]");
+    const arr = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
     return Array.isArray(arr) ? arr.filter(x => typeof x === "string") : [];
   } catch { return []; }
 }
 function saveStoredRuns(ids) {
-  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(ids)); } catch { /* quota / disabled */ }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ids)); } catch { /* quota / disabled */ }
 }
 
 // One-line filter recap from the job's stored params (counts, not names — the
@@ -550,7 +550,7 @@ function App() {
   const [interStats,   setInterStats]   = useState(null);
 
   // Run history — ids of generated jobs, newest first. Each renders its own
-  // self-polling RunCard. Persisted in sessionStorage so history survives a
+  // self-polling RunCard. Persisted in localStorage so history survives a
   // reload; ?jobs=id1,id2 deep-links finished runs.
   const [runIds,      setRunIds]      = useState([]);
   const [submitting,  setSubmitting]  = useState(false);
