@@ -34,9 +34,7 @@ from django.http import FileResponse, Http404, JsonResponse, StreamingHttpRespon
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
-from django.views.generic.edit import FormView
 
-from .forms import NetworkQueryForm
 from .models import (
     Interaction,
     Isoform,
@@ -1007,216 +1005,210 @@ def _resolve_interaction_pair_with_isoforms(
 # ]
 
 
-class NetworkQueryView(FormView):
-    """
-    GET  → render the blank NetworkQueryForm.
-    POST → validate, run the query, re-render with results.
-
-    _run_network_query() is also called by the JSON API endpoint so the
-    query logic lives in one place.
-    """
-
-    template_name = "hippie_website/network_query.html"
-    form_class = NetworkQueryForm
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx.setdefault("network_result", None)
-        return ctx
-
-    def form_valid(self, form):
-        cd = form.cleaned_data
-
-        # Merge textarea + uploaded file into one newline-separated string
-        raw_proteins = cd.get("proteins", "") or ""
-        uploaded = cd.get("proteins_file")
-        if uploaded:
-            raw_proteins += "\n" + uploaded.read().decode("utf-8", errors="replace")
-
-        # layer_0-only → between_proteins (both partners must be seeds).
-        # layer_1 (or neither box checked) → for_proteins (all edges touching seeds).
-        layer_0 = cd.get("layer_0", False)
-        layer_1 = cd.get("layer_1", False)
-        expand = "none" if (layer_0 and not layer_1) else "first_shell"
-
-        selected_types = cd.get("interaction_types")
-        params = {
-            "proteins": raw_proteins,
-            "expand": expand,
-            "include_isoforms": cd.get("include_isoforms", False),
-            "score_min": cd.get("score_min") or 0.0,
-            "tissues": [cd["tissue"].name] if cd.get("tissue") else [],
-            "min_rpkm": cd.get("min_rpkm", None),
-            "interaction_type_ids": [t.pk for t in selected_types]
-            if selected_types
-            else [],
-        }
-        result = _run_network_query(params)
-        output_type = cd.get("output_type", "browser_vis")
-        return self.render_to_response(
-            self.get_context_data(
-                form=form,
-                network_result=result,
-                output_type=output_type,
-                cy_edges_json=json.dumps(result["interactions"])
-                if output_type == "browser_vis"
-                else "[]",
-                cy_seeds_json=json.dumps(result.get("seed_proteins", []))
-                if output_type == "browser_vis"
-                else "[]",
-            )
-        )
-
-
-network_query_view = NetworkQueryView.as_view()
+# Seed / edge caps. Layer semantics are fixed to first-shell ("set vs. HIPPIE")
+# — every edge touching a seed — since the standalone layer toggle was retired
+# when Network Query moved to the shared React FilterBox.
+MAX_SEED_PROTEINS = 1_000  # cap on resolved seed identifiers
+MAX_NETWORK_EDGES = 5_000  # cap on returned edges (protects the browser)
 
 
 @require_GET
+def network_query_view(request):
+    """Render the React shell; all data loads via the JSON API."""
+    return render(request, "hippie_website/network_query.html")
+
+
+@require_POST
 def network_query_api(request):
     """
-    GET /api/network/?proteins=...&score_min=...&...
+    POST /api/network/
 
-    Returns the same shape as protein_query_api but for a set of proteins:
-    {
-        "node_count":   <int>,
-        "edge_count":   <int>,
-        "interactions": [
-            { id, protein_a, protein_b, score, source_count, experiment_count }
-        ],
-        "error": null | "<message>"
-    }
+    Request body (JSON):
+        {
+            "proteins": "<newline/space-separated seed identifiers>",
+            ...shared FilterBox params (show, min_score, max_score, source[],
+               experiment[], interaction_type[], tissue[], min_rpkm,
+               min_degree, min_avg_score, swissprot, include_isoforms)
+        }
+
+    Builds the first-shell sub-network around the seed proteins — every edge
+    touching a seed ("set vs. HIPPIE") — honouring the full shared filter set.
+    Non-interactions are included when ``show`` is noninteractions / both.
+
+    Response (JSON):
+        {
+            "node_count":   <int>,
+            "edge_count":   <int>,
+            "interactions": [ { id, a, b, score, source_count,
+                                experiment_count, is_noninteraction,
+                                seed_interaction, detail_url }, ... ],
+            "seed_ids":     [<protein pk in the query set>, ...],
+            "unresolved":   [<raw identifier>, ...],
+            "truncated":    <bool>,
+            "total_edges":  <int>,
+            "error":        null | "<message>"
+        }
+
+    ``a`` / ``b`` are _protein_display() dicts for protein_1 / protein_2.
     """
-    result = _run_network_query(request.GET)
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+
+    f = _common_filters_from_body(body)
+    result = _run_network_query(str(body.get("proteins", "")), f)
     if result.get("error"):
         return JsonResponse(result, status=400)
     return JsonResponse(result)
 
 
-# def _get_tissue_list():
-#    """Return all Tissue names, sorted, for the filter form checkboxes."""
-#    return list(Tissue.objects.values_list("name", flat=True).order_by("name"))
+def _run_network_query(raw_proteins: str, f: CommonFilters) -> dict:
+    """Assemble the seed sub-network. See network_query_api for the contract.
 
-
-def _run_network_query(params) -> dict:
-    """
-    Execute the network query from GET parameters.
-
-    params keys:
-        proteins        — newline-separated identifiers (gene symbols, UniProt, Entrez)
-        expand          — "none" | "first_shell" | "second_shell"
-        score_min       — float 0–1
-        tissue_mode     — "any" | "both" | "one"  (unused: we always require both)
-        tissues         — list of tissue names
+    Layer is fixed to first-shell: every edge with at least one endpoint in the
+    seed set. Protein-level filters (degree / avg-score / Swiss-Prot / tissue)
+    constrain only the *expanded* (non-seed) endpoints — a seed protein is the
+    user's own input and is never filtered out, so a seed–seed edge always
+    passes them.
     """
     # -- 1. Resolve seed proteins -----------------------------------------
-    raw = params.get("proteins", "")
-    protein_ids, unresolved = _protein_ids_from_raw(raw)
-    seen = set(protein_ids)
+    seed_ids, unresolved = _protein_ids_from_raw(raw_proteins)
+    if len(seed_ids) > MAX_SEED_PROTEINS:
+        seed_ids = seed_ids[:MAX_SEED_PROTEINS]
 
-    if params.get("include_isoforms", False):
-        isoform_pks: list[int] = []
-        for pk in list(protein_ids):
-            isoform_pks.extend(iso.pk for iso in _get_isoforms(pk))
-        protein_ids = list(dict.fromkeys(protein_ids + isoform_pks))
+    protein_pks = list(seed_ids)
+    if f.include_isoforms:
+        for pk in list(seed_ids):
+            protein_pks.extend(iso.pk for iso in _get_isoforms(pk))
+        protein_pks = list(dict.fromkeys(protein_pks))
 
-    if not protein_ids:
+    if not protein_pks:
         return {
             "node_count": 0,
             "edge_count": 0,
             "interactions": [],
-            "error": f"None of the identifiers could be resolved: {', '.join(unresolved)}",
+            "seed_ids": [],
+            "unresolved": unresolved,
+            "truncated": False,
+            "total_edges": 0,
+            "error": "None of the identifiers could be resolved: "
+            + ", ".join(unresolved),
         }
 
-    # -- 2. Expansion (layer) ---------------------------------------------
-    expand = params.get("expand", "none")
-    layer = 0 if expand == "none" else 1  # second_shell treated as layer 1 for now
+    query_set_pks = set(protein_pks)  # seeds + expanded isoforms
+    tissue_pks = _tissue_pk_set(f)
 
-    # -- 3. Score ---------------------------------------------------------
-    try:
-        score_min = float(params.get("score_min", 0))
-    except (TypeError, ValueError):
-        score_min = 0.0
+    def _passes_protein_level(p1: Protein, p2: Protein) -> bool:
+        if p1.pk not in query_set_pks and not _protein_passes(p1, f, tissue_pks):
+            return False
+        if p2.pk not in query_set_pks and not _protein_passes(p2, f, tissue_pks):
+            return False
+        return True
 
-    # -- 4. Tissue filter -------------------------------------------------
-    # params may be a QueryDict (from the API) or a plain dict (from form_valid)
-    if hasattr(params, "getlist"):
-        tissue_names = params.getlist("tissues")
-    else:
-        tissue_names = params.get("tissues") or []
-    tissue_ids: list[int] | None = None
-    if tissue_names:
-        tissue_ids = list(
-            Tissue.objects.filter(name__in=tissue_names).values_list("pk", flat=True)
+    results: list[dict] = []
+
+    # -- 2. Interactions --------------------------------------------------
+    if f.show in ("interactions", "both"):
+        qs = (
+            Interaction.objects.for_proteins(protein_pks)
+            .with_proteins()
+            .prefetch_related("sources", "experiments")
+            .order_by("-score")
         )
+        if not f.include_isoforms:
+            # Drop edges whose partner is an isoform, but keep any isoform the
+            # user explicitly seeded (same canonical-or-queried rule as the
+            # Protein / Interaction query pages).
+            qs = qs.filter(
+                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
+                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
+            )
+        qs = _apply_interaction_level_filters(qs, f)
+        for ix in qs:
+            p1, p2 = ix.protein_1, ix.protein_2
+            if not _passes_protein_level(p1, p2):
+                continue
+            results.append(
+                {
+                    "id": ix.pk,
+                    "a": _protein_display(p1),
+                    "b": _protein_display(p2),
+                    "score": round(ix.score, 4),
+                    "source_count": ix.sources.all().count(),
+                    "experiment_count": ix.experiments.all().count(),
+                    "is_noninteraction": False,
+                    "seed_interaction": p1.pk in query_set_pks
+                    and p2.pk in query_set_pks,
+                    "detail_url": reverse(
+                        "hippie_website:interaction_detail", args=[ix.pk]
+                    ),
+                }
+            )
 
-    min_rpkm = params.get("min_rpkm")
-    try:
-        min_rpkm_val: float | None = float(min_rpkm) if min_rpkm else None
-    except (TypeError, ValueError):
-        min_rpkm_val = None
-
-    # -- 5. Core queryset -------------------------------------------------
-    qs = Interaction.objects.network_query(
-        protein_ids,
-        layer=layer,
-        score_threshold=score_min,
-        tissue_ids=tissue_ids,
-        min_rpkm=min_rpkm_val,
-    ).prefetch_related("sources", "experiments")
-
-    # -- 5a. Interaction type filter --------------------------------------
-    if hasattr(params, "getlist"):
-        type_ids = [int(i) for i in params.getlist("interaction_type_ids") if i]
-    else:
-        type_ids = params.get("interaction_type_ids") or []
-    if type_ids:
-        qs = qs.of_types(type_ids)
-
-    if not params.get("include_isoforms", False):
-        isoform_pks = Isoform.objects.values_list("protein_ptr_id", flat=True)
-        qs = qs.exclude(protein_1_id__in=isoform_pks).exclude(
-            protein_2_id__in=isoform_pks
+    # -- 3. Non-interactions ---------------------------------------------
+    # NonInteractions carry no sources / experiments / interaction types, so a
+    # source-like filter excludes them entirely (mirrors protein_query_api).
+    if f.show in ("noninteractions", "both") and not f.has_source_like:
+        nqs = (
+            NonInteraction.objects.filter(
+                Q(protein_1_id__in=protein_pks) | Q(protein_2_id__in=protein_pks)
+            )
+            .select_related(
+                "protein_1", "protein_1__gene", "protein_2", "protein_2__gene"
+            )
+            .order_by("-score")
         )
+        if not f.include_isoforms:
+            nqs = nqs.filter(
+                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
+                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
+            )
+        if f.min_score is not None:
+            nqs = nqs.filter(score__gte=f.min_score)
+        if f.max_score is not None:
+            nqs = nqs.filter(score__lte=f.max_score)
+        for ni in nqs:
+            p1, p2 = ni.protein_1, ni.protein_2
+            if not _passes_protein_level(p1, p2):
+                continue
+            results.append(
+                {
+                    "id": ni.pk,
+                    "a": _protein_display(p1),
+                    "b": _protein_display(p2),
+                    "score": round(ni.score, 4),
+                    "source_count": None,
+                    "experiment_count": None,
+                    "is_noninteraction": True,
+                    "seed_interaction": p1.pk in query_set_pks
+                    and p2.pk in query_set_pks,
+                    "detail_url": reverse(
+                        "hippie_website:noninteraction_detail", args=[ni.pk]
+                    ),
+                }
+            )
 
-    # -- 6. Serialise -----------------------------------------------------
-    interactions = []
+    # -- 4. Merge / sort / cap -------------------------------------------
+    results.sort(key=lambda r: r["score"], reverse=True)
+    total_edges = len(results)
+    truncated = total_edges > MAX_NETWORK_EDGES
+    if truncated:
+        results = results[:MAX_NETWORK_EDGES]
+
     node_ids: set[int] = set()
-    for ix in qs:
-        node_ids.add(ix.protein_1_id)
-        node_ids.add(ix.protein_2_id)
-        p1 = ix.protein_1
-        p2 = ix.protein_2
-        interactions.append(
-            {
-                "interaction_id": ix.pk,
-                "protein_a": p1.gene.entrez_name or p1.uniprot_name,
-                "uniprot_a": p1.uniprot_accession,
-                "entrez_a": p1.gene.entrez_id or "",
-                "gene_name_a": p1.gene.entrez_name or p1.uniprot_name,
-                "protein_b": p2.gene.entrez_name or p2.uniprot_name,
-                "uniprot_b": p2.uniprot_accession,
-                "entrez_b": p2.gene.entrez_id or "",
-                "gene_name_b": p2.gene.entrez_name or p2.uniprot_name,
-                "score": round(ix.score, 4),
-                "source_count": len(ix.sources.all()),
-                "experiment_count": len(ix.experiments.all()),
-                "uploaded_interaction": ix.protein_1_id in seen
-                and ix.protein_2_id in seen,
-            }
-        )
-
-    seed_names = set(
-        Protein.objects.filter(pk__in=protein_ids).values_list(
-            "gene__entrez_name", flat=True
-        )
-    )
+    for r in results:
+        node_ids.add(r["a"]["id"])
+        node_ids.add(r["b"]["id"])
 
     return {
         "node_count": len(node_ids),
-        "edge_count": len(interactions),
-        "interactions": interactions,
-        "seed_proteins": list(seed_names),
+        "edge_count": len(results),
+        "interactions": results,
+        "seed_ids": sorted(query_set_pks),
         "unresolved": unresolved,
+        "truncated": truncated,
+        "total_edges": total_edges,
         "error": None,
     }
 

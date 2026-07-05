@@ -7,7 +7,7 @@ Abdeckung:
   - interaction_query_api: bekanntes Pair, unbekanntes Pair, fehlendes Protein, zu großer Batch
   - browse_api: Grundstruktur, Tissue-Filter, Source-Filter, Min-Degree-Filter, Min-Score-Filter, Min-RPKM-Filter
   - browse_filter_meta: Struktur der Antwort
-  - network_query_view: POST mit Seeds, Score-Filter, Layer-0-Filter, Min-RPKM-Filter
+  - network_query_api: POST-JSON mit Seeds, Score-Filter, Min-RPKM-Filter (Partner), Non-Interactions, Seed-Flag
   - interaction_detail_view / noninteraction_detail_view: 200 und 404
   - ProteinQuerySet.resolve(): alle vier Identifier-Typen
   - Canonical ordering in Interaction und NonInteraction
@@ -450,7 +450,7 @@ class BrowseFilterMetaTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 6. network_query (POST via Form)
+# 6. network_query (React shell + POST-JSON API)
 # ---------------------------------------------------------------------------
 
 
@@ -466,80 +466,50 @@ class NetworkQueryTest(HippieTestCase):
             gene=cls.tp53.gene, tissue=cls.tissue, median_rpkm=1.0
         )
 
-    def test_get_renders_form(self):
+    def _api(self, **body):
+        return self.client.post(
+            reverse("hippie_website:network_query_api"),
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+
+    def test_get_renders_shell(self):
         r = self.client.get(reverse("hippie_website:network_query"))
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "hippie-hero")
+        self.assertContains(r, "hippie-nq-app")
 
     def test_post_with_valid_seeds(self):
-        r = self.client.post(
-            reverse("hippie_website:network_query"),
-            {
-                "proteins": "BRCA1\nTP53",
-                "output_type": "browser_vis",
-                "layer_0": "on",
-                "score_min": "0.0",
-                "direction": "none",
-                "effect": "none",
-                "negatome_edges": "none",
-            },
-        )
+        r = self._api(proteins="BRCA1\nTP53")
         self.assertEqual(r.status_code, 200)
-        ctx = r.context
-        self.assertIsNotNone(ctx["network_result"])
-        self.assertGreater(ctx["network_result"]["edge_count"], 0)
+        self.assertGreater(r.json()["edge_count"], 0)
 
-    def test_min_rpkm_filter(self):
-        base = {
-            "proteins": "BRCA1\nTP53",
-            "output_type": "browser_vis",
-            "layer_0": "on",
-            "score_min": "0.0",
-            "direction": "none",
-            "effect": "none",
-            "negatome_edges": "none",
-            "tissue": self.tissue.pk,
-        }
-        # both proteins have rpkm=1.0; threshold below → edge survives
-        r_low = self.client.post(
-            reverse("hippie_website:network_query"), {**base, "min_rpkm": "0.5"}
-        )
-        self.assertGreater(r_low.context["network_result"]["edge_count"], 0)
-        # threshold above → edge filtered out
-        r_high = self.client.post(
-            reverse("hippie_website:network_query"), {**base, "min_rpkm": "2.0"}
-        )
-        self.assertEqual(r_high.context["network_result"]["edge_count"], 0)
+    def test_seed_interaction_flag_for_within_set_edge(self):
+        # BRCA1–TP53: both are seeds, so the edge is a seed interaction.
+        data = self._api(proteins="BRCA1\nTP53").json()
+        brca1_tp53 = [
+            e
+            for e in data["interactions"]
+            if {e["a"]["symbol"], e["b"]["symbol"]} == {"BRCA1", "TP53"}
+        ]
+        self.assertTrue(brca1_tp53)
+        self.assertTrue(all(e["seed_interaction"] for e in brca1_tp53))
 
-    def test_post_with_unknown_seed(self):
-        r = self.client.post(
-            reverse("hippie_website:network_query"),
-            {
-                "proteins": "FAKEPROT999",
-                "output_type": "browser_vis",
-                "direction": "none",
-                "effect": "none",
-                "negatome_edges": "none",
-            },
-        )
-        self.assertEqual(r.status_code, 200)
-        ctx = r.context
-        self.assertIsNotNone(ctx["network_result"]["error"])
+    def test_min_rpkm_filter_on_partner(self):
+        # Seed BRCA1 only; TP53 is the (non-seed) partner and must be expressed.
+        base = dict(proteins="BRCA1", tissue=[self.tissue.pk])
+        low = self._api(**base, min_rpkm=0.5).json()
+        self.assertGreater(low["edge_count"], 0)
+        high = self._api(**base, min_rpkm=2.0).json()
+        self.assertEqual(high["edge_count"], 0)
 
-    def test_post_unresolved_identifiers_reported(self):
-        r = self.client.post(
-            reverse("hippie_website:network_query"),
-            {
-                "proteins": "BRCA1\nFAKEPROT999",
-                "output_type": "browser_vis",
-                "layer_0": "on",
-                "direction": "none",
-                "effect": "none",
-                "negatome_edges": "none",
-            },
-        )
-        ctx = r.context
-        self.assertIn("FAKEPROT999", ctx["network_result"]["unresolved"])
+    def test_unknown_seed_returns_error(self):
+        r = self._api(proteins="FAKEPROT999")
+        self.assertEqual(r.status_code, 400)
+        self.assertIsNotNone(r.json()["error"])
+
+    def test_unresolved_identifiers_reported(self):
+        data = self._api(proteins="BRCA1\nFAKEPROT999").json()
+        self.assertIn("FAKEPROT999", data["unresolved"])
 
 
 # ---------------------------------------------------------------------------
@@ -1284,38 +1254,40 @@ class BrowseFilterMetaExperimentsTest(HippieTestCase):
 
 
 class NetworkQueryFilterTest(HippieTestCase):
-    def _post(self, **form):
-        base = {
-            "output_type": "browser_vis",
-            "direction": "none",
-            "effect": "none",
-            "negatome_edges": "none",
-            "score_min": "0.0",
+    def _api(self, **body):
+        return self.client.post(
+            reverse("hippie_website:network_query_api"),
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+
+    @staticmethod
+    def _symbols(data):
+        return {e["a"]["symbol"] for e in data["interactions"]} | {
+            e["b"]["symbol"] for e in data["interactions"]
         }
-        base.update(form)
-        return self.client.post(reverse("hippie_website:network_query"), base)
 
-    def test_score_min_above_threshold_returns_no_edges(self):
-        # Interaction has score=0.85; min=0.99 should exclude it
-        r = self._post(proteins="BRCA1\nTP53", layer_0="on", score_min="0.99")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.context["network_result"]["edge_count"], 0)
+    def test_min_score_above_threshold_returns_no_edges(self):
+        # brca1–tp53 has score 0.85; min_score 0.99 excludes it.
+        data = self._api(proteins="BRCA1\nTP53", min_score=0.99).json()
+        self.assertEqual(data["edge_count"], 0)
 
-    def test_layer_0_excludes_edges_outside_seed_set(self):
-        # Add TP53–EGFR; seeds are only BRCA1+TP53 so TP53–EGFR should not appear
+    def test_first_shell_includes_seed_partner(self):
+        # Seed BRCA1 → first-shell partner TP53 appears among endpoints.
+        data = self._api(proteins="BRCA1").json()
+        self.assertIn("TP53", self._symbols(data))
+
+    def test_first_shell_expands_to_new_partner(self):
+        # Add TP53–EGFR; seeding TP53 reaches EGFR (every edge touching a seed).
         make_interaction(self.tp53, self.egfr, score=0.7)
-        r = self._post(proteins="BRCA1\nTP53", layer_0="on")
-        result = r.context["network_result"]
-        self.assertEqual(result["edge_count"], 1)
+        data = self._api(proteins="TP53").json()
+        self.assertIn("EGFR", self._symbols(data))
 
-    def test_layer_1_includes_first_shell_partners(self):
-        # layer_1 expands to first-shell; BRCA1 seed → TP53 partner included
-        r = self._post(proteins="BRCA1", layer_1="on")
-        result = r.context["network_result"]
-        protein_names = {e["protein_a"] for e in result["interactions"]} | {
-            e["protein_b"] for e in result["interactions"]
-        }
-        self.assertIn("TP53", protein_names)
+    def test_show_noninteractions(self):
+        make_noninteraction(self.brca1, self.egfr, score=0.2)
+        data = self._api(proteins="BRCA1", show="noninteractions").json()
+        self.assertGreater(data["edge_count"], 0)
+        self.assertTrue(all(e["is_noninteraction"] for e in data["interactions"]))
 
 
 # ---------------------------------------------------------------------------
