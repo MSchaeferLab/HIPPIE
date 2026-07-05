@@ -1666,6 +1666,10 @@ class MLSplitStatsTest(TestCase):
         self.assertEqual(payload["protein"]["n_orphaned_by_filter"], 2)
         self.assertEqual(payload["protein"]["median_avg_score"], 0.85)
         self.assertEqual(payload["interaction"]["n_interactions"], 2)
+        # Batch 6: the degree histogram now lives on the protein box, not the
+        # interaction box.
+        self.assertIn("degree_histogram", payload["protein"])
+        self.assertNotIn("degree_histogram", payload["interaction"])
 
 
 class MLSplitPruneUnitTest(SimpleTestCase):
@@ -2137,3 +2141,88 @@ class Batch3FilterMetaInteractionTypesTest(HippieTestCase):
         self.assertIn("interaction_types", data)
         names = [x["name"] for x in data["interaction_types"]]
         self.assertIn("direct interaction", names)
+
+
+# ---------------------------------------------------------------------------
+# Batch 6 — ML Splits: tissue coverage over survivors, status queue position
+# ---------------------------------------------------------------------------
+
+
+class MLSplitTissueCoverageTest(TestCase):
+    """Batch 6: tissue coverage counts only SURVIVING proteins. A filter-orphan
+    whose gene is expressed in a tissue no survivor covers must not inflate the
+    count."""
+
+    @classmethod
+    def setUpTestData(cls):
+        # Distinct genes per protein — make_protein without gene_id shares one
+        # gene (entrez 0), which would collapse tissue coverage.
+        cls.a = make_protein("A", gene_id=101, accession="ACC_A")
+        cls.b = make_protein("B", gene_id=102, accession="ACC_B")
+        cls.orphan = make_protein("O", gene_id=103, accession="ACC_O")
+        cls.orphan2 = make_protein("O2", gene_id=104, accession="ACC_O2")
+
+        make_interaction(cls.a, cls.b, score=0.85)  # survives min_score=0.5
+        make_interaction(cls.orphan, cls.orphan2, score=0.15)  # filtered → orphans
+        call_command("recompute_protein_stats", stdout=StringIO())
+
+        blood = Tissue.objects.create(name="Blood")
+        brain = Tissue.objects.create(name="Brain")
+        # Survivor A covers Blood; orphan O covers Brain (no survivor covers it).
+        GeneTissue.objects.create(gene=cls.a.gene, tissue=blood, median_rpkm=5.0)
+        GeneTissue.objects.create(gene=cls.orphan.gene, tissue=brain, median_rpkm=5.0)
+
+    def test_tissue_coverage_excludes_filter_orphans(self):
+        from .services.generate_splits import SplitParams, build_interaction_queryset
+        from .views import _interaction_stats, _protein_stats
+
+        params = SplitParams(min_score=0.5)
+        _interaction, degree_by_node, score_sum = _interaction_stats(
+            build_interaction_queryset(params)
+        )
+        protein = _protein_stats(params, degree_by_node, score_sum)
+
+        self.assertEqual(protein["n_proteins"], 2)  # A, B survive
+        self.assertEqual(protein["n_orphaned_by_filter"], 2)  # O, O2 orphaned
+        # Only the survivor tissue (Blood) counts — the orphan's Brain is dropped.
+        self.assertEqual(protein["tissue_coverage"], 1)
+
+
+class MLSplitQueuePositionTest(TestCase):
+    """Batch 6: the status endpoint reports queue_position = number of PENDING
+    jobs created before this one (FIFO). RUNNING/DONE jobs never count, and a
+    picked-up (non-PENDING) job reports 0."""
+
+    def test_queue_position_counts_earlier_pending_only(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .models import SplitJob
+
+        base = timezone.now()
+        j_old = SplitJob.objects.create(params={}, status="PENDING")
+        j_run = SplitJob.objects.create(params={}, status="RUNNING")
+        j_new = SplitJob.objects.create(params={}, status="PENDING")
+        # created_at is auto_now_add → force deterministic ordering via update().
+        SplitJob.objects.filter(pk=j_old.pk).update(created_at=base)
+        SplitJob.objects.filter(pk=j_run.pk).update(
+            created_at=base + timedelta(seconds=1)
+        )
+        SplitJob.objects.filter(pk=j_new.pk).update(
+            created_at=base + timedelta(seconds=2)
+        )
+
+        def qpos(job):
+            resp = self.client.get(
+                reverse("hippie_website:browse_splits_status", args=[job.pk])
+            )
+            self.assertEqual(resp.status_code, 200)
+            return resp.json()["queue_position"]
+
+        # j_new: one earlier PENDING (j_old); the earlier RUNNING job is excluded.
+        self.assertEqual(qpos(j_new), 1)
+        # j_old: nothing precedes it.
+        self.assertEqual(qpos(j_old), 0)
+        # A RUNNING job always reports 0 regardless of predecessors.
+        self.assertEqual(qpos(j_run), 0)

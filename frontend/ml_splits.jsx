@@ -185,15 +185,15 @@ const PROTEIN_STATS_HELP = DL([
   ["Median degree", "Median number of surviving interactions per protein, counted only over edges that pass the current filter."],
   ["Median avg score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
   ["Orphaned by filter", "Proteins that pass the protein-level filter (tissue, RPKM, …) but lost every interaction to the score/type/source filter, leaving degree 0. Excluded from the medians above."],
-  ["Tissue coverage", "Number of distinct tissues represented among genes of the filtered proteins (includes orphans)."],
+  ["Tissue coverage", "Number of distinct tissues represented among genes of the surviving proteins (filter-orphans excluded)."],
   ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when “include isoforms” is on."],
+  ["Node degree distribution", "Histogram of per-protein interaction counts (degree) under the current filter."],
 ]);
 
 const INTERACTION_STATS_HELP = DL([
   ["Interactions", "Number of interactions passing the current filter."],
   ["Median score", "Median confidence score across the filtered interactions."],
   ["Experiment types", "Number of distinct experiment types among the filtered interactions."],
-  ["Node degree distribution", "Histogram of per-protein interaction counts (degree) under the current filter."],
   ["Score distribution", "Histogram of interaction confidence scores under the current filter."],
 ]);
 
@@ -261,7 +261,9 @@ function StatsPlaceholder({ loading, error }) {
       {error
         ? <span><i className="bi bi-exclamation-circle me-1"></i>{error}</span>
         : loading
-          ? <span><span className="spinner-sm me-1"></span>Calculating…</span>
+          ? <span style={{whiteSpace:"pre-line"}}>
+              <span className="spinner-sm me-1"></span>{"Calculating…\nthis can take up to 30 seconds"}
+            </span>
           : <span><i className="bi bi-bar-chart me-1"></i>Press “Calculate Statistics” to preview this filter set.</span>}
     </div>
   );
@@ -277,15 +279,20 @@ function ProteinStatsBox({ stats, loading, error }) {
       {!stats
         ? <StatsPlaceholder loading={loading} error={error} />
         : (
-          <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:".6rem"}}>
-            <Metric label="Proteins" value={stats.n_proteins.toLocaleString()} />
-            <Metric label="Median degree" value={stats.median_degree} />
-            <Metric label="Median avg score"
-                    value={stats.median_avg_score == null ? "—" : stats.median_avg_score} />
-            <Metric label="Orphaned by filter" value={stats.n_orphaned_by_filter.toLocaleString()} />
-            <Metric label="Tissue coverage" value={stats.tissue_coverage.toLocaleString()} />
-            <Metric label="Isoforms" value={stats.n_isoforms.toLocaleString()} />
-          </div>
+          <>
+            <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:".6rem"}}>
+              <Metric label="Proteins" value={stats.n_proteins.toLocaleString()} />
+              <Metric label="Median degree" value={stats.median_degree} />
+              <Metric label="Median avg score"
+                      value={stats.median_avg_score == null ? "—" : stats.median_avg_score} />
+              <Metric label="Orphaned by filter" value={stats.n_orphaned_by_filter.toLocaleString()} />
+              <Metric label="Tissue coverage" value={stats.tissue_coverage.toLocaleString()} />
+              <Metric label="Isoforms" value={stats.n_isoforms.toLocaleString()} />
+            </div>
+            {stats.degree_histogram && (
+              <Histogram title="Node degree distribution" bars={stats.degree_histogram} />
+            )}
+          </>
         )}
     </div>
   );
@@ -309,7 +316,6 @@ function InteractionStatsBox({ stats, loading, error }) {
               <Metric label="Experiment types"
                       value={`${stats.n_experiments}`} />
             </div>
-            <Histogram title="Node degree distribution" bars={stats.degree_histogram} />
             <Histogram title="Score distribution" bars={stats.score_histogram} />
           </>
         )}
@@ -342,79 +348,179 @@ function SamplingCard({ negRatio, setNegRatio, seed, setSeed }) {
   );
 }
 
-function ProgressSection({ step, progress, jobId }) {
-  const pct = Math.round(progress * 100);
-  const isDone = step === "done";
+// ── Run-history cards ─────────────────────────────────────────────────────
+// Each generated run is its own self-polling card, newest on top. A card
+// transitions running → done/failed in place; ids persist in localStorage so
+// the history survives reloads, and ?jobs=id1,id2 deep-links finished runs.
+const STORAGE_KEY = "hippie.ml_splits.runs";
+const MAX_RUNS = 20;
+
+function loadStoredRuns() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    return Array.isArray(arr) ? arr.filter(x => typeof x === "string") : [];
+  } catch { return []; }
+}
+function saveStoredRuns(ids) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ids)); } catch { /* quota / disabled */ }
+}
+
+// One-line filter recap from the job's stored params (counts, not names — the
+// status API returns only ids). Mirrors the "score 0.63–1.0 · 2 src …" recap.
+function paramSummary(p) {
+  if (!p) return null;
+  const parts = [
+    `score ${toNum(p.min_score, 0).toFixed(2)}–${toNum(p.max_score, 1).toFixed(2)}`,
+  ];
+  if (p.source_ids?.length)     parts.push(`${p.source_ids.length} src`);
+  if (p.experiment_ids?.length) parts.push(`${p.experiment_ids.length} exp`);
+  if (p.type_ids?.length)       parts.push(`${p.type_ids.length} type`);
+  parts.push(`${p.tissue_ids?.length || 0} tissue`);
+  if (p.min_rpkm > 0)      parts.push(`rpkm≥${p.min_rpkm}`);
+  if (p.min_degree > 0)    parts.push(`deg≥${p.min_degree}`);
+  if (p.min_avg_score > 0) parts.push(`avg≥${toNum(p.min_avg_score, 0).toFixed(2)}`);
+  if (p.include_isoforms)  parts.push("isoforms");
+  parts.push(`neg×${p.neg_ratio}`);
+  parts.push(`seed ${p.seed}`);
+  return parts.join(" · ");
+}
+
+const PILL = {
+  PENDING: { bg:"var(--hippie-border)", fg:GREY,   label:"Queued"  },
+  RUNNING: { bg:TEAL,                   fg:"#fff",  label:"Running" },
+  DONE:    { bg:TEAL,                   fg:"#fff",  label:"Done"    },
+  FAILED:  { bg:RED,                    fg:"#fff",  label:"Failed"  },
+};
+
+function StatusPill({ status }) {
+  const s = PILL[status] || PILL.PENDING;
   return (
-    <div className="hippie-card mb-3 mt-4">
-      <div className="filter-section-label">Job Progress</div>
+    <span style={{
+      background:s.bg, color:s.fg, borderRadius:"100px", padding:".12rem .6rem",
+      fontSize:".62rem", fontFamily:"var(--font-mono)", fontWeight:700,
+      textTransform:"uppercase", letterSpacing:".08em", whiteSpace:"nowrap",
+    }}>{s.label}</span>
+  );
+}
+
+function SplitCards({ summary }) {
+  if (!summary || !summary.splits) return null;
+  return (
+    <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:".75rem", marginTop:"1rem"}}>
+      {summary.splits.map(s => {
+        const total = s.n_pos + s.n_neg;
+        const posFrac = total > 0 ? s.n_pos / total : 0;
+        return (
+          <div key={s.name} style={{
+            background:"var(--hippie-bg)", border:`1px solid ${TEAL}`,
+            borderTop:`3px solid ${TEAL}`, borderRadius:"var(--radius-md)", padding:"1rem",
+          }}>
+            <div style={{fontFamily:"var(--font-mono)", fontSize:".7rem", fontWeight:700,
+                         textTransform:"uppercase", letterSpacing:".1em", color:TEAL, marginBottom:".35rem"}}>
+              {s.name}
+            </div>
+            <div style={{fontFamily:"var(--font-display)", fontSize:"1.6rem", lineHeight:1.1, marginBottom:".5rem"}}>
+              {total.toLocaleString()}
+            </div>
+            <div style={{height:"4px", background:"var(--hippie-border)", borderRadius:"100px", overflow:"hidden", marginBottom:".4rem"}}>
+              <div style={{height:"100%", width:`${Math.round(posFrac*100)}%`, background:TEAL, borderRadius:"100px"}} />
+            </div>
+            <div style={{display:"flex", justifyContent:"space-between",
+                         fontSize:".72rem", fontFamily:"var(--font-mono)", color:GREY}}>
+              <span><i className="bi bi-plus-circle me-1"></i>{s.n_pos.toLocaleString()} pos</span>
+              <span><i className="bi bi-dash-circle me-1"></i>{s.n_neg.toLocaleString()} neg</span>
+            </div>
+            <div style={{fontSize:".72rem", fontFamily:"var(--font-mono)", color:GREY, marginTop:".3rem"}}>
+              <i className="bi bi-diagram-3 me-1"></i>{(s.n_proteins ?? 0).toLocaleString()} proteins
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Self-contained, self-polling run card. Fetches its own status until a
+// terminal state, so several concurrent runs each track independently.
+function RunCard({ jobId }) {
+  const [data, setData] = useState(null);
+  const timer = useRef(null);
+  useEffect(() => {
+    let cancelled = false;
+    function tick() {
+      fetch(cfg.statusBase + jobId + "/")
+        .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+        .then(d => {
+          if (cancelled) return;
+          setData(d);
+          if (d.status !== "DONE" && d.status !== "FAILED")
+            timer.current = setTimeout(tick, 1500);
+        })
+        .catch(() => { if (!cancelled) timer.current = setTimeout(tick, 3000); });
+    }
+    tick();
+    return () => { cancelled = true; clearTimeout(timer.current); };
+  }, [jobId]);
+
+  const status = data?.status || "PENDING";
+  const running = status !== "DONE" && status !== "FAILED";
+  const border  = status === "FAILED" ? RED : status === "DONE" ? TEAL : "var(--hippie-border)";
+  const pct     = Math.round((data?.progress || 0) * 100);
+  const queued  = status === "PENDING" && (data?.queue_position || 0) > 0;
+  const recap   = data ? paramSummary(data.params) : null;
+
+  return (
+    <div className="hippie-card mb-3" style={{borderColor:border}}>
+      <div className="filter-section-label">Run</div>
       <div className="d-flex justify-content-between align-items-center mb-1">
-        <span className="text-muted-sm">
-          {!isDone && <span className="spinner-sm me-1"></span>}
-          {STEP_LABELS[step] || step || "Starting…"}
+        <span className="mono" style={{fontSize:".72rem", color:GREY, wordBreak:"break-all"}}>
+          Job ID: {jobId}
         </span>
-        <span className="text-muted-sm">{pct}%</span>
+        <StatusPill status={status} />
       </div>
-      <div className="batch-progress">
-        <div className="batch-progress-fill" style={{width:`${pct}%`}} />
-      </div>
-      {jobId && (
-        <p className="mb-0 mt-1 mono" style={{fontSize:".75rem", color:GREY}}>Job ID: {jobId}</p>
+      {recap && (
+        <p className="mb-2 mono" style={{fontSize:".72rem", color:GREY}}>{recap}</p>
       )}
-    </div>
-  );
-}
 
-function DownloadSection({ downloadUrl, summary }) {
-  return (
-    <div className="hippie-card mb-3 mt-4" style={{borderColor:TEAL}}>
-      <div className="filter-section-label">Done — Download Your Splits</div>
-      <a href={downloadUrl} style={{
-        display:"inline-block", background:TEAL, color:"#fff", border:"none",
-        borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
-        fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", textDecoration:"none",
-      }}>
-        <i className="bi bi-download me-1"></i> Download ZIP
-      </a>
-      {summary && summary.splits && (
-        <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:".75rem", marginTop:"1rem"}}>
-          {summary.splits.map(s => {
-            const total = s.n_pos + s.n_neg;
-            const posFrac = total > 0 ? s.n_pos / total : 0;
-            return (
-              <div key={s.name} style={{
-                background:"var(--hippie-bg)", border:`1px solid ${TEAL}`,
-                borderTop:`3px solid ${TEAL}`, borderRadius:"var(--radius-md)", padding:"1rem",
-              }}>
-                <div style={{fontFamily:"var(--font-mono)", fontSize:".7rem", fontWeight:700,
-                             textTransform:"uppercase", letterSpacing:".1em", color:TEAL, marginBottom:".35rem"}}>
-                  {s.name}
-                </div>
-                <div style={{fontFamily:"var(--font-display)", fontSize:"1.6rem", lineHeight:1.1, marginBottom:".5rem"}}>
-                  {total.toLocaleString()}
-                </div>
-                <div style={{height:"4px", background:"var(--hippie-border)", borderRadius:"100px", overflow:"hidden", marginBottom:".4rem"}}>
-                  <div style={{height:"100%", width:`${Math.round(posFrac*100)}%`, background:TEAL, borderRadius:"100px"}} />
-                </div>
-                <div style={{display:"flex", justifyContent:"space-between",
-                             fontSize:".72rem", fontFamily:"var(--font-mono)", color:GREY}}>
-                  <span><i className="bi bi-plus-circle me-1"></i>{s.n_pos.toLocaleString()} pos</span>
-                  <span><i className="bi bi-dash-circle me-1"></i>{s.n_neg.toLocaleString()} neg</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      {!data && (
+        <p className="mb-0 text-muted-sm"><span className="spinner-sm me-1"></span>Loading…</p>
       )}
-    </div>
-  );
-}
 
-function ErrorSection({ message }) {
-  return (
-    <div className="hippie-card mb-3 mt-4" style={{borderColor:RED}}>
-      <div className="filter-section-label" style={{color:RED, borderColor:RED}}>Job Failed</div>
-      <pre style={{fontSize:".8rem", whiteSpace:"pre-wrap", margin:0}}>{message}</pre>
+      {data && running && (
+        <>
+          <div className="d-flex justify-content-between align-items-center mb-1">
+            <span className="text-muted-sm">
+              <span className="spinner-sm me-1"></span>
+              {queued
+                ? `Queued — position ${data.queue_position}`
+                : (STEP_LABELS[data.step] || data.step || "Starting…")}
+            </span>
+            <span className="text-muted-sm">{pct}%</span>
+          </div>
+          <div className="batch-progress">
+            <div className="batch-progress-fill" style={{width:`${pct}%`}} />
+          </div>
+        </>
+      )}
+
+      {data && status === "DONE" && (
+        <>
+          <a href={data.download_url} style={{
+            display:"inline-block", background:TEAL, color:"#fff", border:"none",
+            borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
+            fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", textDecoration:"none",
+          }}>
+            <i className="bi bi-download me-1"></i> Download ZIP
+          </a>
+          <SplitCards summary={data.summary} />
+        </>
+      )}
+
+      {data && status === "FAILED" && (
+        <pre style={{fontSize:".8rem", whiteSpace:"pre-wrap", margin:0, color:RED}}>
+          {data.error || "Unknown error"}
+        </pre>
+      )}
     </div>
   );
 }
@@ -432,20 +538,38 @@ function App() {
   const [proteinStats, setProteinStats] = useState(null);
   const [interStats,   setInterStats]   = useState(null);
 
-  // Job
-  const [phase,       setPhase]       = useState("idle");
-  const [step,        setStep]        = useState("starting");
-  const [progress,    setProgress]    = useState(0);
-  const [jobId,       setJobId]       = useState(null);
-  const [downloadUrl, setDownloadUrl] = useState(null);
-  const [summary,     setSummary]     = useState(null);
-  const [errorMsg,    setErrorMsg]    = useState(null);
-  const pollRef = useRef(null);
+  // Run history — ids of generated jobs, newest first. Each renders its own
+  // self-polling RunCard. Persisted in localStorage so history survives a
+  // reload; ?jobs=id1,id2 deep-links finished runs.
+  const [runIds,      setRunIds]      = useState([]);
+  const [submitting,  setSubmitting]  = useState(false);
+  const [submitError, setSubmitError] = useState(null);
 
-  useEffect(() => () => clearTimeout(pollRef.current), []);
+  useEffect(() => {
+    const jobsParam = new URLSearchParams(window.location.search).get("jobs");
+    const stored = loadStoredRuns();
+    if (jobsParam) {
+      // Deep-linked ids first, then any locally-saved runs not already listed.
+      const linked = jobsParam.split(",").map(s => s.trim()).filter(Boolean);
+      const merged = [...linked, ...stored.filter(x => !linked.includes(x))].slice(0, MAX_RUNS);
+      saveStoredRuns(merged);
+      setRunIds(merged);
+    } else {
+      setRunIds(stored);
+    }
+  }, []);
 
-  // Any filter change invalidates the computed statistics → reset button
-  // colours (green Calculate / red Generate) and stale the boxes.
+  function addRun(id) {
+    setRunIds(prev => {
+      const next = [id, ...prev.filter(x => x !== id)].slice(0, MAX_RUNS);
+      saveStoredRuns(next);
+      return next;
+    });
+  }
+
+  // Any filter change invalidates the computed statistics → re-grey and disable
+  // the Generate button (re-enables only after a fresh Calculate) and stale the
+  // stats boxes.
   function staleStats() {
     setStatsFresh(false);
     setProteinStats(null);
@@ -496,50 +620,31 @@ function App() {
     }
   }
 
-  function poll(id) {
-    fetch(cfg.statusBase + id + "/")
-      .then(r => r.json())
-      .then(data => {
-        setStep(data.step || "starting");
-        setProgress(data.progress || 0);
-        if (data.status === "DONE") {
-          setProgress(1); setStep("done");
-          setDownloadUrl(data.download_url); setSummary(data.summary);
-          setPhase("done");
-        } else if (data.status === "FAILED") {
-          setErrorMsg(data.error || "Unknown error"); setPhase("failed");
-        } else {
-          pollRef.current = setTimeout(() => poll(id), 1500);
-        }
-      })
-      .catch(() => { pollRef.current = setTimeout(() => poll(id), 3000); });
-  }
-
   async function handleGenerate() {
-    clearTimeout(pollRef.current);
-    setPhase("running"); setStep("starting"); setProgress(0);
-    setJobId(null); setDownloadUrl(null); setSummary(null); setErrorMsg(null);
+    setSubmitting(true);
+    setSubmitError(null);
     try {
       const r = await fetch(cfg.createUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
         body: JSON.stringify(buildPayload()),
       });
-      if (!r.ok) throw await r.json();
+      if (!r.ok) throw await r.json().catch(() => ({ detail: `Server error ${r.status}` }));
       const data = await r.json();
-      setJobId(data.job_id);
-      poll(data.job_id);
+      addRun(data.job_id);  // prepends a self-polling RunCard
     } catch (err) {
-      setErrorMsg(err.detail || JSON.stringify(err));
-      setPhase("failed");
+      setSubmitError(err.detail || JSON.stringify(err));
+    } finally {
+      setSubmitting(false);
     }
   }
 
-  const running = phase === "running";
+  // A run can only be generated once statistics are fresh (Generate stays grey +
+  // disabled until then), and never while a create request is in flight.
+  const canGenerate = statsFresh && !submitting;
 
-  // Traffic-light button styling. Calculate is green until stats are fresh,
-  // then greys out. Generate is red until stats are fresh, then greens — but it
-  // is never disabled by the stats state (only while a job is running).
+  // Calculate is teal until stats are fresh, then greys out. Generate is greyed
+  // out + disabled until stats are fresh, then turns teal (enabled).
   const calcStyle = {
     background: statsFresh ? "var(--hippie-border)" : TEAL,
     color: statsFresh ? GREY : "#fff",
@@ -548,10 +653,11 @@ function App() {
     cursor: statsLoading ? "wait" : "pointer", opacity: statsLoading ? .7 : 1,
   };
   const genStyle = {
-    background: statsFresh ? TEAL : RED,
-    color:"#fff", border:"none", borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
+    background: statsFresh ? TEAL : "var(--hippie-border)",
+    color: statsFresh ? "#fff" : GREY,
+    border:"none", borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
     fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem",
-    cursor: running ? "not-allowed" : "pointer", opacity: running ? .6 : 1,
+    cursor: canGenerate ? "pointer" : "not-allowed", opacity: submitting ? .7 : 1,
   };
 
   return (
@@ -582,7 +688,7 @@ function App() {
         <button type="button" onClick={handleCalculateStats} disabled={statsLoading} style={calcStyle}>
           <i className="bi bi-calculator me-1"></i> Calculate Statistics
         </button>
-        <button type="button" onClick={handleGenerate} disabled={running} style={genStyle}>
+        <button type="button" onClick={handleGenerate} disabled={!canGenerate} style={genStyle}>
           <i className="bi bi-play-fill me-1"></i> Generate Splits
         </button>
         {!statsFresh && !statsLoading && (
@@ -592,20 +698,18 @@ function App() {
         )}
       </div>
 
-      {(running || phase === "done") && (
-        <ProgressSection
-          step={phase === "done" ? "done" : step}
-          progress={phase === "done" ? 1 : progress}
-          jobId={jobId}
-        />
+      {submitError && (
+        <div className="hippie-card mb-3 mt-3" style={{borderColor:RED}}>
+          <p className="mb-0" style={{color:RED, fontSize:".85rem"}}>
+            <i className="bi bi-exclamation-circle me-1"></i>{submitError}
+          </p>
+        </div>
       )}
 
-      {phase === "done" && downloadUrl && (
-        <DownloadSection downloadUrl={downloadUrl} summary={summary} />
-      )}
-
-      {phase === "failed" && errorMsg && (
-        <ErrorSection message={errorMsg} />
+      {runIds.length > 0 && (
+        <div className="mt-4">
+          {runIds.map(id => <RunCard key={id} jobId={id} />)}
+        </div>
       )}
     </div>
   );

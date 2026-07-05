@@ -2121,16 +2121,18 @@ def _protein_stats(
     # tissue-join duplicates when a tissue filter is active.
     n_pass_protein_filter = pqs.values("pk").distinct().count()
 
-    # Isoform / tissue coverage without a giant ``pk IN (...20k ids...)`` clause:
-    # intersect surviving pks with isoform pks in Python; count tissues over the
-    # clean protein-filter queryset (coverage includes orphans — acceptable).
+    # Isoforms: intersect surviving pks with isoform pks in Python (no giant
+    # ``pk IN (...20k ids...)`` clause). Tissue coverage counts only SURVIVING
+    # proteins (those keeping >=1 edge under the interaction filter); filter-
+    # orphans are excluded, matching the filter-aware medians above.
+    surviving_pks = list(degree_by_node.keys())
     n_isoforms = (
         len(degree_by_node.keys() & set(Isoform.objects.values_list("pk", flat=True)))
         if params.include_isoforms
         else 0
     )
     tissue_coverage = (
-        GeneTissue.objects.filter(gene__proteins__in=pqs)
+        GeneTissue.objects.filter(gene__proteins__pk__in=surviving_pks)
         .values("tissue_id")
         .distinct()
         .count()
@@ -2145,6 +2147,9 @@ def _protein_stats(
         "n_orphaned_by_filter": n_pass_protein_filter - n_surviving,
         "tissue_coverage": tissue_coverage,
         "n_isoforms": n_isoforms,
+        # Per-protein degree distribution (moved here from the interaction box:
+        # degree is a protein-level attribute).
+        "degree_histogram": _bucket_degrees(degree_by_node),
     }
 
 
@@ -2234,7 +2239,6 @@ def _interaction_stats(iqs) -> tuple[dict, dict[int, int], dict[int, float]]:
     return (
         {
             "n_interactions": n,
-            "degree_histogram": _bucket_degrees(degree_by_node),
             # Label = lower bin edge (e.g. "0.3" = bucket [0.3, 0.4)); short enough
             # to read along a 10-bin X axis.
             "score_histogram": [
@@ -2271,11 +2275,22 @@ def browse_splits_stats(request):
 @require_GET
 def browse_splits_status(request, job_id):
     job = get_object_or_404(SplitJob, pk=job_id)
+    # Queue position = number of jobs still PENDING that were created before this
+    # one (FIFO by created_at). 0 once the job is picked up (RUNNING/DONE/FAILED)
+    # or when nothing precedes it. Lets each run card show its wait in line.
+    queue_position = (
+        SplitJob.objects.filter(status="PENDING", created_at__lt=job.created_at).count()
+        if job.status == "PENDING"
+        else 0
+    )
     return JsonResponse(
         {
             "status": job.status,
             "step": job.step,
             "progress": job.progress,
+            "params": job.params,
+            "created_at": job.created_at.isoformat(),
+            "queue_position": queue_position,
             "summary": job.summary,
             "error": job.error or None,
             "download_url": (
