@@ -22,9 +22,9 @@ First migrate, run create superuser and then run the server:
 cd hippie_django
 python manage.py migrate
 
-# If you want example data
-python manage.py seed_test_data
-python manage.py test_import_bait_prey
+python manage.py createsuperuser
+npm run build
+python manage.py collectstatic
 
 # If you want real data from Intact and BioGrid
 cd data
@@ -53,15 +53,8 @@ python manage.py update_tissue_data \
 ```
 
 # If you want to import the real current data
-python manage.py import_hippie_sql data/mschaefer_hippie_v2_v2-4.sql --log-file data/import.log
 
-
-
-python manage.py createsuperuser
-npm run build
-```
-
-Start the celery working in a seperate terminal
+Install celery and then redis. Then start the celery working in a seperate terminal
 ```bash
 cd hippie_django
 celery -A hippie worker -l info 2>&1 > celery.log &
