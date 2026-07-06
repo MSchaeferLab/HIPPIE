@@ -71,6 +71,7 @@ def _protein_display(protein: Protein, isoform_uid: str | None = None) -> dict:
         "uniprot_id": protein.uniprot_accession,
         "gene_id": gene.entrez_id or None,
         "symbol": gene.entrez_name or protein.uniprot_name,
+        "is_reviewed": protein.is_reviewed,
         # isoform_uid is set when this protein is an isoform; None for canonical.
         "isoform_uniprot_id": isoform_uid
         if isoform_uid is not None
@@ -679,6 +680,8 @@ def _resolve_interaction_pair(
         "experiment_count": 0,
         "entrez_a": None,
         "entrez_b": None,
+        "is_reviewed_a": None,
+        "is_reviewed_b": None,
         "is_noninteraction": False,
         "interaction_id": None,
         "detail_url": "",
@@ -1327,9 +1330,11 @@ _UNION_COLS = (
     "p1_symbol",
     "p1_acc",
     "p1_entrez",
+    "p1_reviewed",
     "p2_symbol",
     "p2_acc",
     "p2_entrez",
+    "p2_reviewed",
     "n_sources",
     "n_experiments",
 )
@@ -1350,9 +1355,11 @@ def _interaction_values_qs(qs):
         p1_symbol=_symbol_expr("protein_1"),
         p1_acc=F("protein_1__uniprot_accession"),
         p1_entrez=F("protein_1__gene__entrez_id"),
+        p1_reviewed=F("protein_1__is_reviewed"),
         p2_symbol=_symbol_expr("protein_2"),
         p2_acc=F("protein_2__uniprot_accession"),
         p2_entrez=F("protein_2__gene__entrez_id"),
+        p2_reviewed=F("protein_2__is_reviewed"),
     ).values(*_UNION_COLS)
 
 
@@ -1368,9 +1375,11 @@ def _noninteraction_values_qs(qs):
         p1_symbol=_symbol_expr("protein_1"),
         p1_acc=F("protein_1__uniprot_accession"),
         p1_entrez=F("protein_1__gene__entrez_id"),
+        p1_reviewed=F("protein_1__is_reviewed"),
         p2_symbol=_symbol_expr("protein_2"),
         p2_acc=F("protein_2__uniprot_accession"),
         p2_entrez=F("protein_2__gene__entrez_id"),
+        p2_reviewed=F("protein_2__is_reviewed"),
         n_sources=Value(0, output_field=IntegerField()),
         n_experiments=Value(0, output_field=IntegerField()),
     ).values(*_UNION_COLS)
@@ -1465,11 +1474,13 @@ def _browse_interaction_rows(
                     "symbol": r["p1_symbol"],
                     "uniprot_id": r["p1_acc"],
                     "entrez_id": r["p1_entrez"],
+                    "is_reviewed": r["p1_reviewed"],
                 },
                 "protein_b": {
                     "symbol": r["p2_symbol"],
                     "uniprot_id": r["p2_acc"],
                     "entrez_id": r["p2_entrez"],
+                    "is_reviewed": r["p2_reviewed"],
                 },
                 "score": round(r["score"], 4),
                 "source_count": r["n_sources"],
