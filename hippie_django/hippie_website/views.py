@@ -709,6 +709,8 @@ def _resolve_interaction_pair(
         "uniprot_b": ub["uniprot_id"],
         "entrez_a": ua["gene_id"],
         "entrez_b": ub["gene_id"],
+        "is_reviewed_a": ua["is_reviewed"],
+        "is_reviewed_b": ub["is_reviewed"],
         "isoform_uniprot_a": ua["isoform_uniprot_id"],
         "isoform_uniprot_b": ub["isoform_uniprot_id"],
     }
@@ -744,6 +746,8 @@ def _resolve_interaction_pair(
         "entrez_b": ub["gene_id"],
         "isoform_uniprot_a": ua["isoform_uniprot_id"],
         "isoform_uniprot_b": ub["isoform_uniprot_id"],
+        "is_reviewed_a": ua["is_reviewed"],
+        "is_reviewed_b": ub["is_reviewed"],
         "score": round(interaction.score, 4),
         "source_count": interaction.sources.all().count(),
         "experiment_count": interaction.experiments.all().count(),
@@ -784,6 +788,8 @@ def _resolve_noninteraction_pair(
         "experiment_count": None,
         "entrez_a": None,
         "entrez_b": None,
+        "is_reviewed_a": None,
+        "is_reviewed_b": None,
         "is_noninteraction": True,
         "interaction_id": None,
         "detail_url": "",
@@ -811,6 +817,8 @@ def _resolve_noninteraction_pair(
         "uniprot_b": ub["uniprot_id"],
         "entrez_a": ua["gene_id"],
         "entrez_b": ub["gene_id"],
+        "is_reviewed_a": ua["is_reviewed"],
+        "is_reviewed_b": ub["is_reviewed"],
         "isoform_uniprot_a": ua["isoform_uniprot_id"],
         "isoform_uniprot_b": ub["isoform_uniprot_id"],
     }
@@ -843,6 +851,8 @@ def _resolve_noninteraction_pair(
         "entrez_b": ub["gene_id"],
         "isoform_uniprot_a": ua["isoform_uniprot_id"],
         "isoform_uniprot_b": ub["isoform_uniprot_id"],
+        "is_reviewed_a": ua["is_reviewed"],
+        "is_reviewed_b": ub["is_reviewed"],
         "score": round(ni.score, 4),
         "source_count": None,
         "experiment_count": None,
@@ -970,6 +980,8 @@ def _resolve_interaction_pair_with_isoforms(
                 "entrez_b": ub["gene_id"],
                 "isoform_uniprot_a": ua["isoform_uniprot_id"],
                 "isoform_uniprot_b": ub["isoform_uniprot_id"],
+                "is_reviewed_a": ua["is_reviewed"],
+                "is_reviewed_b": ub["is_reviewed"],
                 "score": round(interaction.score, 4),
                 "source_count": interaction.sources.all().count(),
                 "experiment_count": interaction.experiments.all().count(),
@@ -1638,6 +1650,8 @@ def browse_export_api(request):
             "Sources",
             "Experiments",
             "Type",
+            "Review Type A",
+            "Review Type B",
         ]
 
         def rows():
@@ -1665,6 +1679,8 @@ def browse_export_api(request):
                         r["source_count"],
                         r["experiment_count"],
                         "Non-Interaction" if r["is_noninteraction"] else "Interaction",
+                        "reviewed" if a["is_reviewed"] else "unreviewed",
+                        "reviewed" if b["is_reviewed"] else "unreviewed",
                     ]
                 )
     else:
@@ -2116,7 +2132,7 @@ def _protein_stats(
     and counted in ``n_orphaned_by_filter``."""
     import statistics
 
-    from .models import GeneTissue, Isoform
+    from .models import Isoform
 
     pqs = _protein_filtered_qs(params)
 
@@ -2133,25 +2149,23 @@ def _protein_stats(
     n_pass_protein_filter = pqs.values("pk").distinct().count()
 
     # Isoforms: intersect surviving pks with isoform pks in Python (no giant
-    # ``pk IN (...20k ids...)`` clause). Tissue coverage counts only SURVIVING
-    # proteins (those keeping >=1 edge under the interaction filter); filter-
-    # orphans are excluded, matching the filter-aware medians above. Expressed
-    # via a subquery join on ``iqs`` (never materializes protein ids into the
-    # SQL text), not a giant ``pk IN (...20k ids...)`` clause.
+    # ``pk IN (...20k ids...)`` clause).
     n_isoforms = (
         len(degree_by_node.keys() & set(Isoform.objects.values_list("pk", flat=True)))
         if params.include_isoforms
         else 0
     )
-    surviving_qs = Protein.objects.filter(
-        Q(pk__in=iqs.values("protein_1_id")) | Q(pk__in=iqs.values("protein_2_id"))
+
+    # Proteins removed by the protein-level filter, relative to the full protein
+    # universe (respecting the isoform-inclusion toggle so the base matches the
+    # start of ``_protein_filtered_qs``). Distinct from ``n_orphaned_by_filter``,
+    # which counts proteins that pass this filter but lose all edges.
+    base_universe = (
+        Protein.objects.count()
+        if params.include_isoforms
+        else Protein.objects.filter(isoform__isnull=True).count()
     )
-    tissue_coverage = (
-        GeneTissue.objects.filter(gene__proteins__in=surviving_qs)
-        .values("tissue_id")
-        .distinct()
-        .count()
-    )
+    n_filtered_out = base_universe - n_pass_protein_filter
 
     return {
         "n_proteins": n_surviving,
@@ -2159,8 +2173,8 @@ def _protein_stats(
         "median_avg_score": (
             round(statistics.median(avg_scores), 4) if avg_scores else None
         ),
+        "n_filtered_out": n_filtered_out,
         "n_orphaned_by_filter": n_pass_protein_filter - n_surviving,
-        "tissue_coverage": tissue_coverage,
         "n_isoforms": n_isoforms,
         # Per-protein degree distribution (moved here from the interaction box:
         # degree is a protein-level attribute).

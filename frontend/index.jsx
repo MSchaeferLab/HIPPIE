@@ -24,12 +24,14 @@ function mapRows(data) {
       uniprot: row.query_side?.uniprot_id ?? qs.uniprot_id ?? null,
       entrez: row.query_side?.gene_id ?? qs.gene_id ?? null,
       isoform: row.query_side?.isoform_uniprot_id ?? null,
+      is_reviewed: row.query_side?.is_reviewed ?? qs.is_reviewed,
     },
     b: {
       symbol: row.partner?.symbol ?? "",
       uniprot: row.partner?.uniprot_id ?? null,
       entrez: row.partner?.gene_id ?? null,
       isoform: row.partner?.isoform_uniprot_id ?? null,
+      is_reviewed: row.partner?.is_reviewed,
     },
     score: row.score,
     sourceCount: row.source_count,
@@ -82,7 +84,10 @@ function App() {
     if (INITIAL_Q) runSearch(INITIAL_Q, FILTER_DEFAULTS);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const submit = () => runSearch(query, filters);
+  const submit = () => {
+    setFiltersOpen(false);
+    runSearch(query, filters);
+  };
   const runExample = (ex) => {
     setQuery(ex);
     runSearch(ex, filters);
@@ -131,7 +136,6 @@ function App() {
             <button
               className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
               onClick={() => setFiltersOpen((o) => !o)}
-              style={dirty ? { borderColor: "var(--hippie-accent)", color: "var(--hippie-accent)" } : undefined}
             >
               <i className={`bi bi-funnel${activeCount > 0 ? "-fill" : ""}`}></i>
               Filters
@@ -149,21 +153,13 @@ function App() {
                   {activeCount}
                 </span>
               )}
-              {dirty && (
-                <span
-                  title="Unapplied filter changes — click Search"
-                  style={{
-                    display: "inline-block",
-                    width: ".5rem",
-                    height: ".5rem",
-                    borderRadius: "50%",
-                    background: "var(--hippie-accent)",
-                    marginLeft: ".35rem",
-                  }}
-                ></span>
-              )}
             </button>
-            <button className="btn-hippie" onClick={submit} disabled={loading || !query.trim()}>
+            <button
+              className="btn-hippie"
+              onClick={submit}
+              disabled={loading || !query.trim()}
+              style={dirty ? { background: "var(--hippie-accent)", borderColor: "var(--hippie-accent)" } : undefined}
+            >
               {loading ? (
                 <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2, verticalAlign: "middle" }}></span>
               ) : (
@@ -171,6 +167,7 @@ function App() {
                   <i className="bi bi-search me-1"></i>Search
                 </>
               )}
+              {dirty && !loading && <span className="search-dirty-dot" title="Unapplied filter changes — click Search"></span>}
             </button>
           </div>
         </div>

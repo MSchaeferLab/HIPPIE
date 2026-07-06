@@ -11,6 +11,7 @@ import {
   FilterBox,
   FILTER_DEFAULTS,
   filtersToBody,
+  filtersEqual,
   confThresholds,
 } from "./filters.jsx";
 
@@ -49,6 +50,7 @@ function mapRow(row, i) {
     uniprot: p.uniprot_id || null,
     entrez: p.gene_id ?? null,
     isoform: p.isoform_uniprot_id || null,
+    is_reviewed: p.is_reviewed,
   });
   return {
     key: `${row.is_noninteraction ? "n" : "i"}-${row.id}-${i}`,
@@ -269,6 +271,8 @@ function App() {
 
   // Filters (always visible; applied only on Search) -------------------------
   const [filters, setFilters] = useState(FILTER_DEFAULTS);
+  const [appliedFilters, setAppliedFilters] = useState(FILTER_DEFAULTS);
+  const [appliedSeedKey, setAppliedSeedKey] = useState("");
   const [meta, setMeta] = useState({ tissues: [], sources: [], experiments: [], interaction_types: [] });
 
   // Results ------------------------------------------------------------------
@@ -349,6 +353,8 @@ function App() {
     if (!seeds || seeds.length === 0) return setInputError("Please enter at least one seed protein.");
     if (seeds.length > maxProteins)
       return setInputError(`Too many seeds. Maximum is ${maxProteins.toLocaleString()}.`);
+    setAppliedFilters(filters);
+    setAppliedSeedKey(seedKey);
     runQuery(seeds, filters);
   };
 
@@ -358,10 +364,17 @@ function App() {
     setText(exText);
     setInputError(null);
     const seeds = parseSeeds(exText);
-    if (seeds.length > 0) runQuery(seeds, filters);
+    if (seeds.length > 0) {
+      setAppliedFilters(filters);
+      setAppliedSeedKey(exText.trim());
+      runQuery(seeds, filters);
+    }
   };
 
   const canSubmit = !loading && (mode === "text" ? text.trim().length > 0 : file !== null);
+  // Unapplied-changes indicator: seed input or filters changed since last Search.
+  const seedKey = mode === "text" ? text.trim() : file ? `${file.name}:${file.size}` : "";
+  const dirty = !filtersEqual(filters, appliedFilters) || seedKey !== appliedSeedKey;
   const cyReady = typeof window !== "undefined" && !!window.cytoscape;
 
   return (
@@ -464,7 +477,12 @@ function App() {
               ))}
             </div>
 
-            <button className="btn-nq-submit" onClick={submit} disabled={!canSubmit}>
+            <button
+              className="btn-nq-submit"
+              onClick={submit}
+              disabled={!canSubmit}
+              style={dirty ? { background: "var(--hippie-accent)" } : undefined}
+            >
               {loading ? (
                 <>
                   <span className="spinner me-2"></span>Building…
@@ -474,6 +492,7 @@ function App() {
                   <i className="bi bi-search me-1"></i>Search
                 </>
               )}
+              {dirty && !loading && <span className="search-dirty-dot" title="Unapplied changes — click Search"></span>}
             </button>
           </div>
 

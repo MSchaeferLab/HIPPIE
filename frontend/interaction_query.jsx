@@ -62,12 +62,14 @@ function mapRow(row, i) {
       uniprot: row.uniprot_a || null,
       entrez: row.entrez_a ?? null,
       isoform: row.isoform_uniprot_a || null,
+      is_reviewed: row.is_reviewed_a,
     },
     b: {
       symbol: row.symbol_b,
       uniprot: row.uniprot_b || null,
       entrez: row.entrez_b ?? null,
       isoform: row.isoform_uniprot_b || null,
+      is_reviewed: row.is_reviewed_b,
     },
     score: row.score,
     sourceCount: row.source_count,
@@ -172,6 +174,7 @@ function App() {
     if (!pairs || pairs.length === 0) return setInputError("Please enter at least one protein pair.");
     if (pairs.length > maxPairs)
       return setInputError(`Too many pairs. Maximum is ${maxPairs.toLocaleString()}.`);
+    setFiltersOpen(false);
     runQuery(pairs, filters);
   };
 
@@ -286,7 +289,6 @@ function App() {
             <button
               className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
               onClick={() => setFiltersOpen((o) => !o)}
-              style={dirty ? { borderColor: "var(--hippie-accent)", color: "var(--hippie-accent)" } : undefined}
             >
               <i className={`bi bi-funnel${activeCount > 0 ? "-fill" : ""}`}></i>
               Filters
@@ -304,21 +306,13 @@ function App() {
                   {activeCount}
                 </span>
               )}
-              {dirty && (
-                <span
-                  title="Unapplied filter changes — click Search"
-                  style={{
-                    display: "inline-block",
-                    width: ".5rem",
-                    height: ".5rem",
-                    borderRadius: "50%",
-                    background: "var(--hippie-accent)",
-                    marginLeft: ".35rem",
-                  }}
-                ></span>
-              )}
             </button>
-            <button className="btn-hippie" onClick={submit} disabled={!canSubmit}>
+            <button
+              className="btn-hippie"
+              onClick={submit}
+              disabled={!canSubmit}
+              style={dirty ? { background: "var(--hippie-accent)", borderColor: "var(--hippie-accent)" } : undefined}
+            >
               {streaming ? (
                 <>
                   <span className="spinner me-2"></span>Querying…
@@ -328,6 +322,7 @@ function App() {
                   <i className="bi bi-search me-1"></i>Search
                 </>
               )}
+              {dirty && !streaming && <span className="search-dirty-dot" title="Unapplied filter changes — click Search"></span>}
             </button>
           </div>
         </div>

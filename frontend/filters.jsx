@@ -49,6 +49,21 @@ export function confThresholds(showMode) {
   return { med: _REL.intMedian ?? 0.00, high: _REL.intQ3 ?? 0.00 };
 }
 
+// Tint for the confidence preset chips — mirrors the score-badge colors a score
+// earns once it crosses each threshold (see scoreClass in shared.jsx / hippie.css).
+export const CONF_CHIP_STYLE = {
+  med: {
+    background: "#fef3e2",
+    color: "var(--hippie-score-med)",
+    borderColor: "var(--hippie-score-med)",
+  },
+  high: {
+    background: "var(--hippie-teal-soft)",
+    color: "var(--hippie-score-high)",
+    borderColor: "var(--hippie-score-high)",
+  },
+};
+
 // ── Reusable multi-select checkbox list ─────────────────────────────────────
 export function CheckboxList({ items, selected, onToggle }) {
   const selSet = new Set(selected.map(String));
@@ -208,6 +223,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
             <div className="d-flex gap-2 flex-wrap">
               <button
                 className="tag-chip example-chip"
+                style={CONF_CHIP_STYLE.med}
                 onClick={() => {
                   const v = parseFloat(med.toFixed(2));
                   set({ minScore: v, maxScore: f.maxScore < v ? 1 : f.maxScore });
@@ -217,6 +233,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
               </button>
               <button
                 className="tag-chip example-chip"
+                style={CONF_CHIP_STYLE.high}
                 onClick={() => {
                   const v = parseFloat(high.toFixed(2));
                   set({ minScore: v, maxScore: f.maxScore < v ? 1 : f.maxScore });

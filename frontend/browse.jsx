@@ -73,6 +73,7 @@ function App() {
     setAppliedSearch(search);
     setAppliedFilters(filters);
     setPage(1);
+    setFiltersOpen(false);
   };
 
   const runExample = (ex) => {
@@ -234,8 +235,8 @@ function App() {
     mode === "interactions"
       ? rows.map((r, i) => ({
           key: `${r.is_noninteraction ? "ni" : "i"}-${r.id}-${i}`,
-          a: { symbol: r.protein_a.symbol, uniprot: r.protein_a.uniprot_id, entrez: r.protein_a.entrez_id, isoform: null },
-          b: { symbol: r.protein_b.symbol, uniprot: r.protein_b.uniprot_id, entrez: r.protein_b.entrez_id, isoform: null },
+          a: { symbol: r.protein_a.symbol, uniprot: r.protein_a.uniprot_id, entrez: r.protein_a.entrez_id, isoform: null, is_reviewed: r.protein_a.is_reviewed },
+          b: { symbol: r.protein_b.symbol, uniprot: r.protein_b.uniprot_id, entrez: r.protein_b.entrez_id, isoform: null, is_reviewed: r.protein_b.is_reviewed },
           score: r.score,
           // Non-interactions carry no evidence — show a dash rather than a 0 count.
           sourceCount: r.is_noninteraction ? null : r.source_count,
@@ -300,7 +301,6 @@ function App() {
             <button
               className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
               onClick={() => setFiltersOpen((o) => !o)}
-              style={dirty ? { borderColor: "var(--hippie-accent)", color: "var(--hippie-accent)" } : undefined}
             >
               <i className={`bi bi-funnel${activeCount > 0 ? "-fill" : ""}`}></i>
               Filters
@@ -318,22 +318,14 @@ function App() {
                   {activeCount}
                 </span>
               )}
-              {dirty && (
-                <span
-                  title="Unapplied filter changes — click Search"
-                  style={{
-                    display: "inline-block",
-                    width: ".5rem",
-                    height: ".5rem",
-                    borderRadius: "50%",
-                    background: "var(--hippie-accent)",
-                    marginLeft: ".35rem",
-                  }}
-                ></span>
-              )}
             </button>
-            <button className="btn-hippie" onClick={applySearch}>
+            <button
+              className="btn-hippie"
+              onClick={applySearch}
+              style={dirty ? { background: "var(--hippie-accent)", borderColor: "var(--hippie-accent)" } : undefined}
+            >
               <i className="bi bi-search me-1"></i>Search
+              {dirty && <span className="search-dirty-dot" title="Unapplied filter changes — click Search"></span>}
             </button>
           </div>
         </div>

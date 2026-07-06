@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
+import { confThresholds, CONF_CHIP_STYLE } from "./filters.jsx";
 
 const cfg = window.SPLITS_CONFIG;
 const meta = cfg.meta || { tissues: [], sources: [], experiments: [], interaction_types: [] };
@@ -112,6 +113,7 @@ function ProteinFilterPanel({ filters, onChange }) {
 
 function InteractionFilterPanel({ filters, onChange }) {
   const set = (patch) => onChange({ ...filters, ...patch });
+  const { med, high } = confThresholds("interactions");
   return (
     <div className="hippie-card mb-0" style={{height:"100%"}}>
       <div className="filter-section-label">Interaction Filters</div>
@@ -120,13 +122,35 @@ function InteractionFilterPanel({ filters, onChange }) {
       </label>
       <input type="range" className="form-range mb-2" min="0" max="1" step="0.01"
              value={filters.minScore || 0}
-             onChange={e => set({ minScore: parseFloat(e.target.value) })} />
+             onChange={e => set({ minScore: Math.min(parseFloat(e.target.value), filters.maxScore ?? 1) })} />
       <label className="form-label">
         Max. score ≤ <span className="mono">{(filters.maxScore ?? 1).toFixed(2)}</span>
       </label>
-      <input type="range" className="form-range mb-3" min="0" max="1" step="0.01"
+      <input type="range" className="form-range mb-2" min="0" max="1" step="0.01"
              value={filters.maxScore ?? 1}
-             onChange={e => set({ maxScore: parseFloat(e.target.value) })} />
+             onChange={e => set({ maxScore: Math.max(parseFloat(e.target.value), filters.minScore ?? 0) })} />
+      <div className="d-flex gap-2 flex-wrap mb-3">
+        <button
+          className="tag-chip example-chip"
+          style={CONF_CHIP_STYLE.med}
+          onClick={() => {
+            const v = parseFloat(med.toFixed(2));
+            set({ minScore: v, maxScore: (filters.maxScore ?? 1) < v ? 1 : filters.maxScore });
+          }}
+        >
+          Medium conf. ≥ {med.toFixed(2)}
+        </button>
+        <button
+          className="tag-chip example-chip"
+          style={CONF_CHIP_STYLE.high}
+          onClick={() => {
+            const v = parseFloat(high.toFixed(2));
+            set({ minScore: v, maxScore: (filters.maxScore ?? 1) < v ? 1 : filters.maxScore });
+          }}
+        >
+          High conf. ≥ {high.toFixed(2)}
+        </button>
+      </div>
       <div className="row g-3">
         <div className="col-md-4">
           <label className="form-label">Source database</label>
@@ -184,8 +208,8 @@ const PROTEIN_STATS_HELP = DL([
   ["Proteins", "Filtered proteins that still have at least one surviving interaction under the current interaction filter."],
   ["Median degree", "Median number of surviving interactions per protein, counted only over edges that pass the current filter."],
   ["Median avg score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
+  ["Proteins filtered out", "Proteins removed by the protein-level filter (tissue, RPKM, min-degree, min-avg-score, isoform exclusion) relative to the full protein table. Separate from “Orphaned by filter”, which counts proteins that pass the protein filter but lose all edges."],
   ["Orphaned by filter", "Proteins that pass the protein-level filter (tissue, RPKM, …) but lost every interaction to the score/type/source filter, leaving degree 0. Excluded from the medians above."],
-  ["Tissue coverage", "Number of distinct tissues represented among genes of the surviving proteins (filter-orphans excluded)."],
   ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when “include isoforms” is on."],
   ["Node degree distribution", "Histogram of per-protein interaction counts (degree) under the current filter."],
 ]);
@@ -282,12 +306,12 @@ function ProteinStatsBox({ stats, loading, error }) {
           <>
             <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:".6rem"}}>
               <Metric label="Proteins" value={stats.n_proteins.toLocaleString()} />
+              <Metric label="Isoforms" value={stats.n_isoforms.toLocaleString()} />
               <Metric label="Median degree" value={stats.median_degree} />
               <Metric label="Median avg score"
                       value={stats.median_avg_score == null ? "—" : stats.median_avg_score} />
+              <Metric label="Proteins filtered out" value={stats.n_filtered_out.toLocaleString()} />
               <Metric label="Orphaned by filter" value={stats.n_orphaned_by_filter.toLocaleString()} />
-              <Metric label="Tissue coverage" value={stats.tissue_coverage.toLocaleString()} />
-              <Metric label="Isoforms" value={stats.n_isoforms.toLocaleString()} />
             </div>
             {stats.degree_histogram && (
               <Histogram title="Node degree distribution" bars={stats.degree_histogram} />
@@ -451,6 +475,7 @@ function SplitCards({ summary }) {
 function RunCard({ jobId }) {
   const [data, setData] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [copied, setCopied] = useState(false);
   const timer = useRef(null);
   useEffect(() => {
     let cancelled = false;
@@ -480,6 +505,15 @@ function RunCard({ jobId }) {
   const pct     = Math.round((data?.progress || 0) * 100);
   const queued  = status === "PENDING" && (data?.queue_position || 0) > 0;
   const recap   = data ? paramSummary(data.params) : null;
+
+  // Deep-link back to this page with the job id so a colleague can load + download it.
+  const shareLink = () => {
+    const url = `${window.location.origin}${window.location.pathname}?jobs=${jobId}`;
+    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done).catch(() => {});
+    }
+  };
 
   return (
     <div className="hippie-card mb-3" style={{borderColor:border}}>
@@ -521,13 +555,23 @@ function RunCard({ jobId }) {
 
       {data && status === "DONE" && (
         <>
-          <a href={data.download_url} style={{
-            display:"inline-block", background:TEAL, color:"#fff", border:"none",
-            borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
-            fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", textDecoration:"none",
-          }}>
-            <i className="bi bi-download me-1"></i> Download ZIP
-          </a>
+          <div className="d-flex gap-2 flex-wrap align-items-center">
+            <a href={data.download_url} style={{
+              display:"inline-block", background:TEAL, color:"#fff", border:"none",
+              borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
+              fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", textDecoration:"none",
+            }}>
+              <i className="bi bi-download me-1"></i> Download ZIP
+            </a>
+            <button type="button" onClick={shareLink} title="Copy a shareable link to this run" style={{
+              display:"inline-block", background:"transparent", color:TEAL,
+              border:`1px solid ${TEAL}`, borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
+              fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", cursor:"pointer",
+            }}>
+              <i className={`bi ${copied ? "bi-check2" : "bi-share"} me-1`}></i>
+              {copied ? "Copied!" : "Share Link"}
+            </button>
+          </div>
           <SplitCards summary={data.summary} />
         </>
       )}

@@ -185,7 +185,7 @@ const INT_SORT_VALUES = {
 
 const INT_TSV_HEADER = [
   "Gene A", "UniProt A", "Entrez A", "Gene B", "UniProt B", "Entrez B",
-  "Score", "Sources", "Experiments", "Type",
+  "Score", "Sources", "Experiments", "Type", "Review Type A", "Review Type B",
 ];
 
 function intRowType(r) {
@@ -206,6 +206,8 @@ function intTsvRow(r) {
     nf ? "Not found" : r.sourceCount ?? "",
     nf ? "Not found" : r.experimentCount ?? "",
     intRowType(r),
+    r.a.is_reviewed ? "reviewed" : "unreviewed",
+    r.b.is_reviewed ? "reviewed" : "unreviewed",
   ].map((c) => String(c).replace(/[\t\r\n]/g, " "));
 }
 
@@ -215,6 +217,9 @@ function ProteinCells({ p, stop }) {
     <>
       <td>
         <strong>{p.symbol || "—"}</strong>
+        {p.is_reviewed === false && (
+          <span className="unreviewed-tag">[unreviewed]</span>
+        )}
       </td>
       <td>
         {acc ? (

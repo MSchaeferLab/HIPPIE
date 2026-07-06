@@ -1123,6 +1123,21 @@ class BrowseInteractionsApiTest(HippieTestCase):
             self.assertIn(key, row)
         self.assertFalse(row["is_noninteraction"])
 
+    def test_rows_carry_review_status(self):
+        # Each interactor now carries is_reviewed for the [unreviewed] tag /
+        # Review Type export columns. Set brca1 reviewed, tp53 unreviewed
+        # (the model default is False, so pin both sides explicitly).
+        Protein.objects.filter(pk=self.brca1.pk).update(is_reviewed=True)
+        Protein.objects.filter(pk=self.tp53.pk).update(is_reviewed=False)
+        row = next(r for r in self._get()["interactions"] if not r["is_noninteraction"])
+        self.assertIn("is_reviewed", row["protein_a"])
+        self.assertIn("is_reviewed", row["protein_b"])
+        # brca1–tp53 pair: one reviewed, one not (side order depends on pk).
+        self.assertEqual(
+            {row["protein_a"]["is_reviewed"], row["protein_b"]["is_reviewed"]},
+            {True, False},
+        )
+
     def test_score_range_filter(self):
         # The single fixture interaction scores 0.85.
         self.assertEqual(self._get(min_score=0.9)["total"], 0)
@@ -2163,43 +2178,44 @@ class Batch3FilterMetaInteractionTypesTest(HippieTestCase):
 # ---------------------------------------------------------------------------
 
 
-class MLSplitTissueCoverageTest(TestCase):
-    """Batch 6: tissue coverage counts only SURVIVING proteins. A filter-orphan
-    whose gene is expressed in a tissue no survivor covers must not inflate the
-    count."""
+class MLSplitFilteredOutTest(TestCase):
+    """Task 10: ``n_filtered_out`` counts proteins removed by the protein-level
+    filter (here a tissue filter) relative to the full protein table — distinct
+    from ``n_orphaned_by_filter`` (proteins that pass the filter but lose all
+    edges). ``tissue_coverage`` was removed from the stats payload."""
 
     @classmethod
     def setUpTestData(cls):
-        # Distinct genes per protein — make_protein without gene_id shares one
-        # gene (entrez 0), which would collapse tissue coverage.
+        # Distinct genes per protein so the tissue filter is per-protein.
         cls.a = make_protein("A", gene_id=101, accession="ACC_A")
         cls.b = make_protein("B", gene_id=102, accession="ACC_B")
-        cls.orphan = make_protein("O", gene_id=103, accession="ACC_O")
-        cls.orphan2 = make_protein("O2", gene_id=104, accession="ACC_O2")
+        cls.c = make_protein("C", gene_id=103, accession="ACC_C")
+        cls.d = make_protein("D", gene_id=104, accession="ACC_D")
 
-        make_interaction(cls.a, cls.b, score=0.85)  # survives min_score=0.5
-        make_interaction(cls.orphan, cls.orphan2, score=0.15)  # filtered → orphans
+        make_interaction(cls.a, cls.b, score=0.85)  # survives (both in Blood)
+        make_interaction(cls.c, cls.d, score=0.85)  # C, D removed by tissue filter
         call_command("recompute_protein_stats", stdout=StringIO())
 
-        blood = Tissue.objects.create(name="Blood")
-        brain = Tissue.objects.create(name="Brain")
-        # Survivor A covers Blood; orphan O covers Brain (no survivor covers it).
-        GeneTissue.objects.create(gene=cls.a.gene, tissue=blood, median_rpkm=5.0)
-        GeneTissue.objects.create(gene=cls.orphan.gene, tissue=brain, median_rpkm=5.0)
+        cls.blood = Tissue.objects.create(name="Blood")
+        # Only A and B are expressed in Blood → C and D are filtered out.
+        GeneTissue.objects.create(gene=cls.a.gene, tissue=cls.blood, median_rpkm=5.0)
+        GeneTissue.objects.create(gene=cls.b.gene, tissue=cls.blood, median_rpkm=5.0)
 
-    def test_tissue_coverage_excludes_filter_orphans(self):
+    def test_filtered_out_counts_protein_level_removals(self):
         from .services.generate_splits import SplitParams, build_interaction_queryset
         from .views import _interaction_stats, _protein_stats
 
-        params = SplitParams(min_score=0.5)
+        params = SplitParams(min_score=0.5, tissue_ids=(self.blood.pk,))
         iqs = build_interaction_queryset(params)
         _interaction, degree_by_node, score_sum = _interaction_stats(iqs)
         protein = _protein_stats(params, degree_by_node, score_sum, iqs)
 
-        self.assertEqual(protein["n_proteins"], 2)  # A, B survive
-        self.assertEqual(protein["n_orphaned_by_filter"], 2)  # O, O2 orphaned
-        # Only the survivor tissue (Blood) counts — the orphan's Brain is dropped.
-        self.assertEqual(protein["tissue_coverage"], 1)
+        # Full table = 4 proteins; only A, B pass the Blood tissue filter.
+        self.assertEqual(protein["n_filtered_out"], 2)  # C, D removed by filter
+        self.assertEqual(protein["n_proteins"], 2)  # A, B survive with an edge
+        self.assertEqual(protein["n_orphaned_by_filter"], 0)  # no filter-orphans
+        # tissue_coverage was removed from the payload.
+        self.assertNotIn("tissue_coverage", protein)
 
 
 class MLSplitQueuePositionTest(TestCase):
