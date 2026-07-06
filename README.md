@@ -32,7 +32,7 @@ sh download_update_data.sh
 cd ..
 # Versions change, check what version BIOGRID extracts into
 python manage.py hippie_update \
-    --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt \
+    --biogrid data/BIOGRID-ALL-5.0.259.mitab.txt \
     --intact data/human.txt
 python manage.py load_experiment_types --csv_path technique_scores/techniques_scoring_3.0.tsv
 python manage.py update_homology_data \
