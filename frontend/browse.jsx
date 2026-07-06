@@ -22,7 +22,7 @@ const {
 // score-range, experiment or interaction-type controls); the Interactions tab
 // gets the full interaction-oriented set incl. the interactions/non-interactions
 // /both toggle.
-const PROTEIN_CONTROLS = ["source", "tissue", "protein", "swissprot", "isoforms"];
+const PROTEIN_CONTROLS = ["source", "tissue", "protein", "reviewed", "isoforms"];
 const INTERACTION_CONTROLS = ["showMode", "score", "source", "experiment", "interactionType", "isoforms"];
 
 const EXAMPLES = ["BRCA1", "TP53", "EGFR"];

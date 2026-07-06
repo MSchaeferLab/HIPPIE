@@ -1,0 +1,208 @@
+{
+  "_comment": "Single source of truth for every external dataset the HIPPIE update routine uses. 'fetched', 'last_modified', 'etag', 'version' (and 'filename' when track_extracted) are written back automatically by download_update_data.sh; they record what is currently in data/. 'version' is derived by the first rule that matches, else it defaults to the Last-Modified date: UniProt URLs -> current UniProt release (relnotes.txt); version_file_template -> literal text with '{n}' replaced by the last token of the file's n-th line (e.g. RGD 'build {2}.generated{3}' -> 'build 2024-06-24.generated2026/06/27'); track_extracted+version_regex -> capture from the extracted filename (e.g. BioGRID). 'version_pinned': true keeps a hand-set version (e.g. Alliance). Flags: manual=browser-only download, runtime=fetched live by a Python command, local=no upstream URL.",
+  "sources": {
+    "sec_ac": {
+      "url": "https://ftp.uniprot.org/pub/databases/uniprot/knowledgebase/complete/docs/sec_ac.txt",
+      "filename": "sec_ac.txt",
+      "decompress": "none",
+      "version": "UniProt Release 2026_02",
+      "fetched": "2026-07-03",
+      "last_modified": "Wed, 10 Jun 2026 20:00:00 GMT",
+      "etag": "\"2f345a3-653ebb0451000\""
+    },
+    "human_idmapping": {
+      "url": "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/HUMAN_9606_idmapping.dat.gz",
+      "filename": "HUMAN_9606_idmapping.dat",
+      "decompress": "gz",
+      "version": "UniProt Release 2026_02",
+      "fetched": "2026-07-03",
+      "last_modified": "Wed, 10 Jun 2026 20:00:00 GMT",
+      "etag": "\"241700d-653ebb0451000\""
+    },
+    "gene_info": {
+      "url": "https://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Mammalia/Homo_sapiens.gene_info.gz",
+      "filename": "Homo_sapiens.gene_info",
+      "decompress": "gz",
+      "version": "Fri, 03 Jul 2026 08:39:15 GMT",
+      "fetched": "2026-07-03",
+      "last_modified": "Fri, 03 Jul 2026 08:39:15 GMT",
+      "etag": null
+    },
+    "intact_human": {
+      "url": "https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/species/human.zip",
+      "filename": "human.txt",
+      "decompress": "zip",
+      "version": "Wed, 14 Jan 2026 11:58:40 GMT",
+      "fetched": "2026-07-03",
+      "last_modified": "Wed, 14 Jan 2026 11:58:40 GMT",
+      "etag": "\"45cda05b-64857d43803b2\""
+    },
+    "intact_full": {
+      "url": "https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/intact.zip",
+      "stream_url": "https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/intact.txt",
+      "filename": "intact.txt",
+      "decompress": "zip",
+      "version": "Wed, 14 Jan 2026 11:51:57 GMT",
+      "fetched": "2026-07-03",
+      "last_modified": "Wed, 14 Jan 2026 11:51:57 GMT",
+      "etag": "\"50836a8b-64857bc3f8ba1\""
+    },
+    "biogrid": {
+      "url": "https://downloads.thebiogrid.org/Download/BioGRID/Latest-Release/BIOGRID-ALL-LATEST.mitab.zip",
+      "filename": "BIOGRID-ALL-5.0.259.mitab.txt",
+      "decompress": "zip",
+      "track_extracted": true,
+      "version_regex": "BIOGRID-ALL-(.+)\\.mitab\\.txt",
+      "version": "5.0.259",
+      "fetched": "2026-07-03",
+      "last_modified": "Fri, 03 Jul 2026 14:17:20 GMT",
+      "etag": null
+    },
+    "gtex_sample_attrs": {
+      "url": "https://storage.googleapis.com/adult-gtex/annotations/v11/metadata-files/GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt",
+      "filename": "GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt",
+      "decompress": "none",
+      "version_pinned": true,
+      "version": "v11",
+      "fetched": "2026-07-03",
+      "last_modified": "Thu, 15 Jan 2026 18:59:33 GMT",
+      "etag": "\"4c45e25c3fc5ec92a97da0d4bcba1207\""
+    },
+    "gtex_gene_reads": {
+      "url": "https://storage.googleapis.com/adult-gtex/bulk-gex/v11/rna-seq/GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct.gz",
+      "filename": "GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct",
+      "decompress": "gz",
+      "version_pinned": true,
+      "version": "v11_2025-08-22",
+      "fetched": "2026-07-03",
+      "last_modified": "Thu, 15 Jan 2026 19:04:13 GMT",
+      "etag": "\"93ae0d49692e5afaa34411ea754c2742\""
+    },
+    "orthology_alliance": {
+      "url": "https://download.alliancegenome.org/9.0.0/ORTHOLOGY-ALLIANCE/COMBINED/ORTHOLOGY-ALLIANCE_COMBINED_13.tsv.gz",
+      "filename": "ORTHOLOGY-ALLIANCE_COMBINED_13.tsv",
+      "decompress": "gz",
+      "track_extracted": true,
+      "version_pinned": true,
+      "version": "9.0.0",
+      "_note": "Pinned, versioned Alliance URL — the release number in the path is the tracked version. Bump the URL (and the pipeline auto-updates filename+version) for a new release.",
+      "fetched": "2026-07-03",
+      "last_modified": "Sun, 05 Apr 2026 03:40:06 GMT",
+      "etag": "\"c684c49f4d6a25f2bb8b9f325b383db1\""
+    },
+    "wormbase": {
+      "url_dir": "https://downloads.wormbase.org/releases/current-production-release/species/c_elegans/PRJNA13758/annotation/",
+      "filename": "c_elegans.PRJNA13758.WS298.xrefs.txt.gz",
+      "filename_glob": "c_elegans.PRJNA13758.WS*.xrefs.txt.gz",
+      "decompress": "none",
+      "manual": true,
+      "taxon": "6239",
+      "db": "WormBase",
+      "gz": 1,
+      "version": "WS298",
+      "_note": "Host is behind Cloudflare (curl gets a 403 JS challenge) so this must be downloaded in a browser. filename_glob lets the pipeline pick up any WS release you drop in without editing this entry.",
+      "fetched": null,
+      "last_modified": null,
+      "etag": null
+    },
+    "rgd": {
+      "url": "https://download.rgd.mcw.edu/data_release/GENES_RAT.txt",
+      "runtime": true,
+      "taxon": "10116",
+      "db": "RGD",
+      "gz": 0,
+      "version_file_template": "build {2}.generated{3}",
+      "version": "build 2024-06-24.generated2026/06/27",
+      "fetched": "2026-07-03",
+      "last_modified": "Sat, 27 Jun 2026 05:09:52 GMT",
+      "etag": "\"260f736-655353c43a953\""
+    },
+    "mgi": {
+      "url": "https://www.informatics.jax.org/downloads/reports/MRK_SwissProt_TrEMBL.rpt",
+      "runtime": true,
+      "taxon": "10090",
+      "db": "MGI",
+      "gz": 0,
+      "version": "Tue, 30 Jun 2026 10:31:44 GMT",
+      "fetched": "2026-07-03",
+      "last_modified": "Tue, 30 Jun 2026 10:31:44 GMT",
+      "etag": "\"20c417-6557614d79ba5\""
+    },
+    "zfin": {
+      "url": "https://zfin.org/downloads/uniprot.txt",
+      "runtime": true,
+      "taxon": "7955",
+      "db": "ZFIN",
+      "gz": 0,
+      "version": "Fri, 03 Jul 2026 05:06:55 GMT",
+      "fetched": "2026-07-03",
+      "last_modified": "Fri, 03 Jul 2026 05:06:55 GMT",
+      "etag": "\"41ec8a-655ade4b4c188\""
+    },
+    "xenbase_tropicalis": {
+      "url": "https://download.xenbase.org/xenbase/GenePageReports/xenbase_v1.2.gpi.gz",
+      "runtime": true,
+      "taxon": "8364",
+      "db": "Xenbase",
+      "gz": 1,
+      "version_pinned": true,
+      "version": "v1.2",
+      "fetched": "2026-07-03",
+      "last_modified": "Wed, 01 Jul 2026 10:56:05 GMT",
+      "etag": "\"20a43d-6558a89bdf0c7\""
+    },
+    "xenbase_laevis": {
+      "url": "https://download.xenbase.org/xenbase/GenePageReports/xenbase_v1.2.gpi.gz",
+      "runtime": true,
+      "taxon": "8355",
+      "db": "Xenbase",
+      "gz": 1,
+      "version_pinned": true,
+      "version": "v1.2",
+      "fetched": "2026-07-03",
+      "last_modified": "Wed, 01 Jul 2026 10:56:05 GMT",
+      "etag": "\"20a43d-6558a89bdf0c7\""
+    },
+    "flybase": {
+      "url": "https://s3ftp.flybase.org/releases/current/precomputed_files/genes/fbgn_NAseq_Uniprot_fb_2026_01.tsv.gz",
+      "runtime": true,
+      "taxon": "7227",
+      "db": "FlyBase",
+      "gz": 1,
+      "version_pinned": true,
+      "version": "fb_2026_01",
+      "fetched": "2026-07-03",
+      "last_modified": "Sat, 07 Mar 2026 06:00:54 GMT",
+      "etag": "\"765cd7ede5043a8d0be8134cd929e7ab\""
+    },
+    "sgd": {
+      "url": "http://sgd-archive.yeastgenome.org/curation/chromosomal_feature/dbxref.tab",
+      "runtime": true,
+      "taxon": "559292",
+      "db": "SGD",
+      "gz": 0,
+      "version": "Fri, 03 Jul 2026 09:11:37 GMT",
+      "fetched": "2026-07-03",
+      "last_modified": "Fri, 03 Jul 2026 09:11:37 GMT",
+      "etag": "\"eed0c66178bf92fc76e6a7e49e6f5cfa-2\""
+    },
+    "uniprot_to_orthology": {
+      "filename": "uniprot_to_orthology.tsv",
+      "local": true,
+      "version": "generated",
+      "_note": "Intermediate MOD UniProt->gene map written by update_homology_data; no upstream URL."
+    },
+    "techniques_scoring": {
+      "filename": "technique_scores/techniques_scoring_3.0.tsv",
+      "local": true,
+      "version": "3.0",
+      "_note": "Manually curated experiment-technique scoring TSV consumed by load_experiment_types. Lives in data/technique_scores/; bump filename+version when promoting a new revision."
+    },
+    "pod_flat": {
+      "filename": "POD_flat.pq",
+      "local": true,
+      "version": "manual",
+      "_note": "Bait-prey parquet consumed by import_pod_data; provided manually (no upstream version)."
+    }
+  }
+}

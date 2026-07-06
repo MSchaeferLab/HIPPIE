@@ -67,15 +67,13 @@ class Protein(models.Model):
     uniprot_name = models.CharField(
         max_length=16, db_index=True, default="", blank=True
     )
-    # True for reviewed Swiss-Prot entries, False for TrEMBL. Defaults True;
-    # populated by the update routine (not yet wired), so TrEMBL is empty for now.
-    is_swissprot = models.BooleanField(default=True, db_index=True)
-
     # Denormalised browse stats — refreshed by `recompute_protein_stats`.
     # degree = number of interactions touching this protein (either side);
     # avg_score = mean confidence score across those interactions.
     degree = models.PositiveIntegerField(default=0, db_index=True)
     avg_score = models.FloatField(null=True, blank=True, db_index=True)
+
+    is_reviewed = models.BooleanField(default=False, db_index=True)
 
     objects = ProteinManager()
 

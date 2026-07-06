@@ -20,7 +20,7 @@ export const FILTER_DEFAULTS = {
   minRpkm: 0,
   minDegree: 0,
   minAvgScore: 0,
-  swissprot: "both", // both | swissprot | trembl
+  reviewed: "both", // both | reviewed | unreviewed
 };
 
 // All controls in display order. Pages pass `controls` to pick a subset;
@@ -33,7 +33,7 @@ export const ALL_CONTROLS = [
   "interactionType",
   "tissue",
   "protein",
-  "swissprot",
+  "reviewed",
   "isoforms",
 ];
 
@@ -105,7 +105,7 @@ export function countActiveFilters(f, controls = ALL_CONTROLS) {
   if (on.has("tissue")) n += f.tissue.length;
   if (on.has("protein") && f.minDegree > 0) n++;
   if (on.has("protein") && f.minAvgScore > 0) n++;
-  if (on.has("swissprot") && f.swissprot !== "both") n++;
+  if (on.has("reviewed") && f.reviewed !== "both") n++;
   return n;
 }
 
@@ -130,7 +130,7 @@ function _serialize(f) {
   }
   if (f.minDegree > 0) scalars.min_degree = f.minDegree;
   if (f.minAvgScore > 0) scalars.min_avg_score = f.minAvgScore;
-  if (f.swissprot !== "both") scalars.swissprot = f.swissprot;
+  if (f.reviewed !== "both") scalars.reviewed = f.reviewed;
   return { scalars, lists };
 }
 
@@ -320,16 +320,16 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           </div>
         )}
 
-        {on.has("swissprot") && (
+        {on.has("reviewed") && (
           <div className={colCls}>
             <div className="filter-section-label">Protein review status</div>
             <div className="mode-toggle">
               {[
                 ["both", "Both"],
-                ["swissprot", "Swiss-Prot"],
-                ["trembl", "TrEMBL"],
+                ["reviewed", "Reviewed"],
+                ["unreviewed", "Unreviewed"],
               ].map(([k, label]) => (
-                <button key={k} className={f.swissprot === k ? "active" : ""} onClick={() => set({ swissprot: k })}>
+                <button key={k} className={f.reviewed === k ? "active" : ""} onClick={() => set({ reviewed: k })}>
                   {label}
                 </button>
               ))}

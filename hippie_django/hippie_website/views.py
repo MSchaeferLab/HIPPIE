@@ -173,7 +173,7 @@ class CommonFilters:
     min_rpkm: float | None = None
     min_degree: int | None = None
     min_avg_score: float | None = None
-    swissprot: str = "both"  # both | swissprot | trembl
+    reviewed: str = "both"  # both | reviewed | unreviewed
 
     @property
     def has_source_like(self) -> bool:
@@ -186,7 +186,7 @@ class CommonFilters:
         return (
             self.min_degree is not None
             or self.min_avg_score is not None
-            or self.swissprot != "both"
+            or self.reviewed != "both"
             or bool(self.tissue_ids)
         )
 
@@ -199,9 +199,9 @@ def _build_common_filters(get_scalar, get_list) -> CommonFilters:
     show = get_scalar("show", "interactions")
     if show not in ("interactions", "noninteractions", "both"):
         show = "interactions"
-    swissprot = get_scalar("swissprot", "both")
-    if swissprot not in ("both", "swissprot", "trembl"):
-        swissprot = "both"
+    reviewed = get_scalar("reviewed", "both")
+    if reviewed not in ("both", "reviewed", "unreviewed"):
+        reviewed = "both"
     return CommonFilters(
         show=show,
         include_isoforms=str(get_scalar("include_isoforms", ""))
@@ -215,7 +215,7 @@ def _build_common_filters(get_scalar, get_list) -> CommonFilters:
         min_rpkm=_safe_float(get_scalar("min_rpkm")),
         min_degree=_safe_int(get_scalar("min_degree")),
         min_avg_score=_safe_float(get_scalar("min_avg_score")),
-        swissprot=swissprot,
+        reviewed=reviewed,
     )
 
 
@@ -319,9 +319,9 @@ def _protein_passes(
         protein.avg_score is None or protein.avg_score < f.min_avg_score
     ):
         return False
-    if f.swissprot == "swissprot" and not protein.is_swissprot:
+    if f.reviewed == "reviewed" and not protein.is_reviewed:
         return False
-    if f.swissprot == "trembl" and protein.is_swissprot:
+    if f.reviewed == "unreviewed" and protein.is_reviewed:
         return False
     if tissue_pks is not None and protein.pk not in tissue_pks:
         return False
@@ -1028,7 +1028,7 @@ def network_query_api(request):
             "proteins": "<newline/space-separated seed identifiers>",
             ...shared FilterBox params (show, min_score, max_score, source[],
                experiment[], interaction_type[], tissue[], min_rpkm,
-               min_degree, min_avg_score, swissprot, include_isoforms)
+               min_degree, min_avg_score, reviewed, include_isoforms)
         }
 
     Builds the first-shell sub-network around the seed proteins — every edge
@@ -1263,7 +1263,7 @@ def _filtered_protein_qs(request):
 
     Reads the unified :class:`CommonFilters` contract shared with Protein Query
     and Interaction Query (``min_avg_score`` for the protein average-score gate,
-    ``swissprot`` for the review-status toggle). Interaction-only filters on the
+    ``reviewed`` for the review-status toggle). Interaction-only filters on the
     contract (score/source-set/experiment/type, ``show``) are ignored here.
     """
     f = _common_filters_from_get(request.GET)
@@ -1295,10 +1295,10 @@ def _filtered_protein_qs(request):
         base_qs = base_qs.filter(degree__gte=f.min_degree)
     if f.min_avg_score is not None and f.min_avg_score > 0:
         base_qs = base_qs.filter(avg_score__gte=f.min_avg_score)
-    if f.swissprot == "swissprot":
-        base_qs = base_qs.filter(is_swissprot=True)
-    elif f.swissprot == "trembl":
-        base_qs = base_qs.filter(is_swissprot=False)
+    if f.reviewed == "reviewed":
+        base_qs = base_qs.filter(is_reviewed=True)
+    elif f.reviewed == "unreviewed":
+        base_qs = base_qs.filter(is_reviewed=False)
 
     return base_qs.order_by(order, "pk")
 
@@ -1496,7 +1496,7 @@ def browse_api(request):
 
     Returns a single page of proteins (server-side pagination):
     {"total": <int>, "proteins": [ {id, symbol, uniprot_id, entrez_id,
-                                     degree, avg_score, is_swissprot}, ... ]}
+                                     degree, avg_score, is_reviewed}, ... ]}
     """
     try:
         offset = max(0, int(request.GET.get("offset", 0)))
@@ -1515,7 +1515,7 @@ def browse_api(request):
             "entrez_id": p.gene.entrez_id or None,
             "degree": p.degree,
             "avg_score": p.avg_score,
-            "is_swissprot": p.is_swissprot,
+            "is_reviewed": p.is_reviewed,
         }
         for p in base_qs[offset : offset + limit]
     ]
@@ -1680,7 +1680,7 @@ def browse_export_api(request):
                         p.gene.entrez_name or p.uniprot_name,
                         p.degree,
                         round(p.avg_score, 4) if p.avg_score is not None else "",
-                        "yes" if p.is_swissprot else "no",
+                        "yes" if p.is_reviewed else "no",
                     ]
                 )
 

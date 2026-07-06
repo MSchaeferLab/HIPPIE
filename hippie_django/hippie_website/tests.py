@@ -413,18 +413,18 @@ class BrowseApiTest(HippieTestCase):
         page = self._get(offset=0, limit=1)
         self.assertEqual(page["total"], all_data["total"])
 
-    def test_protein_entry_has_is_swissprot(self):
+    def test_protein_entry_has_is_reviewed(self):
         p = self._get()["proteins"][0]
-        self.assertIn("is_swissprot", p)
+        self.assertIn("is_reviewed", p)
 
-    def test_swissprot_filter(self):
-        # Flip EGFR to TrEMBL; the review-status filter must partition the set.
-        Protein.objects.filter(pk=self.egfr.pk).update(is_swissprot=False)
-        sp = self._get(swissprot="swissprot")
-        tr = self._get(swissprot="trembl")
-        self.assertNotIn(self.egfr.pk, [p["id"] for p in sp["proteins"]])
-        self.assertEqual(tr["total"], 1)
-        self.assertEqual(tr["proteins"][0]["id"], self.egfr.pk)
+    def test_reviewed_filter(self):
+        # Flip EGFR to unreviewed; the review-status filter must partition the set.
+        Protein.objects.filter(pk=self.egfr.pk).update(is_reviewed=False)
+        rev = self._get(reviewed="reviewed")
+        unrev = self._get(reviewed="unreviewed")
+        self.assertNotIn(self.egfr.pk, [p["id"] for p in rev["proteins"]])
+        self.assertEqual(unrev["total"], 1)
+        self.assertEqual(unrev["proteins"][0]["id"], self.egfr.pk)
 
 
 # ---------------------------------------------------------------------------
@@ -1842,7 +1842,7 @@ class MLSplitGenerateTest(TestCase):
 
 class Batch3ProteinQueryFilterTest(HippieTestCase):
     """protein_query_api now honours the full shared filter set; protein-level
-    filters (score/source/experiment/swissprot) apply to the partner (B) side."""
+    filters (score/source/experiment/reviewed) apply to the partner (B) side."""
 
     def _query(self, q, **params):
         r = self.client.get(
@@ -1871,13 +1871,13 @@ class Batch3ProteinQueryFilterTest(HippieTestCase):
         self.assertEqual(len(rows), 1)
         self.assertTrue(all(i["score"] >= 0.88 for i in rows))
 
-    def test_swissprot_trembl_excludes_all_partners(self):
-        # Every fixture protein defaults is_swissprot=True → TrEMBL → empty.
+    def test_reviewed_unreviewed_excludes_all_partners(self):
+        # Every fixture protein defaults is_reviewed=True → unreviewed → empty.
         self.assertEqual(
-            len(self._query("BRCA1", swissprot="trembl")["interactions"]), 0
+            len(self._query("BRCA1", reviewed="unreviewed")["interactions"]), 0
         )
         self.assertGreaterEqual(
-            len(self._query("BRCA1", swissprot="swissprot")["interactions"]), 1
+            len(self._query("BRCA1", reviewed="reviewed")["interactions"]), 1
         )
 
     def test_max_score_filter(self):
@@ -2019,15 +2019,15 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
         )
         self.assertEqual(miss[0]["score"], -1.0)
 
-    def test_swissprot_filter(self):
-        Protein.objects.filter(pk=self.egfr.pk).update(is_swissprot=False)
+    def test_reviewed_filter(self):
+        Protein.objects.filter(pk=self.egfr.pk).update(is_reviewed=False)
         make_interaction(self.brca1, self.egfr, score=0.9)
         hit = self._post(
-            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], swissprot="swissprot"
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], reviewed="reviewed"
         )
         self.assertGreater(hit[0]["score"], 0)
         miss = self._post(
-            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}], swissprot="swissprot"
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}], reviewed="reviewed"
         )
         self.assertEqual(miss[0]["score"], -1.0)
 
@@ -2132,14 +2132,14 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
             uniprot_accession="P38398-3",
             general_protein=self.brca1,
         )
-        Protein.objects.filter(pk=iso_bad.pk).update(is_swissprot=False)
+        Protein.objects.filter(pk=iso_bad.pk).update(is_reviewed=False)
         make_interaction(iso_ok, self.tp53, score=0.7)
         make_interaction(iso_bad, self.tp53, score=0.6)
 
         results = self._post(
             [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
             include_isoforms=True,
-            swissprot="swissprot",
+            reviewed="reviewed",
         )
         isoform_tags = {r["isoform_uniprot_a"] for r in results}
         self.assertIn("P38398-2", isoform_tags)
