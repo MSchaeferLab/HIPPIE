@@ -15,10 +15,32 @@ from .models import (
     ProteinSynonym,
     GeneTissue,
     Publication,
+    ReleaseMeta,
     Source,
     Species,
+    SplitJob,
     Tissue,
 )
+
+
+@admin.register(ReleaseMeta)
+class ReleaseMetaAdmin(admin.ModelAdmin):
+    list_display = (
+        "version_label",
+        "release_number",
+        "release_date",
+        "int_median",
+        "int_q3",
+    )
+    ordering = ("-release_date", "-release_number")
+
+
+@admin.register(SplitJob)
+class SplitJobAdmin(admin.ModelAdmin):
+    list_display = ("id", "status", "progress", "step", "created_at", "finished_at")
+    list_filter = ("status",)
+    readonly_fields = ("id", "created_at", "finished_at")
+    ordering = ("-created_at",)
 
 
 @admin.register(Gene)
@@ -125,7 +147,11 @@ class InteractionAdmin(admin.ModelAdmin):
         "protein_2",
         "score",
     )
-    search_fields = ("=id", "protein_1__gene__entrez_name", "protein_2__gene__entrez_name")
+    search_fields = (
+        "=id",
+        "protein_1__gene__entrez_name",
+        "protein_2__gene__entrez_name",
+    )
     ordering = ("-score", "id")
     list_select_related = ("protein_1", "protein_2")
     autocomplete_fields = ("protein_1", "protein_2")
@@ -189,7 +215,11 @@ class BaitPreyAssociationAdmin(admin.ModelAdmin):
 @admin.register(NonInteraction)
 class NonInteractionAdmin(admin.ModelAdmin):
     list_display = ("id", "protein_1", "protein_2", "score")
-    search_fields = ("=id", "protein_1__gene__entrez_name", "protein_2__gene__entrez_name")
+    search_fields = (
+        "=id",
+        "protein_1__gene__entrez_name",
+        "protein_2__gene__entrez_name",
+    )
     ordering = ("-score", "id")
     list_select_related = ("protein_1", "protein_2")
     autocomplete_fields = ("protein_1", "protein_2")

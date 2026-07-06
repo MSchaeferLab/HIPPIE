@@ -149,9 +149,7 @@ class Command(BaseCommand):
         #     ]
         # )
         # gene_cache.update({g.entrez_id: g for g in new_genes})
-        self.stdout.write(
-            f"          Genes — {len(existing_genes):,} existing"
-        )
+        self.stdout.write(f"          Genes — {len(existing_genes):,} existing")
 
         tissues = set(sample_to_verbose.values())
         existing_tissues = Tissue.objects.filter(name__in=tissues)

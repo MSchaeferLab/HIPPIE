@@ -6,7 +6,7 @@
       "filename": "sec_ac.txt",
       "decompress": "none",
       "version": "UniProt Release 2026_02",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Wed, 10 Jun 2026 20:00:00 GMT",
       "etag": "\"2f345a3-653ebb0451000\""
     },
@@ -15,7 +15,7 @@
       "filename": "HUMAN_9606_idmapping.dat",
       "decompress": "gz",
       "version": "UniProt Release 2026_02",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Wed, 10 Jun 2026 20:00:00 GMT",
       "etag": "\"241700d-653ebb0451000\""
     },
@@ -23,9 +23,9 @@
       "url": "https://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Mammalia/Homo_sapiens.gene_info.gz",
       "filename": "Homo_sapiens.gene_info",
       "decompress": "gz",
-      "version": "Fri, 03 Jul 2026 08:39:15 GMT",
-      "fetched": "2026-07-03",
-      "last_modified": "Fri, 03 Jul 2026 08:39:15 GMT",
+      "version": "Mon, 06 Jul 2026 08:06:09 GMT",
+      "fetched": "2026-07-06",
+      "last_modified": "Mon, 06 Jul 2026 08:06:09 GMT",
       "etag": null
     },
     "intact_human": {
@@ -33,7 +33,7 @@
       "filename": "human.txt",
       "decompress": "zip",
       "version": "Wed, 14 Jan 2026 11:58:40 GMT",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Wed, 14 Jan 2026 11:58:40 GMT",
       "etag": "\"45cda05b-64857d43803b2\""
     },
@@ -43,7 +43,7 @@
       "filename": "intact.txt",
       "decompress": "zip",
       "version": "Wed, 14 Jan 2026 11:51:57 GMT",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Wed, 14 Jan 2026 11:51:57 GMT",
       "etag": "\"50836a8b-64857bc3f8ba1\""
     },
@@ -54,8 +54,8 @@
       "track_extracted": true,
       "version_regex": "BIOGRID-ALL-(.+)\\.mitab\\.txt",
       "version": "5.0.259",
-      "fetched": "2026-07-03",
-      "last_modified": "Fri, 03 Jul 2026 14:17:20 GMT",
+      "fetched": "2026-07-06",
+      "last_modified": "Mon, 06 Jul 2026 08:56:16 GMT",
       "etag": null
     },
     "gtex_sample_attrs": {
@@ -64,7 +64,7 @@
       "decompress": "none",
       "version_pinned": true,
       "version": "v11",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Thu, 15 Jan 2026 18:59:33 GMT",
       "etag": "\"4c45e25c3fc5ec92a97da0d4bcba1207\""
     },
@@ -74,7 +74,7 @@
       "decompress": "gz",
       "version_pinned": true,
       "version": "v11_2025-08-22",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Thu, 15 Jan 2026 19:04:13 GMT",
       "etag": "\"93ae0d49692e5afaa34411ea754c2742\""
     },
@@ -86,7 +86,7 @@
       "version_pinned": true,
       "version": "9.0.0",
       "_note": "Pinned, versioned Alliance URL — the release number in the path is the tracked version. Bump the URL (and the pipeline auto-updates filename+version) for a new release.",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Sun, 05 Apr 2026 03:40:06 GMT",
       "etag": "\"c684c49f4d6a25f2bb8b9f325b383db1\""
     },
@@ -113,7 +113,7 @@
       "gz": 0,
       "version_file_template": "build {2}.generated{3}",
       "version": "build 2024-06-24.generated2026/06/27",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Sat, 27 Jun 2026 05:09:52 GMT",
       "etag": "\"260f736-655353c43a953\""
     },
@@ -134,10 +134,10 @@
       "taxon": "7955",
       "db": "ZFIN",
       "gz": 0,
-      "version": "Fri, 03 Jul 2026 05:06:55 GMT",
-      "fetched": "2026-07-03",
-      "last_modified": "Fri, 03 Jul 2026 05:06:55 GMT",
-      "etag": "\"41ec8a-655ade4b4c188\""
+      "version": "Mon, 06 Jul 2026 05:06:31 GMT",
+      "fetched": "2026-07-06",
+      "last_modified": "Mon, 06 Jul 2026 05:06:31 GMT",
+      "etag": "\"41ec8a-655ea3cd8eae7\""
     },
     "xenbase_tropicalis": {
       "url": "https://download.xenbase.org/xenbase/GenePageReports/xenbase_v1.2.gpi.gz",
@@ -147,7 +147,7 @@
       "gz": 1,
       "version_pinned": true,
       "version": "v1.2",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Wed, 01 Jul 2026 10:56:05 GMT",
       "etag": "\"20a43d-6558a89bdf0c7\""
     },
@@ -159,7 +159,7 @@
       "gz": 1,
       "version_pinned": true,
       "version": "v1.2",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Wed, 01 Jul 2026 10:56:05 GMT",
       "etag": "\"20a43d-6558a89bdf0c7\""
     },
@@ -171,7 +171,7 @@
       "gz": 1,
       "version_pinned": true,
       "version": "fb_2026_01",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Sat, 07 Mar 2026 06:00:54 GMT",
       "etag": "\"765cd7ede5043a8d0be8134cd929e7ab\""
     },
@@ -182,7 +182,7 @@
       "db": "SGD",
       "gz": 0,
       "version": "Fri, 03 Jul 2026 09:11:37 GMT",
-      "fetched": "2026-07-03",
+      "fetched": "2026-07-06",
       "last_modified": "Fri, 03 Jul 2026 09:11:37 GMT",
       "etag": "\"eed0c66178bf92fc76e6a7e49e6f5cfa-2\""
     },

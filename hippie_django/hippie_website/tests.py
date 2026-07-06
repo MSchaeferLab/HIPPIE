@@ -7,8 +7,8 @@ Abdeckung:
   - interaction_query_api: bekanntes Pair, unbekanntes Pair, fehlendes Protein, zu großer Batch
   - browse_api: Grundstruktur, Tissue-Filter, Source-Filter, Min-Degree-Filter, Min-Score-Filter, Min-RPKM-Filter
   - browse_filter_meta: Struktur der Antwort
-  - network_query_view: POST mit Seeds, Score-Filter, Layer-0-Filter, Min-RPKM-Filter
-  - protein_detail_view / interaction_detail_view / noninteraction_detail_view: 200 und 404
+  - network_query_api: POST-JSON mit Seeds, Score-Filter, Min-RPKM-Filter (Partner), Non-Interactions, Seed-Flag
+  - interaction_detail_view / noninteraction_detail_view: 200 und 404
   - ProteinQuerySet.resolve(): alle vier Identifier-Typen
   - Canonical ordering in Interaction und NonInteraction
   - _protein_display() Helper (inkl. isoform_uid Parameter)
@@ -18,7 +18,7 @@ Abdeckung:
   - protein_query_api show=noninteractions / show=both
   - interaction_query_api show=noninteractions / show=both
   - InteractionQuerySet: between_proteins, above_score, in_tissues
-  - BaitPreyTest / BaitPreyAssociation Modelle
+  - BaitPreyAssociation Modell
   - _safe_int / _safe_float Helpers
 """
 
@@ -105,7 +105,9 @@ class HippieTestCase(TestCase):
             "EGFR", uniprot_name="EGFR_HUMAN", gene_id=1956, accession="P00533"
         )
         cls.ix = make_interaction(cls.brca1, cls.tp53, score=0.85)
-        cls.src = Source.objects.create(name="BioGRID", url="https://thebiogrid.org/")
+        cls.src = Source.objects.create(
+            name="BioGRID", url="https://thebiogrid.org/", n_connected_interactions=1
+        )
         cls.exp = ExperimentType.objects.create(
             name="Two-hybrid", psi_mi_code="MI:0018", quality_score=5.0
         )
@@ -153,16 +155,6 @@ class UrlSmokeTest(HippieTestCase):
     def test_information_get(self):
         r = self.client.get(reverse("hippie_website:information"))
         self.assertEqual(r.status_code, 200)
-
-    def test_protein_detail_get(self):
-        r = self.client.get(
-            reverse("hippie_website:protein_detail", args=[self.brca1.pk])
-        )
-        self.assertEqual(r.status_code, 200)
-
-    def test_protein_detail_404(self):
-        r = self.client.get(reverse("hippie_website:protein_detail", args=[99999]))
-        self.assertEqual(r.status_code, 404)
 
     def test_interaction_detail_get(self):
         r = self.client.get(
@@ -421,6 +413,19 @@ class BrowseApiTest(HippieTestCase):
         page = self._get(offset=0, limit=1)
         self.assertEqual(page["total"], all_data["total"])
 
+    def test_protein_entry_has_is_reviewed(self):
+        p = self._get()["proteins"][0]
+        self.assertIn("is_reviewed", p)
+
+    def test_reviewed_filter(self):
+        # Flip EGFR to unreviewed; the review-status filter must partition the set.
+        Protein.objects.filter(pk=self.egfr.pk).update(is_reviewed=False)
+        rev = self._get(reviewed="reviewed")
+        unrev = self._get(reviewed="unreviewed")
+        self.assertNotIn(self.egfr.pk, [p["id"] for p in rev["proteins"]])
+        self.assertEqual(unrev["total"], 1)
+        self.assertEqual(unrev["proteins"][0]["id"], self.egfr.pk)
+
 
 # ---------------------------------------------------------------------------
 # 5. browse_filter_meta
@@ -445,7 +450,7 @@ class BrowseFilterMetaTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 6. network_query (POST via Form)
+# 6. network_query (React shell + POST-JSON API)
 # ---------------------------------------------------------------------------
 
 
@@ -461,80 +466,50 @@ class NetworkQueryTest(HippieTestCase):
             gene=cls.tp53.gene, tissue=cls.tissue, median_rpkm=1.0
         )
 
-    def test_get_renders_form(self):
+    def _api(self, **body):
+        return self.client.post(
+            reverse("hippie_website:network_query_api"),
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+
+    def test_get_renders_shell(self):
         r = self.client.get(reverse("hippie_website:network_query"))
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "hippie-hero")
+        self.assertContains(r, "hippie-nq-app")
 
     def test_post_with_valid_seeds(self):
-        r = self.client.post(
-            reverse("hippie_website:network_query"),
-            {
-                "proteins": "BRCA1\nTP53",
-                "output_type": "browser_vis",
-                "layer_0": "on",
-                "score_min": "0.0",
-                "direction": "none",
-                "effect": "none",
-                "negatome_edges": "none",
-            },
-        )
+        r = self._api(proteins="BRCA1\nTP53")
         self.assertEqual(r.status_code, 200)
-        ctx = r.context
-        self.assertIsNotNone(ctx["network_result"])
-        self.assertGreater(ctx["network_result"]["edge_count"], 0)
+        self.assertGreater(r.json()["edge_count"], 0)
 
-    def test_min_rpkm_filter(self):
-        base = {
-            "proteins": "BRCA1\nTP53",
-            "output_type": "browser_vis",
-            "layer_0": "on",
-            "score_min": "0.0",
-            "direction": "none",
-            "effect": "none",
-            "negatome_edges": "none",
-            "tissue": self.tissue.pk,
-        }
-        # both proteins have rpkm=1.0; threshold below → edge survives
-        r_low = self.client.post(
-            reverse("hippie_website:network_query"), {**base, "min_rpkm": "0.5"}
-        )
-        self.assertGreater(r_low.context["network_result"]["edge_count"], 0)
-        # threshold above → edge filtered out
-        r_high = self.client.post(
-            reverse("hippie_website:network_query"), {**base, "min_rpkm": "2.0"}
-        )
-        self.assertEqual(r_high.context["network_result"]["edge_count"], 0)
+    def test_seed_interaction_flag_for_within_set_edge(self):
+        # BRCA1–TP53: both are seeds, so the edge is a seed interaction.
+        data = self._api(proteins="BRCA1\nTP53").json()
+        brca1_tp53 = [
+            e
+            for e in data["interactions"]
+            if {e["a"]["symbol"], e["b"]["symbol"]} == {"BRCA1", "TP53"}
+        ]
+        self.assertTrue(brca1_tp53)
+        self.assertTrue(all(e["seed_interaction"] for e in brca1_tp53))
 
-    def test_post_with_unknown_seed(self):
-        r = self.client.post(
-            reverse("hippie_website:network_query"),
-            {
-                "proteins": "FAKEPROT999",
-                "output_type": "browser_vis",
-                "direction": "none",
-                "effect": "none",
-                "negatome_edges": "none",
-            },
-        )
-        self.assertEqual(r.status_code, 200)
-        ctx = r.context
-        self.assertIsNotNone(ctx["network_result"]["error"])
+    def test_min_rpkm_filter_on_partner(self):
+        # Seed BRCA1 only; TP53 is the (non-seed) partner and must be expressed.
+        base = dict(proteins="BRCA1", tissue=[self.tissue.pk])
+        low = self._api(**base, min_rpkm=0.5).json()
+        self.assertGreater(low["edge_count"], 0)
+        high = self._api(**base, min_rpkm=2.0).json()
+        self.assertEqual(high["edge_count"], 0)
 
-    def test_post_unresolved_identifiers_reported(self):
-        r = self.client.post(
-            reverse("hippie_website:network_query"),
-            {
-                "proteins": "BRCA1\nFAKEPROT999",
-                "output_type": "browser_vis",
-                "layer_0": "on",
-                "direction": "none",
-                "effect": "none",
-                "negatome_edges": "none",
-            },
-        )
-        ctx = r.context
-        self.assertIn("FAKEPROT999", ctx["network_result"]["unresolved"])
+    def test_unknown_seed_returns_error(self):
+        r = self._api(proteins="FAKEPROT999")
+        self.assertEqual(r.status_code, 400)
+        self.assertIsNotNone(r.json()["error"])
+
+    def test_unresolved_identifiers_reported(self):
+        data = self._api(proteins="BRCA1\nFAKEPROT999").json()
+        self.assertIn("FAKEPROT999", data["unresolved"])
 
 
 # ---------------------------------------------------------------------------
@@ -662,20 +637,6 @@ class DetailViewContextTest(HippieTestCase):
             d = ctx[side]
             for key in ("protein", "uniprot_id", "gene_id", "symbol"):
                 self.assertIn(key, d)
-
-    def test_protein_detail_context_keys(self):
-        r = self.client.get(
-            reverse("hippie_website:protein_detail", args=[self.brca1.pk])
-        )
-        ctx = r.context
-        for key in ("protein", "symbol", "uniprot_id", "gene_id", "interaction_count"):
-            self.assertIn(key, ctx)
-
-    def test_protein_detail_interaction_count(self):
-        r = self.client.get(
-            reverse("hippie_website:protein_detail", args=[self.brca1.pk])
-        )
-        self.assertEqual(r.context["interaction_count"], 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1099,7 +1060,7 @@ class InteractionQuerySetMethodsTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 19. browse_api min_score filter
+# 19. browse_api min_avg_score filter (unified CommonFilters param)
 # ---------------------------------------------------------------------------
 
 
@@ -1109,17 +1070,17 @@ class BrowseApiMinScoreTest(HippieTestCase):
         self.assertEqual(r.status_code, 200)
         return json.loads(r.content)
 
-    def test_min_score_excludes_proteins_with_low_avg(self):
+    def test_min_avg_score_excludes_proteins_with_low_avg(self):
         # BRCA1 + TP53 share a 0.85 interaction; EGFR has none (avg_score=None).
-        data = self._get(min_score=0.5)
+        data = self._get(min_avg_score=0.5)
         self.assertEqual(data["total"], 2)
         for p in data["proteins"]:
             self.assertIsNotNone(p["avg_score"])
             self.assertGreaterEqual(p["avg_score"], 0.5)
 
-    def test_min_score_zero_is_no_op(self):
+    def test_min_avg_score_zero_is_no_op(self):
         all_data = self._get()
-        zero_data = self._get(min_score=0)
+        zero_data = self._get(min_avg_score=0)
         self.assertEqual(zero_data["total"], all_data["total"])
 
 
@@ -1129,6 +1090,16 @@ class BrowseApiMinScoreTest(HippieTestCase):
 
 
 class BrowseInteractionsApiTest(HippieTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        # brca1–tp53 is the interaction (cls.ix, one source + one experiment).
+        # Add a non-interaction so the result-type toggle / union has both kinds.
+        cls.ni = make_noninteraction(cls.brca1, cls.egfr, score=0.0)
+        # Populate denormalised n_sources / n_experiments so count assertions
+        # and count-column sorting exercise real values.
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
     def _get(self, **params):
         r = self.client.get(reverse("hippie_website:browse_interactions_api"), params)
         self.assertEqual(r.status_code, 200)
@@ -1146,9 +1117,26 @@ class BrowseInteractionsApiTest(HippieTestCase):
             "score",
             "source_count",
             "experiment_count",
+            "is_noninteraction",
             "detail_url",
         ):
             self.assertIn(key, row)
+        self.assertFalse(row["is_noninteraction"])
+
+    def test_rows_carry_review_status(self):
+        # Each interactor now carries is_reviewed for the [unreviewed] tag /
+        # Review Type export columns. Set brca1 reviewed, tp53 unreviewed
+        # (the model default is False, so pin both sides explicitly).
+        Protein.objects.filter(pk=self.brca1.pk).update(is_reviewed=True)
+        Protein.objects.filter(pk=self.tp53.pk).update(is_reviewed=False)
+        row = next(r for r in self._get()["interactions"] if not r["is_noninteraction"])
+        self.assertIn("is_reviewed", row["protein_a"])
+        self.assertIn("is_reviewed", row["protein_b"])
+        # brca1–tp53 pair: one reviewed, one not (side order depends on pk).
+        self.assertEqual(
+            {row["protein_a"]["is_reviewed"], row["protein_b"]["is_reviewed"]},
+            {True, False},
+        )
 
     def test_score_range_filter(self):
         # The single fixture interaction scores 0.85.
@@ -1160,6 +1148,104 @@ class BrowseInteractionsApiTest(HippieTestCase):
 
     def test_experiment_filter(self):
         self.assertEqual(self._get(experiment=self.exp.pk)["total"], 1)
+
+    def test_evidence_counts_denormalised(self):
+        # Symmetric 1/1 counts couldn't catch a source/experiment column
+        # swap in the response — give this interaction a second source so
+        # the two counts differ.
+        src2 = Source.objects.create(name="IntAct", url="https://www.ebi.ac.uk/intact/")
+        self.ix.sources.add(src2)
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
+        row = self._get()["interactions"][0]
+        self.assertEqual(row["source_count"], 2)
+        self.assertEqual(row["experiment_count"], 1)
+
+    def test_sort_by_sources_count(self):
+        # sort=sources rides n_sources — previously untested. Give a second
+        # interaction more sources than the shared brca1-tp53 fixture (1
+        # source) and confirm both sort directions order by the count.
+        src2 = Source.objects.create(name="IntAct", url="https://www.ebi.ac.uk/intact/")
+        ix2 = make_interaction(self.tp53, self.egfr, score=0.5)
+        ix2.sources.add(self.src, src2)
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
+        asc = self._get(sort="sources", dir="asc")
+        self.assertEqual([r["id"] for r in asc["interactions"]], [self.ix.pk, ix2.pk])
+        desc = self._get(sort="sources", dir="desc")
+        self.assertEqual([r["id"] for r in desc["interactions"]], [ix2.pk, self.ix.pk])
+
+    def test_sort_by_experiments_count(self):
+        # sort=experiments rides n_experiments — previously untested.
+        exp2 = ExperimentType.objects.create(
+            name="Affinity Capture-MS", psi_mi_code="MI:0004", quality_score=3.0
+        )
+        ix2 = make_interaction(self.tp53, self.egfr, score=0.5)
+        ix2.experiments.add(self.exp, exp2)
+        call_command("recompute_interaction_flags", stdout=StringIO())
+
+        asc = self._get(sort="experiments", dir="asc")
+        self.assertEqual([r["id"] for r in asc["interactions"]], [self.ix.pk, ix2.pk])
+        desc = self._get(sort="experiments", dir="desc")
+        self.assertEqual([r["id"] for r in desc["interactions"]], [ix2.pk, self.ix.pk])
+
+    def test_pagination_tiebreak_across_union_kinds(self):
+        # Interaction and NonInteraction have independent, overlapping id
+        # sequences — force an explicit id collision between the two tables
+        # (regression for the union pagination tiebreak fix) and confirm
+        # offset/limit pagination is deterministic: no row dropped or
+        # duplicated across the page boundary that lands on the tie.
+        tied_id = 999999
+        tied_ix = Interaction.objects.create(
+            pk=tied_id, protein_1=self.tp53, protein_2=self.egfr, score=0.5
+        )
+        tied_ni = NonInteraction.objects.create(
+            pk=tied_id, protein_1=self.tp53, protein_2=self.egfr, score=0.5
+        )
+
+        page1 = self._get(show="both", sort="score", dir="asc", offset=0, limit=2)
+        page2 = self._get(show="both", sort="score", dir="asc", offset=2, limit=2)
+        self.assertEqual(page1["total"], 4)
+
+        seen = [(r["id"], r["is_noninteraction"]) for r in page1["interactions"]]
+        seen += [(r["id"], r["is_noninteraction"]) for r in page2["interactions"]]
+        self.assertEqual(len(seen), 4)
+        self.assertEqual(len(set(seen)), 4)
+        self.assertIn((tied_ix.pk, False), seen)
+        self.assertIn((tied_ni.pk, True), seen)
+
+    def test_show_noninteractions(self):
+        data = self._get(show="noninteractions")
+        self.assertEqual(data["total"], 1)
+        row = data["interactions"][0]
+        self.assertTrue(row["is_noninteraction"])
+        self.assertEqual(row["source_count"], 0)
+        self.assertIn("/noninteraction/", row["detail_url"])
+
+    def test_show_both_unions_tables(self):
+        data = self._get(show="both")
+        self.assertEqual(data["total"], 2)
+        kinds = sorted(r["is_noninteraction"] for r in data["interactions"])
+        self.assertEqual(kinds, [False, True])
+
+    def test_source_filter_excludes_noninteractions_in_both(self):
+        # A source filter can never match a non-interaction → "both" collapses
+        # to interactions only.
+        data = self._get(show="both", source=self.src.pk)
+        self.assertEqual(data["total"], 1)
+        self.assertFalse(data["interactions"][0]["is_noninteraction"])
+
+    def test_sort_by_symbol_a_does_not_error(self):
+        # A third row with a protein_a symbol distinct from the shared
+        # brca1-* fixtures makes this order-sensitive — with only the two
+        # brca1-* rows, both canonicalize to the same protein_a and
+        # `sorted(symbols) == symbols` passed unconditionally.
+        make_noninteraction(self.tp53, self.egfr, score=0.0)
+
+        data = self._get(show="both", sort="symbol_a", dir="asc")
+        self.assertEqual(data["total"], 3)
+        symbols = [r["protein_a"]["symbol"] for r in data["interactions"]]
+        self.assertEqual(symbols, ["BRCA1", "BRCA1", "TP53"])
 
 
 # ---------------------------------------------------------------------------
@@ -1183,38 +1269,40 @@ class BrowseFilterMetaExperimentsTest(HippieTestCase):
 
 
 class NetworkQueryFilterTest(HippieTestCase):
-    def _post(self, **form):
-        base = {
-            "output_type": "browser_vis",
-            "direction": "none",
-            "effect": "none",
-            "negatome_edges": "none",
-            "score_min": "0.0",
+    def _api(self, **body):
+        return self.client.post(
+            reverse("hippie_website:network_query_api"),
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+
+    @staticmethod
+    def _symbols(data):
+        return {e["a"]["symbol"] for e in data["interactions"]} | {
+            e["b"]["symbol"] for e in data["interactions"]
         }
-        base.update(form)
-        return self.client.post(reverse("hippie_website:network_query"), base)
 
-    def test_score_min_above_threshold_returns_no_edges(self):
-        # Interaction has score=0.85; min=0.99 should exclude it
-        r = self._post(proteins="BRCA1\nTP53", layer_0="on", score_min="0.99")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.context["network_result"]["edge_count"], 0)
+    def test_min_score_above_threshold_returns_no_edges(self):
+        # brca1–tp53 has score 0.85; min_score 0.99 excludes it.
+        data = self._api(proteins="BRCA1\nTP53", min_score=0.99).json()
+        self.assertEqual(data["edge_count"], 0)
 
-    def test_layer_0_excludes_edges_outside_seed_set(self):
-        # Add TP53–EGFR; seeds are only BRCA1+TP53 so TP53–EGFR should not appear
+    def test_first_shell_includes_seed_partner(self):
+        # Seed BRCA1 → first-shell partner TP53 appears among endpoints.
+        data = self._api(proteins="BRCA1").json()
+        self.assertIn("TP53", self._symbols(data))
+
+    def test_first_shell_expands_to_new_partner(self):
+        # Add TP53–EGFR; seeding TP53 reaches EGFR (every edge touching a seed).
         make_interaction(self.tp53, self.egfr, score=0.7)
-        r = self._post(proteins="BRCA1\nTP53", layer_0="on")
-        result = r.context["network_result"]
-        self.assertEqual(result["edge_count"], 1)
+        data = self._api(proteins="TP53").json()
+        self.assertIn("EGFR", self._symbols(data))
 
-    def test_layer_1_includes_first_shell_partners(self):
-        # layer_1 expands to first-shell; BRCA1 seed → TP53 partner included
-        r = self._post(proteins="BRCA1", layer_1="on")
-        result = r.context["network_result"]
-        protein_names = {e["protein_a"] for e in result["interactions"]} | {
-            e["protein_b"] for e in result["interactions"]
-        }
-        self.assertIn("TP53", protein_names)
+    def test_show_noninteractions(self):
+        make_noninteraction(self.brca1, self.egfr, score=0.2)
+        data = self._api(proteins="BRCA1", show="noninteractions").json()
+        self.assertGreater(data["edge_count"], 0)
+        self.assertTrue(all(e["is_noninteraction"] for e in data["interactions"]))
 
 
 # ---------------------------------------------------------------------------
@@ -1534,10 +1622,9 @@ class MLSplitStatsTest(TestCase):
         from .views import _interaction_stats, _protein_stats
 
         params = SplitParams(**overrides)
-        interaction, degree_by_node, score_sum_by_node = _interaction_stats(
-            build_interaction_queryset(params)
-        )
-        protein = _protein_stats(params, degree_by_node, score_sum_by_node)
+        iqs = build_interaction_queryset(params)
+        interaction, degree_by_node, score_sum_by_node = _interaction_stats(iqs)
+        protein = _protein_stats(params, degree_by_node, score_sum_by_node, iqs)
         return interaction, protein
 
     def test_orphans_excluded_and_medians_are_filter_aware(self):
@@ -1593,6 +1680,18 @@ class MLSplitStatsTest(TestCase):
         self.assertEqual(payload["protein"]["n_orphaned_by_filter"], 2)
         self.assertEqual(payload["protein"]["median_avg_score"], 0.85)
         self.assertEqual(payload["interaction"]["n_interactions"], 2)
+        # Batch 6: the degree histogram now lives on the protein box, not the
+        # interaction box.
+        self.assertIn("degree_histogram", payload["protein"])
+        self.assertNotIn("degree_histogram", payload["interaction"])
+        # Filtered degrees are A:2, B:1, C:1 → bucket "1" holds B and C, "2"
+        # holds A. Checks the histogram is built from degree_by_node (moved
+        # with the relocation), not an empty/wrong dict.
+        degree_hist = {
+            b["label"]: b["count"] for b in payload["protein"]["degree_histogram"]
+        }
+        self.assertEqual(degree_hist["1"], 2)
+        self.assertEqual(degree_hist["2"], 1)
 
 
 class MLSplitPruneUnitTest(SimpleTestCase):
@@ -1699,11 +1798,19 @@ class MLSplitGenerateTest(TestCase):
             self.assertEqual(
                 summary.n_proteins, sum(s["n_proteins"] for s in summary.splits)
             )
+            # Individual split sizes: catches a swapped/zeroed split, which the
+            # sum-only check above can't (e.g. a 24-0-0 split sums the same as
+            # 12-6-6). Values are deterministic for this fixture + seed=1
+            # (verified stable across repeated runs).
+            by_name = {s["name"]: s for s in summary.splits}
+            self.assertEqual(by_name["train"]["n_proteins"], 12)
+            self.assertEqual(by_name["validation"]["n_proteins"], 6)
+            self.assertEqual(by_name["test"]["n_proteins"], 6)
             if summary.n_discarded_nodes > 0:
                 pre_prune = get_interaction_graph(params).number_of_nodes()
                 self.assertLess(summary.n_proteins, pre_prune)
 
-            for name in ("train", "val", "test"):
+            for name in ("train", "validation", "test"):
                 pos = (work_dir / f"{name}_pos.csv").read_text().splitlines()
                 neg = (work_dir / f"{name}_neg.csv").read_text().splitlines()
                 self.assertEqual(
@@ -1741,3 +1848,512 @@ class MLSplitGenerateTest(TestCase):
             )
         )
         self.assertEqual(mapping[iso.pk], "ACC000-2")
+
+
+# ---------------------------------------------------------------------------
+# Batch 3 — shared full-parity filters on the two query APIs
+# ---------------------------------------------------------------------------
+
+
+class Batch3ProteinQueryFilterTest(HippieTestCase):
+    """protein_query_api now honours the full shared filter set; protein-level
+    filters (score/source/experiment/reviewed) apply to the partner (B) side."""
+
+    def _query(self, q, **params):
+        r = self.client.get(
+            reverse("hippie_website:protein_query_api"), {"q": q, **params}
+        )
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def test_source_filter_limits_partners(self):
+        # brca1–tp53 carries BioGRID; add brca1–egfr with no source at all.
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        self.assertEqual(len(self._query("BRCA1")["interactions"]), 2)
+        only_src = self._query("BRCA1", source=self.src.pk)
+        partners = {i["partner"]["symbol"] for i in only_src["interactions"]}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_experiment_filter_limits_partners(self):
+        make_interaction(self.brca1, self.egfr, score=0.9)  # no experiment
+        rows = self._query("BRCA1", experiment=self.exp.pk)
+        partners = {i["partner"]["symbol"] for i in rows["interactions"]}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_min_score_filter(self):
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", min_score=0.88)["interactions"]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(all(i["score"] >= 0.88 for i in rows))
+
+    def test_reviewed_unreviewed_excludes_all_partners(self):
+        # Every fixture protein defaults is_reviewed=True → unreviewed → empty.
+        self.assertEqual(
+            len(self._query("BRCA1", reviewed="unreviewed")["interactions"]), 0
+        )
+        self.assertGreaterEqual(
+            len(self._query("BRCA1", reviewed="reviewed")["interactions"]), 1
+        )
+
+    def test_max_score_filter(self):
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", max_score=0.87)["interactions"]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(all(i["score"] <= 0.87 for i in rows))
+
+    def test_min_degree_filter(self):
+        # tp53's denormalised degree is 1 (its only interaction, with brca1,
+        # existed when recompute_protein_stats last ran); egfr's is 0.
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", min_degree=1)["interactions"]
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_min_avg_score_filter(self):
+        # tp53's denormalised avg_score is 0.85; egfr's is None (it had no
+        # interactions when recompute_protein_stats last ran).
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", min_avg_score=0.5)["interactions"]
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_tissue_filter(self):
+        tissue = Tissue.objects.create(name="Brain")
+        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_rpkm=1.0)
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        rows = self._query("BRCA1", tissue=tissue.pk, min_rpkm=0.5)["interactions"]
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_interaction_type_filter_limits_partners(self):
+        from .models import InteractionType
+
+        itype = InteractionType.objects.create(
+            name="direct interaction", psi_mi_code="MI:0407"
+        )
+        self.ix.interaction_types.add(itype)
+        make_interaction(self.brca1, self.egfr, score=0.9)  # no interaction_type
+        rows = self._query("BRCA1", interaction_type=itype.pk)["interactions"]
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
+    def test_noninteractions_excluded_when_source_like_filter_active(self):
+        # NonInteractions carry no sources, so a source filter must exclude
+        # them entirely rather than silently including every non-interaction.
+        make_noninteraction(self.brca1, self.egfr, score=0.3)
+        rows = self._query("BRCA1", show="both", source=self.src.pk)["interactions"]
+        self.assertTrue(all(not i["is_noninteraction"] for i in rows))
+        partners = {i["partner"]["symbol"] for i in rows}
+        self.assertEqual(partners, {"TP53"})
+
+
+class Batch3InteractionQueryFilterTest(HippieTestCase):
+    """interaction_query_api now returns entrez + is_noninteraction and applies
+    the full filter set; a match that fails a filter becomes a not-found row
+    (score -1) so every input pair still yields exactly one row."""
+
+    def _post(self, pairs, **body):
+        r = self.client.post(
+            reverse("hippie_website:interaction_query_api"),
+            data=json.dumps({"pairs": pairs, **body}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)["results"]
+
+    def test_entrez_and_type_fields_present(self):
+        r = self._post([{"a": "BRCA1", "b": "TP53", "input_order": 0}])[0]
+        self.assertEqual(r["entrez_a"], 672)
+        self.assertEqual(r["entrez_b"], 7157)
+        self.assertFalse(r["is_noninteraction"])
+
+    def test_not_found_pair_has_null_entrez(self):
+        r = self._post([{"a": "FAKEPROT", "b": "TP53", "input_order": 0}])[0]
+        self.assertIsNone(r["entrez_a"])
+
+    def test_min_score_miss_becomes_not_found_row(self):
+        # brca1–tp53 = 0.85; min_score 0.9 filters it out → one not-found row.
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], min_score=0.9
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["score"], -1.0)
+
+    def test_source_filter_match_and_miss(self):
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], source=[self.src.pk]
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        other = Source.objects.create(name="OtherDB", url="")
+        miss = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], source=[other.pk]
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_isoform_both_noninteraction_yields_single_row(self):
+        # A pair that is ONLY a documented non-interaction must yield exactly one
+        # row in isoform + both mode — no spurious not-found (-1) row alongside it.
+        make_noninteraction(self.brca1, self.egfr, score=0.3)
+        results = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
+            show="both",
+            include_isoforms=True,
+        )
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0]["is_noninteraction"])
+        self.assertGreaterEqual(results[0]["score"], 0)
+
+    def test_max_score_filter(self):
+        # brca1-tp53 = 0.85; max_score 0.5 excludes it → not-found row.
+        miss = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], max_score=0.5
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+        hit = self._post([{"a": "BRCA1", "b": "TP53", "input_order": 0}], max_score=0.9)
+        self.assertGreater(hit[0]["score"], 0)
+
+    def test_min_score_hit_returns_found_row(self):
+        # A threshold below the fixture's actual score must still return a match.
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], min_score=0.5
+        )
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0]["is_noninteraction"])
+        self.assertGreaterEqual(results[0]["score"], 0.5)
+
+    def test_experiment_filter_match_and_miss(self):
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], experiment=[self.exp.pk]
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        other = ExperimentType.objects.create(
+            name="Affinity chromatography", psi_mi_code="MI:0004", quality_score=3.0
+        )
+        miss = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], experiment=[other.pk]
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_reviewed_filter(self):
+        Protein.objects.filter(pk=self.egfr.pk).update(is_reviewed=False)
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], reviewed="reviewed"
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        miss = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}], reviewed="reviewed"
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_min_degree_filter(self):
+        # egfr's denormalised degree is 0 (it had no interactions when
+        # recompute_protein_stats last ran).
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        hit = self._post([{"a": "BRCA1", "b": "TP53", "input_order": 0}], min_degree=1)
+        self.assertGreater(hit[0]["score"], 0)
+        miss = self._post([{"a": "BRCA1", "b": "EGFR", "input_order": 0}], min_degree=1)
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_min_avg_score_filter(self):
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}], min_avg_score=0.5
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        # egfr's denormalised avg_score is None → fails the threshold.
+        miss = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}], min_avg_score=0.5
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_tissue_filter(self):
+        # Interaction-level tissue filtering requires BOTH endpoints to be
+        # expressed in the tissue, unlike the partner-only check used by
+        # protein_query_api.
+        tissue = Tissue.objects.create(name="Brain")
+        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_rpkm=1.0)
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            tissue=[tissue.pk],
+            min_rpkm=0.5,
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        # egfr's gene has no tissue expression recorded → fails the filter.
+        make_interaction(self.brca1, self.egfr, score=0.9)
+        miss = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
+            tissue=[tissue.pk],
+            min_rpkm=0.5,
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_interaction_type_filter_match_and_miss(self):
+        from .models import InteractionType
+
+        itype = InteractionType.objects.create(
+            name="direct interaction", psi_mi_code="MI:0407"
+        )
+        self.ix.interaction_types.add(itype)
+        hit = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            interaction_type=[itype.pk],
+        )
+        self.assertGreater(hit[0]["score"], 0)
+        other = InteractionType.objects.create(
+            name="physical association", psi_mi_code="MI:0915"
+        )
+        miss = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            interaction_type=[other.pk],
+        )
+        self.assertEqual(miss[0]["score"], -1.0)
+
+    def test_noninteraction_excluded_by_source_like_filter(self):
+        # NonInteractions carry no sources; a source filter must exclude them
+        # rather than treating the has_source_like check as a no-op.
+        make_noninteraction(self.brca1, self.egfr, score=0.3)
+        results = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
+            show="noninteractions",
+            source=[self.src.pk],
+        )
+        self.assertEqual(results[0]["score"], -1.0)
+
+    def test_scalar_sent_as_list_and_list_sent_as_scalar(self):
+        # min_score (a scalar field) sent as a single-element list, and source
+        # (a list field) sent as a bare scalar — the JSON-body adapter must
+        # unwrap/wrap these the same way the GET adapter's querystring
+        # semantics do (repeated keys vs. a single value).
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            min_score=[0.5],
+            source=self.src.pk,
+        )
+        self.assertEqual(len(results), 1)
+        self.assertGreaterEqual(results[0]["score"], 0.5)
+
+    def test_isoform_expansion_applies_protein_level_filter_per_combo(self):
+        iso_ok = Isoform.objects.create(
+            gene=self.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-2",
+            general_protein=self.brca1,
+        )
+        iso_bad = Isoform.objects.create(
+            gene=self.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-3",
+            general_protein=self.brca1,
+        )
+        Protein.objects.filter(pk=iso_bad.pk).update(is_reviewed=False)
+        make_interaction(iso_ok, self.tp53, score=0.7)
+        make_interaction(iso_bad, self.tp53, score=0.6)
+
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            include_isoforms=True,
+            reviewed="reviewed",
+        )
+        isoform_tags = {r["isoform_uniprot_a"] for r in results}
+        self.assertIn("P38398-2", isoform_tags)
+        self.assertNotIn("P38398-3", isoform_tags)
+
+
+class Batch3FilterMetaInteractionTypesTest(HippieTestCase):
+    def test_interaction_types_returned(self):
+        from .models import InteractionType
+
+        InteractionType.objects.create(name="direct interaction", psi_mi_code="MI:0407")
+        r = self.client.get(reverse("hippie_website:browse_filter_meta"))
+        data = json.loads(r.content)
+        self.assertIn("interaction_types", data)
+        names = [x["name"] for x in data["interaction_types"]]
+        self.assertIn("direct interaction", names)
+
+
+# ---------------------------------------------------------------------------
+# Batch 6 — ML Splits: tissue coverage over survivors, status queue position
+# ---------------------------------------------------------------------------
+
+
+class MLSplitFilteredOutTest(TestCase):
+    """Task 10: ``n_filtered_out`` counts proteins removed by the protein-level
+    filter (here a tissue filter) relative to the full protein table — distinct
+    from ``n_orphaned_by_filter`` (proteins that pass the filter but lose all
+    edges). ``tissue_coverage`` was removed from the stats payload."""
+
+    @classmethod
+    def setUpTestData(cls):
+        # Distinct genes per protein so the tissue filter is per-protein.
+        cls.a = make_protein("A", gene_id=101, accession="ACC_A")
+        cls.b = make_protein("B", gene_id=102, accession="ACC_B")
+        cls.c = make_protein("C", gene_id=103, accession="ACC_C")
+        cls.d = make_protein("D", gene_id=104, accession="ACC_D")
+
+        make_interaction(cls.a, cls.b, score=0.85)  # survives (both in Blood)
+        make_interaction(cls.c, cls.d, score=0.85)  # C, D removed by tissue filter
+        call_command("recompute_protein_stats", stdout=StringIO())
+
+        cls.blood = Tissue.objects.create(name="Blood")
+        # Only A and B are expressed in Blood → C and D are filtered out.
+        GeneTissue.objects.create(gene=cls.a.gene, tissue=cls.blood, median_rpkm=5.0)
+        GeneTissue.objects.create(gene=cls.b.gene, tissue=cls.blood, median_rpkm=5.0)
+
+    def test_filtered_out_counts_protein_level_removals(self):
+        from .services.generate_splits import SplitParams, build_interaction_queryset
+        from .views import _interaction_stats, _protein_stats
+
+        params = SplitParams(min_score=0.5, tissue_ids=(self.blood.pk,))
+        iqs = build_interaction_queryset(params)
+        _interaction, degree_by_node, score_sum = _interaction_stats(iqs)
+        protein = _protein_stats(params, degree_by_node, score_sum, iqs)
+
+        # Full table = 4 proteins; only A, B pass the Blood tissue filter.
+        self.assertEqual(protein["n_filtered_out"], 2)  # C, D removed by filter
+        self.assertEqual(protein["n_proteins"], 2)  # A, B survive with an edge
+        self.assertEqual(protein["n_orphaned_by_filter"], 0)  # no filter-orphans
+        # tissue_coverage was removed from the payload.
+        self.assertNotIn("tissue_coverage", protein)
+
+
+class MLSplitQueuePositionTest(TestCase):
+    """Batch 6: the status endpoint reports queue_position = number of PENDING
+    jobs created before this one (FIFO). RUNNING/DONE jobs never count, and a
+    picked-up (non-PENDING) job reports 0."""
+
+    def test_queue_position_counts_earlier_pending_only(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .models import SplitJob
+
+        base = timezone.now()
+        j_old = SplitJob.objects.create(params={}, status="PENDING")
+        j_run = SplitJob.objects.create(params={}, status="RUNNING")
+        j_new = SplitJob.objects.create(params={}, status="PENDING")
+        # created_at is auto_now_add → force deterministic ordering via update().
+        SplitJob.objects.filter(pk=j_old.pk).update(created_at=base)
+        SplitJob.objects.filter(pk=j_run.pk).update(
+            created_at=base + timedelta(seconds=1)
+        )
+        SplitJob.objects.filter(pk=j_new.pk).update(
+            created_at=base + timedelta(seconds=2)
+        )
+
+        def qpos(job):
+            resp = self.client.get(
+                reverse("hippie_website:browse_splits_status", args=[job.pk])
+            )
+            self.assertEqual(resp.status_code, 200)
+            return resp.json()["queue_position"]
+
+        # j_new: one earlier PENDING (j_old); the earlier RUNNING job is excluded.
+        self.assertEqual(qpos(j_new), 1)
+        # j_old: nothing precedes it.
+        self.assertEqual(qpos(j_old), 0)
+        # A RUNNING job always reports 0 regardless of predecessors.
+        self.assertEqual(qpos(j_run), 0)
+
+    def test_queue_position_counts_all_earlier_pending_not_just_presence(self):
+        # Regression guard: a boolean "anything pending ahead" check would
+        # also report 1 here, indistinguishable from the real FIFO count.
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .models import SplitJob
+
+        base = timezone.now()
+        jobs = [SplitJob.objects.create(params={}, status="PENDING") for _ in range(4)]
+        for i, job in enumerate(jobs):
+            SplitJob.objects.filter(pk=job.pk).update(
+                created_at=base + timedelta(seconds=i)
+            )
+
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[jobs[-1].pk])
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["queue_position"], 3)
+
+    def test_queue_position_tiebreaks_identical_created_at(self):
+        # Two PENDING jobs sharing the same created_at (e.g. same-millisecond
+        # creation) must still be given a strict, deterministic order rather
+        # than both counting (or neither counting) the other.
+        from django.utils import timezone
+
+        from .models import SplitJob
+
+        now = timezone.now()
+        j1 = SplitJob.objects.create(params={}, status="PENDING")
+        j2 = SplitJob.objects.create(params={}, status="PENDING")
+        SplitJob.objects.filter(pk__in=[j1.pk, j2.pk]).update(created_at=now)
+
+        earlier, later = sorted([j1, j2], key=lambda j: j.pk)
+
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[later.pk])
+        )
+        self.assertEqual(resp.json()["queue_position"], 1)
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[earlier.pk])
+        )
+        self.assertEqual(resp.json()["queue_position"], 0)
+
+
+class MLSplitEndpointNotFoundTest(TestCase):
+    """browse_splits_status/download/create for a nonexistent or not-yet-done
+    job id must 404, not 500 or silently succeed."""
+
+    def test_status_404_for_unknown_job_id(self):
+        import uuid
+
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[uuid.uuid4()])
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_download_404_for_unknown_job_id(self):
+        import uuid
+
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_download", args=[uuid.uuid4()])
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_download_404_for_job_not_yet_done(self):
+        from .models import SplitJob
+
+        job = SplitJob.objects.create(params={}, status="PENDING")
+        resp = self.client.get(
+            reverse("hippie_website:browse_splits_download", args=[job.pk])
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_create_enqueues_job_and_returns_202(self):
+        from unittest.mock import patch
+
+        from .models import SplitJob
+
+        with patch("hippie_website.views.run_split_job.delay") as mock_delay:
+            resp = self.client.post(
+                reverse("hippie_website:browse_splits_create"),
+                data=json.dumps({}),
+                content_type="application/json",
+            )
+        self.assertEqual(resp.status_code, 202)
+        payload = resp.json()
+        self.assertEqual(payload["status"], "PENDING")
+        job = SplitJob.objects.get(pk=payload["job_id"])
+        mock_delay.assert_called_once_with(str(job.id))
+
+    def test_create_400_for_invalid_params(self):
+        resp = self.client.post(
+            reverse("hippie_website:browse_splits_create"),
+            data=json.dumps({"min_score": 2.0}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)

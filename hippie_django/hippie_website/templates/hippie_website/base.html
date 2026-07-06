@@ -25,6 +25,24 @@
 
 <body>
 
+{# Active-release confidence thresholds — consumed by React via window.HIPPIE_RELEASE. #}
+{% if current_release %}
+<script>
+  window.HIPPIE_RELEASE = {
+    intMedian: {{ current_release.int_median|default:0.00 }},
+    intQ3: {{ current_release.int_q3|default:0.00 }},
+    nonintMedian: {{ current_release.nonint_median|default:0.00 }},
+    nonintQ3: {{ current_release.nonint_q3|default:0.00 }},
+    bothMedian: {{ current_release.both_median|default:0.00 }},
+    bothQ3: {{ current_release.both_q3|default:0.00 }}
+  };
+</script>
+{% else %}
+<script>
+  window.HIPPIE_RELEASE = { intMedian: 0.00, intQ3: 0.00, nonintMedian: 0.00, nonintQ3: 0.00, bothMedian: 0.00, bothQ3: 0.00 };
+</script>
+{% endif %}
+
 {#   ===================================================== #}
 {#   Tier 1 — white top bar                                #}
 {#   ===================================================== #}
@@ -106,8 +124,8 @@
     </span>
     <div class="d-flex gap-4">
       <a href="{% url 'hippie_website:information' %}">Documentation</a>
-      <a href="https://doi.org/10.1093/nar/gkw985" target="_blank" rel="noopener">
-        Cite: Alanis-Lobato <em>et al.</em> NAR 2017
+      <a href="{% url 'hippie_website:information' %}#cite">
+        Citation
       </a>
     </div>
   </div>

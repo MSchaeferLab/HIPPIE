@@ -49,16 +49,16 @@
       <li><a href="#score">Score filter.</a></li>
       <li><a href="#type">Interaction type filter.</a></li>
       <li><a href="#tissue">Tissue filter.</a></li>
-      <li><a href="#function">Functional filter.</a></li>
       <li><a href="#export">Exporting query results.</a></li>
       <li><a href="#browsing">Browsing the HIPPIE proteome.</a></li>
       <li><a href="#cytoscape">Cytoscape visualization of HIPPIE output.</a></li>
       <li><a href="#download">Download the repository.</a></li>
       <li><a href="#example">Example of a HIPPIE workflow.</a></li>
       <li><a href="#sources">Sources.</a></li>
+      <li><a href="#resources">Resource versions.</a></li>
       <li><a href="#api">HIPPIE API.</a></li>
       <li><a href="#remarks">General technical remarks.</a></li>
-      <li><a href="#cite">Related manuscripts (how to cite).</a></li>
+      <li><a href="#cite">Citation.</a></li>
       <li><a href="#contact">Contact.</a></li>
     </ul>
   </div>
@@ -201,8 +201,10 @@
     <h5 id="score" class="section-label section-label--inline mt-3">Score filter</h5>
     <p class="mt-2">
       A threshold on the HIPPIE confidence score can be chosen. The user can either specify a custom
-      value between 0 and 1 or choose a predefined confidence level: medium confidence (0.63 - second
-      quartile of the HIPPIE score distribution) or high confidence (0.73 - third quartile). If both
+      value between 0 and 1 or choose a predefined confidence level: medium confidence ({{ current_release.int_median|default:0.00|floatformat:2 }} for interactions,
+      {{ current_release.nonint_median|default:0.00|floatformat:2 }} for non-interactions - second
+      quartile of the HIPPIE score distribution) or high confidence ({{ current_release.int_q3|default:0.00|floatformat:2 }} for interactions,
+      {{ current_release.nonint_q3|default:0.00|floatformat:2 }} for non-interactions - third quartile). If both
       custom and predefined thresholds are selected, the higher one is applied.
     </p>
     <p>Note, that the confidence filter is not applied to interactions uploaded by the user.</p>
@@ -231,16 +233,6 @@
       The tissue expression RNA-Seq data was taken from
       <a href="http://gtexportal.org/" target="_blank" rel="noopener">GTEx</a>. A gene was considered
       to be expressed in a given tissue if it showed an RPKM &gt;= 1.
-    </p>
-
-    <h5 id="function" class="section-label section-label--inline mt-3">Functional filter</h5>
-    <p class="mt-2">
-      Interactions can be filtered for annotation of
-      <a href="http://www.geneontology.org/" target="_blank" rel="noopener">GO</a> and
-      <a href="http://www.nlm.nih.gov/mesh/" target="_blank" rel="noopener">MeSH</a> terms.
-      Interactions are associated with the lowest common ancestor within the hierarchy of terms
-      associated with the interacting proteins. Selection of a more generic term causes interactions
-      annotated with a more specific term to pass the filter.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
@@ -294,7 +286,7 @@
       exported from HIPPIE and activate the columns which should be imported.
     </p>
     <p>
-      In our example the 'score' and the 'uploaded interaction' columns have been selected and are
+      In our example the 'score' and the 'seed interaction' columns have been selected and are
       imported as edge features. In the resulting Cytoscape network the score attribute is size
       encoded: high confidence interactions are drawn with a thicker line as compared to those with
       fewer experimental evidence. The information whether an interaction is from HIPPIE or uploaded by
@@ -411,23 +403,111 @@
   </div>
 </div>
 
+{# ── Resource versions ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="resources" class="section-label">Resource versions</h4>
+    <p>
+      Source databases and reference resources integrated in the current HIPPIE release{% if current_release %}
+      (<strong>v{{ current_release.version_label }}</strong>{% if current_release.release_date %}, {{ current_release.release_date }}{% endif %}){% endif %}.
+    </p>
+    {% if current_release.resource_versions %}
+    <div style="overflow-x:auto;">
+      <table class="table table-sm" style="max-width:32rem;">
+        <thead>
+          <tr><th>Resource</th><th>Version</th></tr>
+        </thead>
+        <tbody>
+          {% for name, version in current_release.resource_versions.items %}
+          <tr><td>{{ name }}</td><td><code>{{ version }}</code></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted-sm">No resource version information is available for the current release.</p>
+    {% endif %}
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
 {# ── HIPPIE API ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <h4 id="api" class="section-label">HIPPIE API</h4>
+    <h4 id="api" class="section-label">HIPPIE REST API</h4>
     <p>
-      HIPPIE users can query the resource via our REST web service. This means that HIPPIE can be
-      easily integrated in any Bioinformatics pipeline using the following template:
+      HIPPIE can be queried programmatically through a small set of JSON endpoints, so it can be
+      integrated into any bioinformatics pipeline. All paths below are relative to the HIPPIE base
+      URL and return <code>application/json</code> unless noted otherwise. Parameters marked
+      <em>(repeatable)</em> may be supplied more than once (e.g. <code>&amp;source=1&amp;source=2</code>).
     </p>
-    <div class="hippie-card--muted mb-3">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;">http://cbdm-01.zdv.uni-mainz.de/~mschaefer/hippie/queryHIPPIE.php?<b>proteins=</b>xxx,xxx;xxx|xxx&amp;<b>layers=</b>xxx&amp;<b>conf_thres=</b>xxx&amp;<b>out_type=</b>xxx</code>
-    </div>
+
+    <p class="mb-1"><strong>Shared filter parameters</strong> (accepted by most endpoints):</p>
     <ul>
-      <li><b>proteins</b> = One or more proteins of interest separated by ",", ";" or "|" (<em>mandatory</em>).</li>
-      <li><b>layers</b> = 0 to query interactions within the input set or 1 to query interactions between the input set and HIPPIE (<em>optional, default = 1</em>).</li>
-      <li><b>conf_thres</b> = Only protein interactions with confidence scores above this threshold, which can range between 0 an 1, are considered (<em>optional, default = 0</em>).</li>
-      <li><b>out_type</b> = The query output format. <em>browser</em> shows the list of interactions in a table in HIPPIE, <em>viz</em> shows a network visualization, <em>mitab</em> generates a MITAB file and <em>conc_file</em> generates a simple tab-separated text file (<em>optional, default = conc_file</em>).</li>
+      <li><code>show</code> = <code>interactions</code>, <code>noninteractions</code> or <code>both</code>.</li>
+      <li><code>min_score</code> / <code>max_score</code> = confidence-score bounds (0–1).</li>
+      <li><code>source</code>, <code>experiment</code>, <code>interaction_type</code>, <code>tissue</code> = numeric ids <em>(repeatable)</em>.</li>
+      <li><code>min_rpkm</code> = minimum tissue expression (used together with <code>tissue</code>).</li>
+      <li><code>min_degree</code>, <code>min_avg_score</code> = protein-level thresholds.</li>
+      <li><code>reviewed</code> = <code>both</code>, <code>reviewed</code> or <code>unreviewed</code>.</li>
+      <li><code>include_isoforms</code> = <code>1</code> to expand canonical proteins to their isoforms.</li>
     </ul>
+
+    <p class="mt-4 mb-1"><strong>Protein query</strong></p>
+    <div class="hippie-card--muted mb-2">
+      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/query/?<b>q=</b>TP53&amp;show=both&amp;min_score=0.63</code>
+    </div>
+    <p>
+      Interactions of a single protein. <code>q</code> (an identifier — gene symbol, UniProt accession
+      or Entrez id) is required; the shared filters apply. Returns
+      <code>{ query_protein, isoforms_included, expanded_proteins, interactions[], error }</code>.
+    </p>
+
+    <p class="mt-4 mb-1"><strong>Batch pairwise lookup</strong></p>
+    <div class="hippie-card--muted mb-2">
+      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>POST</b> /api/interaction/ &nbsp;&nbsp;(JSON body)</code>
+    </div>
+    <p>
+      Looks up the recorded interaction for each supplied pair. Body:
+      <code>{ "pairs": [ { "a": "TP53", "b": "MDM2", "input_order": 0 } ], … filters }</code>
+      (up to 200 pairs per request). Returns <code>{ results: [ … ] }</code>; a row with
+      <code>score = -1.0</code> means that pair was not found.
+    </p>
+
+    <p class="mt-4 mb-1"><strong>Network expansion</strong></p>
+    <div class="hippie-card--muted mb-2">
+      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>POST</b> /api/network/ &nbsp;&nbsp;(JSON body)</code>
+    </div>
+    <p>
+      Builds the first-shell sub-network around a set of seed proteins (every edge touching a seed).
+      Body: <code>{ "proteins": "TP53 BRCA1 ATM", … filters }</code> (identifiers separated by
+      whitespace, commas or semicolons). Returns
+      <code>{ node_count, edge_count, interactions[], seed_ids, unresolved, truncated, total_edges, error }</code>.
+    </p>
+
+    <p class="mt-4 mb-1"><strong>Browse (paginated)</strong></p>
+    <div class="hippie-card--muted mb-2">
+      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/browse/?offset=0&amp;limit=50&amp;sort=degree&amp;dir=desc<br><b>GET</b> /api/browse/interactions/?offset=0&amp;limit=50&amp;show=both</code>
+    </div>
+    <p>
+      <code>/api/browse/</code> returns a page of proteins <code>{ total, proteins[] }</code> (each
+      protein carries <code>degree</code>, <code>avg_score</code> and <code>is_reviewed</code>);
+      <code>/api/browse/interactions/</code> returns a page of interactions
+      <code>{ total, interactions[] }</code>. Both accept <code>offset</code>, <code>limit</code>
+      (≤&nbsp;200), a free-text <code>q</code>, <code>sort</code>/<code>dir</code>, and the shared filters.
+    </p>
+
+    <p class="mt-4 mb-1"><strong>Bulk export (TSV)</strong></p>
+    <div class="hippie-card--muted mb-2">
+      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/browse/export/?<b>mode=</b>interactions&amp;show=both</code>
+    </div>
+    <p>
+      Streams the filtered result set as a tab-separated file (<code>mode=proteins</code> or
+      <code>mode=interactions</code>, using the same filters as the matching browse endpoint).
+      Capped at 50&nbsp;000 rows; the response sets the header <code>X-Export-Truncated: 1</code>
+      when the cap is reached.
+    </p>
+
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>
@@ -448,12 +528,19 @@
 {# ── Related manuscripts ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <h4 id="cite" class="section-label">Related manuscripts</h4>
+    <h4 id="cite" class="section-label">Citation</h4>
+    <p>If you use HIPPIE in your research, please cite:</p>
+    <p style="line-height:1.8;">
+      Alanis-Lobato G, Andrade-Navarro MA, &amp; Schaefer MH. (2016).
+      <i>HIPPIE v2.0: enhancing meaningfulness and reliability of protein-protein interaction networks</i>.
+      Nucleic Acids Research, gkw985
+      [<a href="https://doi.org/10.1093/nar/gkw985" target="_blank" rel="noopener">link</a>].
+    </p>
+    <p class="mb-1"><strong>Related manuscripts:</strong></p>
     <ul style="line-height:1.8;">
-      <li>Schaefer MH, Fontaine J-F, Vinayagam A, Porras P, Wanker EE, et al. (2012) <i>HIPPIE: Integrating Protein Interaction Networks with Experiment Based Quality Scores</i>. PLoS ONE, 7(2): e31826 [<a href="http://www.plosone.org/article/info%3Adoi%2F10.1371%2Fjournal.pone.0031826" target="_blank" rel="noopener">link</a>]</li>
+      <li>Schaefer MH, Fontaine J-F, Vinayagam A, Porras P, Wanker EE, et al. (2012) <i>HIPPIE: Integrating Protein Interaction Networks with Experiment Based Quality Scores</i>. PLoS ONE, 7(2): e31826 [<a href="https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0031826" target="_blank" rel="noopener">link</a>]</li>
       <li>Schaefer MH, Lopes TJS, Mah N, Shoemaker JE, Matsuoka Y, et al. (2013) <i>Adding Protein Context to the Human Protein-Protein Interaction Network to Reveal Meaningful Interactions</i>. PLoS Computational Biology, 9(1): e1002860 [<a href="http://www.ploscompbiol.org/article/info%3Adoi%2F10.1371%2Fjournal.pcbi.1002860" target="_blank" rel="noopener">link</a>]</li>
       <li>Suratanee A, Schaefer MH, Betts M, Soons Z, Mannsperger H, et al. (2014) <i>Characterizing Protein Interactions Employing a Genome-Wide siRNA Cellular Phenotyping Screen</i>. PLoS Computational Biology, 10.9: e1003814 [<a href="http://www.ploscompbiol.org/article/info%3Adoi%2F10.1371%2Fjournal.pcbi.1003814" target="_blank" rel="noopener">link</a>]</li>
-      <li>Alanis-Lobato G, Andrade-Navarro MA, &amp; Schaefer MH. (2016). <i>HIPPIE v2.0: enhancing meaningfulness and reliability of protein-protein interaction networks</i>. Nucleic Acids Research, gkw985 [<a href="http://nar.oxfordjournals.org/content/early/2016/10/28/nar.gkw985" target="_blank" rel="noopener">link</a>]</li>
     </ul>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>

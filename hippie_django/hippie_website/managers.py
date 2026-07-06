@@ -114,7 +114,9 @@ class ProteinQuerySet(models.QuerySet):
     # Tissue filtering
     # ------------------------------------------------------------------
 
-    def expressed_in(self, tissue_ids: list[int], min_rpkm: float | None = None) -> "ProteinQuerySet":
+    def expressed_in(
+        self, tissue_ids: list[int], min_rpkm: float | None = None
+    ) -> "ProteinQuerySet":
         """Filter to proteins expressed in *any* of the given tissues."""
         if min_rpkm is not None:
             return self.filter(
@@ -134,7 +136,7 @@ class ProteinManager(models.Manager):
     def with_browse_annotations(self):
         return self.get_queryset().with_browse_annotations()
 
-    def expressed_in(self, tissue_ids, min_rpkm = None):
+    def expressed_in(self, tissue_ids, min_rpkm=None):
         return self.get_queryset().expressed_in(tissue_ids, min_rpkm)
 
 
@@ -218,7 +220,9 @@ class InteractionQuerySet(models.QuerySet):
     # Tissue filtering  (both interactors must be expressed)
     # ------------------------------------------------------------------
 
-    def in_tissues(self, tissue_ids: list[int], min_rpkm: float | None = None) -> "InteractionQuerySet":
+    def in_tissues(
+        self, tissue_ids: list[int], min_rpkm: float | None = None
+    ) -> "InteractionQuerySet":
         """
         Keep interactions where *both* proteins are expressed in at least
         one of the given tissues.
@@ -303,4 +307,3 @@ class InteractionManager(models.Manager):
 
     def network_query(self, protein_ids, **kwargs):
         return self.get_queryset().network_query(protein_ids, **kwargs)
-

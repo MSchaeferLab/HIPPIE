@@ -241,6 +241,28 @@ a:hover { color: var(--hippie-accent); text-decoration: underline; }
 .score-med  { background: #fef3e2;                   color: var(--hippie-score-med);  }
 .score-low  { background: var(--hippie-accent-soft); color: var(--hippie-score-low);  }
 
+/* Small muted marker for proteins whose review status is unreviewed. */
+.unreviewed-tag {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  font-weight: 500;
+  color: var(--hippie-ink-muted);
+  margin-left: .35rem;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+/* Dot on the Search button signalling unapplied filter changes. */
+.search-dirty-dot {
+  display: inline-block;
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: #fff;
+  margin-left: .4rem;
+  vertical-align: middle;
+}
+
 /* ==========================================================
    Table
    ========================================================== */

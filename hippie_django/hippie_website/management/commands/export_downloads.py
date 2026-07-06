@@ -19,8 +19,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
-import statistics
-
 from django.core.management.base import BaseCommand
 from django.db.models import Count, QuerySet
 from django.utils import timezone
@@ -33,6 +31,7 @@ from hippie_website.models import (
     NonInteraction,
     Protein,
 )
+from hippie_website.stats_utils import compute_quartiles
 
 MITAB_FILENAME = "HIPPIE-current.mitab.txt"
 TXT_FILENAME = "HIPPIE-current.txt"
@@ -232,20 +231,12 @@ def _add(bucket: Bucket, p1: int, p2: int, score: float, p2g: dict[int, int]) ->
 
 
 def _fmt_quartiles(scores: list[float]) -> str:
-    n = len(scores)
-    if n == 0:
+    if not scores:
         return "score: (no rows)"
-    s = sorted(scores)
-    mean = statistics.fmean(s)
-    if n >= 2:
-        q1, median, q3 = statistics.quantiles(s, n=4, method="inclusive")
-        std = statistics.stdev(s)
-    else:
-        q1 = median = q3 = s[0]
-        std = 0.0
+    q = compute_quartiles(scores)
     return (
-        f"score: min={s[0]:.4f} Q1={q1:.4f} median={median:.4f} "
-        f"Q3={q3:.4f} max={s[-1]:.4f} mean={mean:.4f} std={std:.4f}"
+        f"score: min={q['min']:.4f} Q1={q['q1']:.4f} median={q['median']:.4f} "
+        f"Q3={q['q3']:.4f} max={q['max']:.4f} mean={q['mean']:.4f} std={q['std']:.4f}"
     )
 
 

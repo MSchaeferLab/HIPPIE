@@ -7,9 +7,10 @@
 {% csrf_token %}
 <script>
   window.HIPPIE_IQ_CONFIG = {
-    apiUrl:    "{% url 'hippie_website:interaction_query_api' %}",
-    maxPairs:  5000,
-    batchSize: 100,
+    apiUrl:        "{% url 'hippie_website:interaction_query_api' %}",
+    filterMetaUrl: "{% url 'hippie_website:browse_filter_meta' %}",
+    maxPairs:      5000,
+    batchSize:     100,
   };
 </script>
 <div id="hippie-iq-app"></div>

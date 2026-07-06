@@ -277,7 +277,7 @@ class EdgePartition:
 # Top-level entry point called by tasks.py
 # ---------------------------------------------------------------------------
 
-SPLIT_NAMES = ["train", "val", "test"]
+SPLIT_NAMES = ["train", "validation", "test"]
 
 
 def generate_splits(params: SplitParams, work_dir: Path, cb) -> SplitSummary:

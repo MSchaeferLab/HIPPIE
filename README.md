@@ -191,19 +191,19 @@ docker compose exec web python manage.py update_homology_data \
     --ncbi_gene_info_file data/Homo_sapiens.gene_info \
     --intact_file        data/intact.txt
 
-# 5. Load tissue information
+# 5. Rescoring
+docker compose exec web python manage.py hippie_update --rescore-all
+
+# 6. Import bait-prey association and negative interaction (non-interaction) data
+# Requires data/POD_flat.pq — place the file in hippie_django/data/ before running
+docker compose exec web python manage.py import_pod_data --file data/POD_flat.pq
+
+# 7. Load tissue information
 # Versions change, check what version is downloaded
 docker compose exec web python manage.py update_tissue_data \
     --gct-path               data/GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct \
     --annotation-sample-path data/GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt \
     --entrez-homo-path       data/Homo_sapiens.gene_info
-
-# 6. Rescoring
-docker compose exec web python manage.py hippie_update --rescore-all
-
-# 7. Import bait-prey association and negative interaction (non-interaction) data
-# Requires data/POD_flat.pq — place the file in hippie_django/data/ before running
-docker compose exec web python manage.py import_pod_data --file data/POD_flat.pq
 ```
 
 `collectstatic` runs automatically on each `web` boot; migrations are manual

@@ -1,8 +1,14 @@
 // Shared utilities and components used by all React pages.
 
+// Confidence thresholds come from the active release (window.HIPPIE_RELEASE,
+// injected by base.html); fall back to the documented v3.0 values.
+const _REL = (typeof window !== "undefined" && window.HIPPIE_RELEASE) || {};
+const MED_THRESHOLD = _REL.intMedian ?? 0.00;
+const HIGH_THRESHOLD = _REL.intQ3 ?? 0.00;
+
 export function scoreClass(s) {
-  if (s >= 0.72) return "score-badge score-high";
-  if (s >= 0.63) return "score-badge score-med";
+  if (s >= HIGH_THRESHOLD) return "score-badge score-high";
+  if (s >= MED_THRESHOLD) return "score-badge score-med";
   return "score-badge score-low";
 }
 
@@ -109,4 +115,10 @@ export function PageSizeSelect({ pageSize, onChange }) {
 export function SortableTh({ sortKey, currentKey, currentDir, onSort, children, className="" }) {
   const cls = [className, currentKey === sortKey ? `sorted-${currentDir}` : ""].join(" ").trim();
   return <th className={cls} onClick={() => onSort(sortKey)}>{children}</th>;
+}
+
+// Read a cookie value by name (used for the Django CSRF token in POST fetches).
+export function getCookie(name) {
+  const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+  return m ? decodeURIComponent(m[1]) : "";
 }
