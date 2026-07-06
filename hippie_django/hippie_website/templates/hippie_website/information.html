@@ -49,7 +49,6 @@
       <li><a href="#score">Score filter.</a></li>
       <li><a href="#type">Interaction type filter.</a></li>
       <li><a href="#tissue">Tissue filter.</a></li>
-      <li><a href="#function">Functional filter.</a></li>
       <li><a href="#export">Exporting query results.</a></li>
       <li><a href="#browsing">Browsing the HIPPIE proteome.</a></li>
       <li><a href="#cytoscape">Cytoscape visualization of HIPPIE output.</a></li>
@@ -202,8 +201,10 @@
     <h5 id="score" class="section-label section-label--inline mt-3">Score filter</h5>
     <p class="mt-2">
       A threshold on the HIPPIE confidence score can be chosen. The user can either specify a custom
-      value between 0 and 1 or choose a predefined confidence level: medium confidence ({{ current_release.int_median|default:0.63|floatformat:2 }} - second
-      quartile of the HIPPIE score distribution) or high confidence ({{ current_release.int_q3|default:0.72|floatformat:2 }} - third quartile). If both
+      value between 0 and 1 or choose a predefined confidence level: medium confidence ({{ current_release.int_median|default:0.00|floatformat:2 }} for interactions,
+      {{ current_release.nonint_median|default:0.00|floatformat:2 }} for non-interactions - second
+      quartile of the HIPPIE score distribution) or high confidence ({{ current_release.int_q3|default:0.00|floatformat:2 }} for interactions,
+      {{ current_release.nonint_q3|default:0.00|floatformat:2 }} for non-interactions - third quartile). If both
       custom and predefined thresholds are selected, the higher one is applied.
     </p>
     <p>Note, that the confidence filter is not applied to interactions uploaded by the user.</p>
@@ -232,16 +233,6 @@
       The tissue expression RNA-Seq data was taken from
       <a href="http://gtexportal.org/" target="_blank" rel="noopener">GTEx</a>. A gene was considered
       to be expressed in a given tissue if it showed an RPKM &gt;= 1.
-    </p>
-
-    <h5 id="function" class="section-label section-label--inline mt-3">Functional filter</h5>
-    <p class="mt-2">
-      Interactions can be filtered for annotation of
-      <a href="http://www.geneontology.org/" target="_blank" rel="noopener">GO</a> and
-      <a href="http://www.nlm.nih.gov/mesh/" target="_blank" rel="noopener">MeSH</a> terms.
-      Interactions are associated with the lowest common ancestor within the hierarchy of terms
-      associated with the interacting proteins. Selection of a more generic term causes interactions
-      annotated with a more specific term to pass the filter.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
@@ -480,17 +471,16 @@
     <h4 id="cite" class="section-label">Citation</h4>
     <p>If you use HIPPIE in your research, please cite:</p>
     <p style="line-height:1.8;">
-      Alanis-Lobato G, Andrade-Navarro MA, &amp; Schaefer MH. (2017).
+      Alanis-Lobato G, Andrade-Navarro MA, &amp; Schaefer MH. (2016).
       <i>HIPPIE v2.0: enhancing meaningfulness and reliability of protein-protein interaction networks</i>.
       Nucleic Acids Research, gkw985
       [<a href="https://doi.org/10.1093/nar/gkw985" target="_blank" rel="noopener">link</a>].
     </p>
     <p class="mb-1"><strong>Related manuscripts:</strong></p>
     <ul style="line-height:1.8;">
-      <li>Schaefer MH, Fontaine J-F, Vinayagam A, Porras P, Wanker EE, et al. (2012) <i>HIPPIE: Integrating Protein Interaction Networks with Experiment Based Quality Scores</i>. PLoS ONE, 7(2): e31826 [<a href="http://www.plosone.org/article/info%3Adoi%2F10.1371%2Fjournal.pone.0031826" target="_blank" rel="noopener">link</a>]</li>
+      <li>Schaefer MH, Fontaine J-F, Vinayagam A, Porras P, Wanker EE, et al. (2012) <i>HIPPIE: Integrating Protein Interaction Networks with Experiment Based Quality Scores</i>. PLoS ONE, 7(2): e31826 [<a href="https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0031826" target="_blank" rel="noopener">link</a>]</li>
       <li>Schaefer MH, Lopes TJS, Mah N, Shoemaker JE, Matsuoka Y, et al. (2013) <i>Adding Protein Context to the Human Protein-Protein Interaction Network to Reveal Meaningful Interactions</i>. PLoS Computational Biology, 9(1): e1002860 [<a href="http://www.ploscompbiol.org/article/info%3Adoi%2F10.1371%2Fjournal.pcbi.1002860" target="_blank" rel="noopener">link</a>]</li>
       <li>Suratanee A, Schaefer MH, Betts M, Soons Z, Mannsperger H, et al. (2014) <i>Characterizing Protein Interactions Employing a Genome-Wide siRNA Cellular Phenotyping Screen</i>. PLoS Computational Biology, 10.9: e1003814 [<a href="http://www.ploscompbiol.org/article/info%3Adoi%2F10.1371%2Fjournal.pcbi.1003814" target="_blank" rel="noopener">link</a>]</li>
-      <li>Alanis-Lobato G, Andrade-Navarro MA, &amp; Schaefer MH. (2016). <i>HIPPIE v2.0: enhancing meaningfulness and reliability of protein-protein interaction networks</i>. Nucleic Acids Research, gkw985 [<a href="http://nar.oxfordjournals.org/content/early/2016/10/28/nar.gkw985" target="_blank" rel="noopener">link</a>]</li>
     </ul>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>

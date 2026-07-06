@@ -42,7 +42,7 @@ from hippie_website.models import (
 )
 from hippie_website.stats_utils import compute_quartiles
 
-from ._sources import data_path
+from ._sources import data_path, load_sources
 
 # ---------------------------------------------------------------------------
 # Scoring constants (from DB.java)
@@ -1174,6 +1174,48 @@ def _rescore_all() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Resource version labels (data/sources.json key -> human-readable label)
+# ---------------------------------------------------------------------------
+
+_RESOURCE_LABELS: dict[str, str] = {
+    "sec_ac": "UniProt (sec_ac)",
+    "human_idmapping": "UniProt (idmapping)",
+    "gene_info": "NCBI Gene",
+    "intact_human": "IntAct (human)",
+    "intact_full": "IntAct (full)",
+    "biogrid": "BioGRID",
+    "gtex_sample_attrs": "GTEx (sample attributes)",
+    "gtex_gene_reads": "GTEx (gene reads)",
+    "orthology_alliance": "Alliance of Genome Resources",
+    "wormbase": "WormBase",
+    "rgd": "RGD",
+    "mgi": "MGI",
+    "zfin": "ZFIN",
+    "xenbase_tropicalis": "Xenbase (X. tropicalis)",
+    "xenbase_laevis": "Xenbase (X. laevis)",
+    "flybase": "FlyBase",
+    "sgd": "SGD",
+    "uniprot_to_orthology": "UniProt → Orthology map",
+    "techniques_scoring": "Technique scoring",
+    "pod_flat": "Negative Data",
+}
+
+
+def _current_resource_versions() -> dict[str, str]:
+    """Human-readable resource label -> version, read fresh from data/sources.json.
+
+    sources.json is the source of truth: its 'version' fields are updated by
+    download_update_data.sh / record_fetch after the data files themselves are
+    updated, so this always reflects what's actually sitting in data/.
+    """
+    return {
+        _RESOURCE_LABELS.get(key, key): entry["version"]
+        for key, entry in load_sources().items()
+        if entry.get("version")
+    }
+
+
+# ---------------------------------------------------------------------------
 # Management command
 # ---------------------------------------------------------------------------
 
@@ -1263,19 +1305,6 @@ class Command(BaseCommand):
         rel = ReleaseMeta.current() or ReleaseMeta.objects.create()
         rel.set_quartiles("int", compute_quartiles(int_scores))
         rel.set_quartiles("both", compute_quartiles(int_scores + nonint_scores))
-        rel.resource_versions = {
-            **(rel.resource_versions or {}),
-            **{
-                key: val
-                for key, val in {
-                    "BioGRID": Path(biogrid_path).name if biogrid_path else "",
-                    "IntAct": Path(intact_path).name if intact_path else "",
-                    "UniProt (idmapping)": "HUMAN_9606_idmapping.dat",
-                    "UniProt (sec_ac)": "sec_ac.txt",
-                    "NCBI Gene": "Homo_sapiens.gene_info",
-                }.items()
-                if val
-            },
-        }
+        rel.resource_versions = _current_resource_versions()
         rel.save()
         self.stdout.write("Done.")

@@ -147,3 +147,71 @@ MI:0401	biochemical                                      	5
 MI:0947	 bead aggregation assay	3
 MI:0976	 total internal reflection fluorescence spectroscopy	9
 MI:2339	 electron microscopy 3D single particle reconstruction	10
+MI:2437	holdup assay	6
+MI:0034	display technology	5
+MI:1113	two hybrid bait and prey pooling approach	5
+MI:0097	reverse ras recruitment system	5
+MI:0900	p8 filamentous phage display	6
+MI:0104	static light scattering	9
+MI:1320	membrane yeast two hybrid	5
+MI:0982	electrophoretic mobility-based method	2
+MI:0727	lexa b52 complementation	5
+MI:0905	amplified luminescent proximity homogeneous assay	7
+MI:0990	cleavage assay	7.5
+MI:1000	hydroxylase assay	7.5
+MI:0655	lambda repressor two hybrid	5
+MI:0605	enzymatic footprinting	3
+MI:1232	aggregation assay	3
+MI:0944	mass spectrometry study of hydrogen/deuterium exchange	6
+MI:1008	sumoylase assay	7.5
+MI:0841	phosphotransferase assay	7.5
+MI:0858	immunodepleted coimmunoprecipitation	5
+MI:2169	luminiscence technology	1
+MI:0512	zymography	7.5
+MI:1016	fluorescence recovery after photobleaching	2
+MI:1246	ion mobility mass spectrometry of complexes	6
+MI:1104	solid state nmr	10
+MI:1204	split firefly luciferase complementation	6
+MI:0880	atpase assay	7.5
+MI:0964	infrared spectroscopy	9
+MI:1019	protein phosphatase assay	7.5
+MI:1311	differential scanning calorimetry	10
+MI:2340	electron microscopy 3D helical reconstruction	10
+MI:2189	avexis	5
+MI:1147	ampylation assay	7.5
+MI:1024	scanning electron microscopy	5
+MI:0894	electron diffraction	9
+MI:1010	neddylase assay	7.5
+MI:1034	nuclease assay	7.5
+MI:0943	detection by mass spectrometry	5
+MI:0979	oxidoreductase assay	7.5
+MI:0073	mrna display	6
+MI:0963	interactome parallel affinity capture	5
+MI:1022	field flow fractionation	2
+MI:0998	deubiquitinase assay	7.5
+MI:1103	solution state nmr	10
+MI:0916	lexa vp16 complementation	5
+MI:1037	Split renilla luciferase complementation	6
+MI:2171	complemented donor-acceptor resonance energy transfer	6
+MI:0814	protease accessibility laddering	3
+MI:0968	biosensor	7
+MI:1138	decarboxylation assay	7.5
+MI:0928	filter trap assay	3
+MI:0859	force spectroscopy	9
+MI:1036	nucleotide exchange assay	7.5
+MI:0991	lipoprotein cleavage assay	7.5
+MI:1002	myristoylase assay	7.5
+MI:2404	oxidase assay	7.5
+MI:1017	rna immunoprecipitation	0
+MI:0888	small angle neutron scattering	9
+MI:2338	electron tomography	9
+MI:1086	equilibrium dialysis	7.5
+MI:0695	sandwich immunoassay	5
+MI:1038	silicon nanowire field-effect transistor	9
+MI:0256	rna interference	0
+MI:0225	chromatin immunoprecipitation array	2
+MI:1005	adp ribosylase assay	7.5
+MI:1004	palmitoylase assay	7.5
+MI:1309	de-ADP-ribosylation assay	7.5
+MI:0095	proteinchip(r) on a surface-enhanced laser desorption/ionization	5
+MI:0425	kinase scintillation proximity assay	7.5

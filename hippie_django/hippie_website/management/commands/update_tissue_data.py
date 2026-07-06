@@ -210,13 +210,3 @@ class Command(BaseCommand):
                 f"Done — {created:,} GeneTissue rows created, {updated:,} updated."
             )
         )
-
-        # Record GTEx / gene-info source versions on the current release.
-        from hippie_website.models import ReleaseMeta
-
-        ReleaseMeta.record_resources(
-            {
-                "GTEx": path_cgt.name,
-                "NCBI Gene": path_homo_entrez.name,
-            }
-        )

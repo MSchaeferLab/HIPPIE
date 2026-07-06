@@ -225,8 +225,8 @@ function App() {
               Every interaction carries a confidence score from 0 to 1, computed as a weighted sum of experimental
               technique quality, the number of supporting studies, and cross-species conservation. An interaction
               mentioned at least once in the literature receives a score of ≥ 0.49, so 0.49 is the minimum interaction
-              score in the database. Scores ≥ {(window.HIPPIE_RELEASE?.intMedian ?? 0.63).toFixed(2)} are considered{" "}
-              <em>medium confidence</em>; ≥ {(window.HIPPIE_RELEASE?.intQ3 ?? 0.72).toFixed(2)} <em>high confidence</em>.
+              score in the database. Scores ≥ {(window.HIPPIE_RELEASE?.intMedian ?? 0.00).toFixed(2)} are considered{" "}
+              <em>medium confidence</em>; ≥ {(window.HIPPIE_RELEASE?.intQ3 ?? 0.00).toFixed(2)} <em>high confidence</em>.
             </p>
           </div>
         </div>

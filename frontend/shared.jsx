@@ -3,8 +3,8 @@
 // Confidence thresholds come from the active release (window.HIPPIE_RELEASE,
 // injected by base.html); fall back to the documented v3.0 values.
 const _REL = (typeof window !== "undefined" && window.HIPPIE_RELEASE) || {};
-const MED_THRESHOLD = _REL.intMedian ?? 0.63;
-const HIGH_THRESHOLD = _REL.intQ3 ?? 0.72;
+const MED_THRESHOLD = _REL.intMedian ?? 0.00;
+const HIGH_THRESHOLD = _REL.intQ3 ?? 0.00;
 
 export function scoreClass(s) {
   if (s >= HIGH_THRESHOLD) return "score-badge score-high";

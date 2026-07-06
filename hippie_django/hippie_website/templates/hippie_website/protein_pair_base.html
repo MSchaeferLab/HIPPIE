@@ -20,9 +20,9 @@
     </h1>
     <div class="d-flex align-items-center gap-3 flex-wrap">
       {% with score=pair_score %}
-        {% if score >= current_release.int_q3|default:0.72 %}
+        {% if score >= current_release.int_q3|default:0.00 %}
           <span class="score-badge score-high">{{ score|floatformat:4 }}</span>
-        {% elif score >= current_release.int_median|default:0.63 %}
+        {% elif score >= current_release.int_median|default:0.00 %}
           <span class="score-badge score-med">{{ score|floatformat:4 }}</span>
         {% else %}
           <span class="score-badge score-low">{{ score|floatformat:4 }}</span>

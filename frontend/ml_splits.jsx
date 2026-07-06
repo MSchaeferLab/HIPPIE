@@ -369,18 +369,23 @@ function saveStoredRuns(ids) {
 // status API returns only ids). Mirrors the "score 0.63–1.0 · 2 src …" recap.
 function paramSummary(p) {
   if (!p) return null;
-  const parts = [
-    `score ${toNum(p.min_score, 0).toFixed(2)}–${toNum(p.max_score, 1).toFixed(2)}`,
-  ];
+  const parts = [];
+  if (p.min_score !== 0 && p.max_score !== 1){
+    parts.push(`score min/max ${toNum(p.min_score, 0).toFixed(2)}–${toNum(p.max_score, 1).toFixed(2)}`)
+  } else if (p.min_score !== 0) {
+    parts.push(`score min ${toNum(p.min_score, 0).toFixed(2)}`)
+  } else if (p.max_score !== 1) {
+    parts.push(`score max ${toNum(p.max_score, 1).toFixed(2)}`)
+  }
   if (p.source_ids?.length)     parts.push(`${p.source_ids.length} src`);
   if (p.experiment_ids?.length) parts.push(`${p.experiment_ids.length} exp`);
   if (p.type_ids?.length)       parts.push(`${p.type_ids.length} type`);
-  parts.push(`${p.tissue_ids?.length || 0} tissue`);
-  if (p.min_rpkm > 0)      parts.push(`rpkm≥${p.min_rpkm}`);
-  if (p.min_degree > 0)    parts.push(`deg≥${p.min_degree}`);
-  if (p.min_avg_score > 0) parts.push(`avg≥${toNum(p.min_avg_score, 0).toFixed(2)}`);
-  if (p.include_isoforms)  parts.push("isoforms");
-  parts.push(`neg×${p.neg_ratio}`);
+  if (p.tissue_ids?.length)     parts.push(`${p.tissue_ids?.length} tissue`);
+  if (p.min_rpkm > 0)           parts.push(`min rpkm≥${p.min_rpkm}`);
+  if (p.min_degree > 0)         parts.push(`min deg≥${p.min_degree}`);
+  if (p.min_avg_score > 0)      parts.push(`min avg≥${toNum(p.min_avg_score, 0).toFixed(2)}`);
+  if (p.include_isoforms)       parts.push("including isoforms");
+  parts.push(`neg ratio ${p.neg_ratio}`);
   parts.push(`seed ${p.seed}`);
   return parts.join(" · ");
 }

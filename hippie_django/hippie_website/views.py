@@ -154,7 +154,7 @@ def protein_query_view(request):
 # FilterBox component emits identical params everywhere. Interaction-level
 # filters (score / source / experiment / interaction-type) are applied to an
 # Interaction queryset (or matched against a prefetched Interaction); protein-
-# level filters (degree / avg-score / Swiss-Prot / tissue) are checked per
+# level filters (degree / avg-score / reviewed / tissue) are checked per
 # Protein in Python — query-page result sets are small (one protein's partners,
 # or a user-supplied pair list), so no full-table scan is involved.
 # ---------------------------------------------------------------------------
@@ -1067,7 +1067,7 @@ def _run_network_query(raw_proteins: str, f: CommonFilters) -> dict:
     """Assemble the seed sub-network. See network_query_api for the contract.
 
     Layer is fixed to first-shell: every edge with at least one endpoint in the
-    seed set. Protein-level filters (degree / avg-score / Swiss-Prot / tissue)
+    seed set. Protein-level filters (degree / avg-score / reviewed / tissue)
     constrain only the *expanded* (non-seed) endpoints — a seed protein is the
     user's own input and is never filtered out, so a seed–seed edge always
     passes them.
@@ -1666,7 +1666,7 @@ def browse_export_api(request):
             "Gene Symbol",
             "Degree",
             "Avg. Score",
-            "Swiss-Prot",
+            "Review Type",
         ]
         page = qs[:EXPORT_CAP]
 
@@ -1680,7 +1680,7 @@ def browse_export_api(request):
                         p.gene.entrez_name or p.uniprot_name,
                         p.degree,
                         round(p.avg_score, 4) if p.avg_score is not None else "",
-                        "yes" if p.is_reviewed else "no",
+                        "reviewed" if p.is_reviewed else "unreviewed",
                     ]
                 )
 

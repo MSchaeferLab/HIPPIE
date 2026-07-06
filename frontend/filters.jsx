@@ -43,10 +43,10 @@ const _REL = (typeof window !== "undefined" && window.HIPPIE_RELEASE) || {};
 // read from the active release injected by base.html (fallbacks documented).
 export function confThresholds(showMode) {
   if (showMode === "noninteractions")
-    return { med: _REL.nonintMedian ?? 0.63, high: _REL.nonintQ3 ?? 0.72 };
+    return { med: _REL.nonintMedian ?? 0.00, high: _REL.nonintQ3 ?? 0.00 };
   if (showMode === "both")
-    return { med: _REL.bothMedian ?? 0.63, high: _REL.bothQ3 ?? 0.72 };
-  return { med: _REL.intMedian ?? 0.63, high: _REL.intQ3 ?? 0.72 };
+    return { med: _REL.bothMedian ?? 0.00, high: _REL.bothQ3 ?? 0.00 };
+  return { med: _REL.intMedian ?? 0.00, high: _REL.intQ3 ?? 0.00 };
 }
 
 // ── Reusable multi-select checkbox list ─────────────────────────────────────

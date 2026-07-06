@@ -27,7 +27,7 @@
       <div class="d-flex align-items-center gap-3 flex-wrap">
         <span class="tag-chip">~1.1M interactions</span>
         <span class="tag-chip">+71k isoform-specific</span>
-        <span class="tag-chip">~162 MB</span>
+        <span class="tag-chip">~18 MB</span>
       </div>
       <div class="mt-3">
         <a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.txt.gz' %}" class="btn-hippie" style="font-size:.875rem; padding:.45rem 1rem;">
@@ -48,7 +48,7 @@
       <div class="d-flex align-items-center gap-3 flex-wrap">
         <span class="tag-chip">PSI-MI TAB 2.5</span>
         <span class="tag-chip">TSV</span>
-        <span class="tag-chip">~1.1 GB</span>
+        <span class="tag-chip">~115 MB</span>
       </div>
       <div class="mt-3">
         <a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.mitab.txt.gz' %}" class="btn-hippie" style="font-size:.875rem; padding:.45rem 1rem;">
@@ -136,7 +136,7 @@
               <td><span class="col-badge">7</span></td>
               <td><code>score</code></td>
               <td><code>0.85</code></td>
-              <td>HIPPIE confidence score (0–1), 2 decimals. ≥{{ current_release.int_median|default:0.63|floatformat:2 }} medium, ≥{{ current_release.int_q3|default:0.72|floatformat:2 }} high confidence</td>
+              <td>HIPPIE confidence score (0–1), 2 decimals. ≥{{ current_release.int_median|default:0.00|floatformat:2 }} medium, ≥{{ current_release.int_q3|default:0.0|floatformat:2 }} high confidence</td>
             </tr>
             <tr>
               <td><span class="col-badge">8</span></td>

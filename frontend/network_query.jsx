@@ -17,7 +17,7 @@ import {
 const { apiUrl, filterMetaUrl, maxProteins } = window.HIPPIE_NQ_CONFIG;
 
 const EXAMPLES = [
-  { label: "Example — tumour suppressors", text: "TP53\nBRCA1\nMDM2\nATM" },
+  { label: "Example — tumor suppressors", text: "TP53\nBRCA1\nATM" },
   { label: "Example — Huntington", text: "HTT\nHSP90AA1\nBDNF\nCREBBP" },
   { label: "Example — EGFR signalling", text: "EGFR\nERBB2\nGRB2\nSOS1" },
 ];

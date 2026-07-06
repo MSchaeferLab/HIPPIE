@@ -108,7 +108,7 @@
     </p>
     <ul style="font-size:.9rem; line-height:1.8;">
       <li><strong>Positives</strong> — interactions above a confidence threshold. Higher thresholds
-        (≥ {{ current_release.int_q3|default:0.72|floatformat:2 }}, high confidence) trade quantity for reliability.</li>
+        (≥ {{ current_release.int_q3|default:0.00|floatformat:2 }}, high confidence) trade quantity for reliability.</li>
       <li><strong>Negatives</strong> — there is no gold-standard "these never interact" set. Common
         choices: random non-edges, or curated non-interactions. Random negatives are biased by node
         degree, which a model can exploit instead of learning biology.</li>
@@ -135,7 +135,7 @@
       train/test dataset with negative sampling for you:
     </p>
     <ul style="font-size:.9rem; line-height:1.8;">
-      <li>Set <code class="mono">min_score</code> (e.g. {{ current_release.int_q3|default:0.72|floatformat:2 }}) to keep high-confidence positives.</li>
+      <li>Set <code class="mono">min_score</code> (e.g. {{ current_release.int_q3|default:0.00|floatformat:2 }}) to keep high-confidence positives.</li>
       <li>Add a <strong>tissue</strong> filter and <code class="mono">min_rpkm</code> to scope the proteome.</li>
       <li>Choose a <code class="mono">neg_ratio</code> (negatives per positive) and a fixed
         <code class="mono">seed</code> so the export is reproducible.</li>
@@ -150,7 +150,7 @@ import requests, time
 
 BASE = "https://your-hippie-host"          <span class="c"># this server</span>
 params = {
-    "min_score": {{ current_release.int_q3|default:0.72|floatformat:2 }},                       <span class="c"># high-confidence positives only</span>
+    "min_score": {{ current_release.int_q3|default:0.00|floatformat:2 }},                       <span class="c"># high-confidence positives only</span>
     "tissue_ids": [5],                       <span class="c"># e.g. colon</span>
     "min_rpkm": 1.0,
     "neg_ratio": 1.0,                        <span class="c"># balanced negatives</span>
