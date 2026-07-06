@@ -1,5 +1,7 @@
 # HIPPIE_FACELIFT
 
+## Setup software
+
 Clone the repository:
 
 ```bash
@@ -15,31 +17,41 @@ python3.11 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+Install [Redis](https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/)
 
-First migrate, run create superuser and then run the server:
+## Setup database
+
+First migrate, then run create superuser and generate the frontend files
 
 ```bash
 cd hippie_django
 python manage.py migrate
+python manage.py createsuperuser
+npm run build
+python manage.py collectstatic
 
-# If you want example data
-python manage.py seed_test_data
-python manage.py test_import_bait_prey
+```
 
-# If you want real data from Intact and BioGrid
+
+## Import data
+
+Use the download script to download the relevant data and import it into HIPPIE
+
+```bash
 cd data
 sh download_update_data.sh
 cd ..
 # Versions change, check what version BIOGRID extracts into
 python manage.py hippie_update \
-    --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt \
+    --biogrid data/BIOGRID-ALL-5.0.259.mitab.txt \
     --intact data/human.txt
-python manage.py load_experiment_types --csv_path technique_scores/techniques_scoring_3.0.tsv
+python manage.py load_experiment_types --csv_path data/technique_scores/techniques_scoring_3.0.tsv
 python manage.py update_homology_data \
-    --homology_file data/ORTHOLOGY-ALLIANCE_COMBINED.tsv \
+    --homology_file data/ORTHOLOGY-ALLIANCE_COMBINED_13.tsv \
     --ncbi_gene_info_file data/Homo_sapiens.gene_info \
     --intact_file data/intact.txt
 
+# Scoring just the positive interactions
 python manage.py hippie_update --rescore-all
 
 # Import bait-prey association and negative interaction (non-interaction) data
@@ -52,23 +64,16 @@ python manage.py update_tissue_data \
     --entrez-homo-path      data/Homo_sapiens.gene_info
 ```
 
-# If you want to import the real current data
-python manage.py import_hippie_sql data/mschaefer_hippie_v2_v2-4.sql --log-file data/import.log
+## Running the server
 
-
-
-python manage.py createsuperuser
-npm run build
-```
-
-Start the celery working in a seperate terminal
-```bash
-cd hippie_django
-celery -A hippie worker -l info 2>&1 > celery.log &
-```
-Start the server in the first terminal
+Start the server
 ```bash
 python manage.py runserver
+```
+Start the celery worker in a separate terminal to use the ml-split parts
+```bash
+cd /your/path/to/hippie/HIPPIE_FACELIFT/hippie_django
+celery -A hippie worker -l info 2>&1 > celery.log &
 ```
 
 When you change anything in the frontend, you need to run the following command to build the frontend:
@@ -173,7 +178,7 @@ docker compose exec web bash data/download_update_data.sh
 # 2. Run the update (paths are relative to the container's WORKDIR)
 # Versions change, check what version BIOGRID extracts into
 docker compose exec web python manage.py hippie_update \
-    --biogrid data/BIOGRID-ALL-5.0.257.mitab.txt \
+    --biogrid data/BIOGRID-ALL-5.0.259.mitab.txt \
     --intact  data/human.txt
 
 # 3. Load experiment scoring table
@@ -182,7 +187,7 @@ docker compose exec web python manage.py load_experiment_types \
 
 # 4. Load homology / orthology data
 docker compose exec web python manage.py update_homology_data \
-    --homology_file      data/ORTHOLOGY-ALLIANCE_COMBINED.tsv \
+    --homology_file      data/ORTHOLOGY-ALLIANCE_COMBINED_13.tsv \
     --ncbi_gene_info_file data/Homo_sapiens.gene_info \
     --intact_file        data/intact.txt
 
