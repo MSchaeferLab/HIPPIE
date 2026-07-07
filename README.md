@@ -45,7 +45,7 @@ cd ..
 python manage.py hippie_update \
     --biogrid data/BIOGRID-ALL-5.0.259.mitab.txt \
     --intact data/human.txt
-python manage.py load_experiment_types --csv_path data/technique_scores/techniques_scoring_3.0.tsv
+python manage.py load_experiment_types --csv_path data/user_downloads/techniques_scoring_3.0.tsv
 python manage.py update_homology_data \
     --homology_file data/ORTHOLOGY-ALLIANCE_COMBINED_13.tsv \
     --ncbi_gene_info_file data/Homo_sapiens.gene_info \
@@ -183,7 +183,7 @@ docker compose exec web python manage.py hippie_update \
 
 # 3. Load experiment scoring table
 docker compose exec web python manage.py load_experiment_types \
-    --csv_path data/technique_scores/techniques_scoring_3.0.tsv
+    --csv_path data/user_downloads/techniques_scoring_3.0.tsv
 
 # 4. Load homology / orthology data
 docker compose exec web python manage.py update_homology_data \

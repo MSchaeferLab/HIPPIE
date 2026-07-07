@@ -193,10 +193,10 @@
       "_note": "Intermediate MOD UniProt->gene map written by update_homology_data; no upstream URL."
     },
     "techniques_scoring": {
-      "filename": "technique_scores/techniques_scoring_3.0.tsv",
+      "filename": "user_downloads/techniques_scoring_3.0.tsv",
       "local": true,
       "version": "3.0",
-      "_note": "Manually curated experiment-technique scoring TSV consumed by load_experiment_types. Lives in data/technique_scores/; bump filename+version when promoting a new revision."
+      "_note": "Manually curated experiment-technique scoring TSV consumed by load_experiment_types. Lives in data/user_downloads/; bump filename+version when promoting a new revision."
     },
     "pod_flat": {
       "filename": "POD_flat.pq",

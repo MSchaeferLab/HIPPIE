@@ -206,11 +206,11 @@ const DL = (rows) =>
 
 const PROTEIN_STATS_HELP = DL([
   ["Proteins", "Filtered proteins that still have at least one surviving interaction under the current interaction filter."],
+  ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when “include isoforms” is on."],
   ["Median degree", "Median number of surviving interactions per protein, counted only over edges that pass the current filter."],
   ["Median avg score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
   ["Proteins filtered out", "Proteins removed by the protein-level filter (tissue, RPKM, min-degree, min-avg-score, isoform exclusion) relative to the full protein table. Separate from “Orphaned by filter”, which counts proteins that pass the protein filter but lose all edges."],
   ["Orphaned by filter", "Proteins that pass the protein-level filter (tissue, RPKM, …) but lost every interaction to the score/type/source filter, leaving degree 0. Excluded from the medians above."],
-  ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when “include isoforms” is on."],
   ["Node degree distribution", "Histogram of per-protein interaction counts (degree) under the current filter."],
 ]);
 

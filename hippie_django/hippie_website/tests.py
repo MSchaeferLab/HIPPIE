@@ -72,6 +72,10 @@ def make_protein(name, uniprot_name=None, gene_id=None, accession=None):
         gene=gene,
         uniprot_name=uniprot_name or (name if gene_id is None else ""),
         uniprot_accession=accession if accession is not None else f"TEST_{name}",
+        # Fixtures model well-known Swiss-Prot proteins → reviewed. The model
+        # default is False (proteins start unreviewed until update_review_status
+        # flips them against UniProt's reviewed list); tests set True explicitly.
+        is_reviewed=True,
     )
 
 
@@ -1407,9 +1411,15 @@ class SafeConversionTest(TestCase):
 
 
 class UpdateTissueDataCommandTest(TestCase):
-    def test_required_args_are_enforced(self):
+    def test_missing_input_file_raises(self):
+        # Paths now default from data/sources.json (they are no longer required
+        # flags), so a path that resolves to a missing file must raise rather
+        # than run silently.
         with self.assertRaises(CommandError):
-            call_command("update_tissue_data")
+            call_command(
+                "update_tissue_data",
+                gct_path="/nonexistent/does_not_exist.gct",
+            )
 
     def test_existing_gene_tissue_median_is_updated(self):
         gene = Gene.objects.create(entrez_id=101, entrez_name="GENE1")
@@ -2140,6 +2150,7 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
             uniprot_name="",
             uniprot_accession="P38398-2",
             general_protein=self.brca1,
+            is_reviewed=True,
         )
         iso_bad = Isoform.objects.create(
             gene=self.brca1.gene,

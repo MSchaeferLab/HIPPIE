@@ -74,7 +74,7 @@ services:
       - static_volume:/vol/static:ro
       - media_volume:/vol/media:ro
       # Release files served directly by Apache at /downloads/ (see hippie.conf.template).
-      - ./hippie_django/data/hippie_versions:/vol/downloads:ro
+      - ./hippie_django/data/user_downloads:/vol/downloads:ro
     ports:
       - "${HOST_PORT:-8080}:80"
     networks:
