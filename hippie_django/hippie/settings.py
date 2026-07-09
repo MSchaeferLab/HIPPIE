@@ -78,6 +78,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "hippie_website.context_processors.release",
+                "hippie_website.context_processors.google_analytics",
             ],
         },
     },
@@ -202,3 +203,8 @@ else:
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         }
     }
+
+# ── Analytics ──────────────────────────────────────────────────────────────
+# GA4 measurement ID (e.g. "G-XXXXXXXXXX"). Empty disables analytics entirely
+# (dev/local default) — base.html only emits the gtag.js snippet when this is set.
+GA_MEASUREMENT_ID = os.environ.get("DJANGO_GA_MEASUREMENT_ID", "")

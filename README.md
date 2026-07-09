@@ -132,6 +132,14 @@ DJANGO_ALLOWED_HOSTS=example.com
 DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com
 ```
 
+### Google Analytics (optional)
+
+Set `DJANGO_GA_MEASUREMENT_ID` in `.env` to a GA4 measurement ID (e.g. `G-XXXXXXXXXX`)
+to enable tracking; leave it blank to disable analytics entirely (the default).
+Tracking respects a Consent Mode v2 banner shown to visitors — usage is only
+logged after they accept, and declining never restricts site access. See
+`/privacy/` for the (placeholder — needs legal review) privacy notice this links to.
+
 Add the following block to your host Apache config (`/etc/apache2/apache2.conf`
 or a site conf in `/etc/apache2/sites-enabled/`) to proxy the containerised
 stack:

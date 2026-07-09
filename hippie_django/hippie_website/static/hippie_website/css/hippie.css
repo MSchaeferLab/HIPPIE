@@ -127,6 +127,19 @@ a:hover { color: var(--hippie-accent); text-decoration: underline; }
   font-size: .8rem;
   color: var(--hippie-ink-muted);
 }
+.cookie-consent-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1050;
+  background: var(--hippie-surface);
+  border-top: 1px solid var(--hippie-border);
+  box-shadow: var(--shadow-card);
+  padding: 1rem 0;
+  font-size: .85rem;
+  color: var(--hippie-ink);
+}
 
 /* ==========================================================
    Cards

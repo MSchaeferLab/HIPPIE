@@ -4,6 +4,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  {% if ga_measurement_id %}
+  {# Google tag (gtag.js) — Consent Mode v2: analytics_storage defaults to denied #}
+  {# until the visitor accepts the cookie banner (see #cookie-consent-banner below). #}
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('consent', 'default', {
+      'analytics_storage': 'denied'
+    });
+    gtag('js', new Date());
+    gtag('config', '{{ ga_measurement_id }}');
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_measurement_id }}"></script>
+  {% endif %}
+
   <title>{% block title %}HIPPIE{% endblock %} — Human Integrated Protein–Protein Interaction rEference</title>
 
   {# Bootstrap 5 CSS #}
@@ -127,9 +143,59 @@
       <a href="{% url 'hippie_website:information' %}#cite">
         Citation
       </a>
+      {% if ga_measurement_id %}
+      <a href="{% url 'hippie_website:privacy' %}">Privacy Policy</a>
+      <a href="#" id="cookie-settings-link">Cookie Settings</a>
+      {% endif %}
     </div>
   </div>
 </footer>
+
+{#   ===================================================== #}
+{#   Cookie consent banner (Consent Mode v2)                #}
+{#   ===================================================== #}
+{% if ga_measurement_id %}
+<div id="cookie-consent-banner" class="cookie-consent-banner" hidden>
+  <div class="container d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <span>
+      We use Google Analytics only to track anonymous usage statistics. Declining just
+      disables logging — the site works the same either way.
+      <a href="{% url 'hippie_website:privacy' %}">Privacy Policy</a>
+    </span>
+    <div class="d-flex gap-2">
+      <button type="button" id="cookie-consent-decline" class="btn btn-sm btn-outline-secondary">Decline</button>
+      <button type="button" id="cookie-consent-accept" class="btn btn-sm btn-success">Accept</button>
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    var STORAGE_KEY = 'hippie_ga_consent';
+    var banner = document.getElementById('cookie-consent-banner');
+    var stored = localStorage.getItem(STORAGE_KEY);
+
+    if (stored === 'granted') {
+      gtag('consent', 'update', { analytics_storage: 'granted' });
+    } else if (stored !== 'denied') {
+      banner.hidden = false;
+    }
+
+    document.getElementById('cookie-consent-accept').addEventListener('click', function () {
+      localStorage.setItem(STORAGE_KEY, 'granted');
+      gtag('consent', 'update', { analytics_storage: 'granted' });
+      banner.hidden = true;
+    });
+    document.getElementById('cookie-consent-decline').addEventListener('click', function () {
+      localStorage.setItem(STORAGE_KEY, 'denied');
+      banner.hidden = true;
+    });
+    document.getElementById('cookie-settings-link').addEventListener('click', function (e) {
+      e.preventDefault();
+      banner.hidden = false;
+    });
+  })();
+</script>
+{% endif %}
 
 {#   ===================================================== #}
 {#   Bootstrap JS                                          #}

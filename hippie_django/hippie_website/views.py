@@ -30,7 +30,14 @@ from django.db.models import (
     Value,
 )
 from django.db.models.functions import Coalesce, NullIf
-from django.http import FileResponse, Http404, JsonResponse, StreamingHttpResponse
+from django.http import (
+    FileResponse,
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    JsonResponse,
+    StreamingHttpResponse,
+)
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
@@ -1948,27 +1955,24 @@ def download_view(request):
 
 
 # Directory holding the downloadable HIPPIE release files (server-only).
-HIPPIE_VERSIONS_DIR = settings.BASE_DIR / "data" / "hippie_versions"
-TECH_SCORING_VIEW_DIR = settings.BASE_DIR / "data" / "technique_scores"
+DOWNLOAD_DIR = settings.BASE_DIR / "data" / "user_downloads"
 
 
 @require_GET
 def download_dataset(request, filename: str):
     """Serve a downloadable file as an attachment.
-
-    Searches ``HIPPIE_VERSIONS_DIR`` then ``TECH_SCORING_VIEW_DIR``.
     ``filename`` is collapsed to a single path component to guard against
     directory traversal (``..``) and absolute paths.
     """
     safe_name = os.path.basename(filename)
     if safe_name != filename:
         raise Http404("File not found")
-    for directory in (HIPPIE_VERSIONS_DIR, TECH_SCORING_VIEW_DIR):
-        file_path = (directory / safe_name).resolve()
-        if file_path.parent == directory.resolve() and file_path.is_file():
-            return FileResponse(
-                open(file_path, "rb"), as_attachment=True, filename=safe_name
-            )
+
+    file_path = (DOWNLOAD_DIR / safe_name).resolve()
+    if file_path.is_file():
+        return FileResponse(
+            open(file_path, "rb"), as_attachment=True, filename=safe_name
+        )
     raise Http404("File not found")
 
 
@@ -1980,6 +1984,11 @@ def information_view(request):
 @require_GET
 def machine_learning_view(request):
     return render(request, "hippie_website/ml.html", {})
+
+
+@require_GET
+def privacy_view(request: HttpRequest) -> HttpResponse:
+    return render(request, "hippie_website/privacy.html", {})
 
 
 # ---------------------------------------------------------------------------

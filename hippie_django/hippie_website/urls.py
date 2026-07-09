@@ -17,6 +17,7 @@ urlpatterns = [
     ),
     path("information/", views.information_view, name="information"),
     path("machine-learning/", views.machine_learning_view, name="machine_learning"),
+    path("privacy/", views.privacy_view, name="privacy"),
     # ── Detail pages ───────────────────────────────────────────
     path(
         "interaction/<int:pk>/",
