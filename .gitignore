@@ -320,3 +320,6 @@ hippie_django/data/user_downloads/*
 hippie_django/logs/*.log
 hippie_django/logs/*.json
 hippie_django/media
+
+# macOS
+.DS_Store

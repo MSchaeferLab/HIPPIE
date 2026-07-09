@@ -62,6 +62,9 @@ python manage.py update_tissue_data \
     --gct-path              data/GTEx_Analysis_*_gene_reads.gct \
     --annotation-sample-path data/GTEx_Analysis_*_SampleAttributesDS.txt \
     --entrez-homo-path      data/Homo_sapiens.gene_info
+
+# Refresh Protein.is_reviewed from UniProt's reviewed (Swiss-Prot) accession list
+python manage.py update_review_status
 ```
 
 ## Running the server
@@ -204,6 +207,9 @@ docker compose exec web python manage.py update_tissue_data \
     --gct-path               data/GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_reads.gct \
     --annotation-sample-path data/GTEx_Analysis_v11_Annotations_SampleAttributesDS.txt \
     --entrez-homo-path       data/Homo_sapiens.gene_info
+
+# 8. Refresh Protein.is_reviewed from UniProt's reviewed (Swiss-Prot) accession list
+docker compose exec web python manage.py update_review_status
 ```
 
 `collectstatic` runs automatically on each `web` boot; migrations are manual
