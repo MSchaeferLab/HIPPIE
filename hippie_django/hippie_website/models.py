@@ -345,9 +345,6 @@ class Interaction(models.Model):
     experiments = models.ManyToManyField(
         ExperimentType, related_name="interactions", db_table="interaction2experiment"
     )
-    conserved_species = models.ManyToManyField(
-        Species, related_name="conserved_interactions", db_table="interaction2species"
-    )
     interaction_types = models.ManyToManyField(
         InteractionType, related_name="interactions", db_table="interaction2type"
     )
