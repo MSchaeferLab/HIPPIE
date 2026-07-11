@@ -37,7 +37,7 @@
     <div class="col-md-6">
       <div class="protein-card">
         <p class="section-label mb-1">Interactor A</p>
-        <div class="protein-name">{{ p1.symbol }}{% if not p1.protein.is_reviewed %} <span class="unreviewed-tag">[unreviewed]</span>{% endif %}</div>
+        <div class="protein-name">{{ p1.symbol }} {% if not p1.protein.is_reviewed %} <span class="score-badge score-low">unreviewed</span>{% endif %}</div>
         <div class="id-row">
           <dl>
             <dt>UniProt</dt>
@@ -65,7 +65,7 @@
     <div class="col-md-6">
       <div class="protein-card">
         <p class="section-label mb-1">Interactor B</p>
-        <div class="protein-name">{{ p2.symbol }}{% if not p2.protein.is_reviewed %} <span class="unreviewed-tag">[unreviewed]</span>{% endif %}</div>
+        <div class="protein-name">{{ p2.symbol }} {% if not p2.protein.is_reviewed %} <span class="score-badge score-low">unreviewed</span>{% endif %}</div>
         <div class="id-row">
           <dl>
             <dt>UniProt</dt>

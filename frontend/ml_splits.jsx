@@ -608,28 +608,30 @@ function App() {
   const [runIds,      setRunIds]      = useState([]);
   const [submitting,  setSubmitting]  = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  // Mirrors localStorage exactly — deep-linked (?jobs=) ids are shown via
+  // runIds but never enter storedIds, so visiting a shared link never
+  // persists someone else's run ids into this browser's history.
+  const storedIdsRef = useRef([]);
 
   useEffect(() => {
     const jobsParam = new URLSearchParams(window.location.search).get("jobs");
     const stored = loadStoredRuns();
+    storedIdsRef.current = stored;
     if (jobsParam) {
       // Deep-linked ids first (de-duplicated), then any locally-saved runs
-      // not already listed.
+      // not already listed. Display-only — not written back to storage.
       const linked = [...new Set(jobsParam.split(",").map(s => s.trim()).filter(Boolean))];
-      const merged = [...linked, ...stored.filter(x => !linked.includes(x))].slice(0, MAX_RUNS);
-      saveStoredRuns(merged);
-      setRunIds(merged);
+      setRunIds([...linked, ...stored.filter(x => !linked.includes(x))].slice(0, MAX_RUNS));
     } else {
       setRunIds(stored);
     }
   }, []);
 
   function addRun(id) {
-    setRunIds(prev => {
-      const next = [id, ...prev.filter(x => x !== id)].slice(0, MAX_RUNS);
-      saveStoredRuns(next);
-      return next;
-    });
+    const next = [id, ...storedIdsRef.current.filter(x => x !== id)].slice(0, MAX_RUNS);
+    storedIdsRef.current = next;
+    saveStoredRuns(next);
+    setRunIds(prev => [id, ...prev.filter(x => x !== id)].slice(0, MAX_RUNS));
   }
 
   // Any filter change invalidates the computed statistics → re-grey and disable

@@ -874,7 +874,7 @@ class BrowseInteractionsApiTest(HippieTestCase):
         self.assertFalse(row["is_noninteraction"])
 
     def test_rows_carry_review_status(self):
-        # Each interactor now carries is_reviewed for the [unreviewed] tag /
+        # Each interactor now carries is_reviewed for the unreviewed tag /
         # Review Type export columns. Set brca1 reviewed, tp53 unreviewed
         # (the model default is False, so pin both sides explicitly).
         Protein.objects.filter(pk=self.brca1.pk).update(is_reviewed=True)

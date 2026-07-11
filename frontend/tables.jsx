@@ -224,9 +224,9 @@ function ProteinCells({ p, stop }) {
   return (
     <>
       <td>
-        <strong>{p.symbol || "—"}</strong>
+        <strong>{p.symbol || "—"} </strong>
         {p.is_reviewed === false && (
-          <span className="unreviewed-tag">[unreviewed]</span>
+          <span className="score-badge score-low">unreviewed</span>
         )}
       </td>
       <td>
