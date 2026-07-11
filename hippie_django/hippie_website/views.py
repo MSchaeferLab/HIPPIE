@@ -1933,6 +1933,8 @@ HIPPIE_VERSIONS_DIR = settings.BASE_DIR / "data" / "hippie_versions"
 TECH_SCORING_VIEW_DIR = settings.BASE_DIR / "data" / "technique_scores"
 
 
+# This is just a backup function in case the application is not run with docker.
+# In production the download files are served with apache
 @require_GET
 def download_dataset(request, filename: str):
     """Serve a downloadable file as an attachment.
