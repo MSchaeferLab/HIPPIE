@@ -1,12 +1,13 @@
 """Generate the public HIPPIE download files.
 
-Writes three files into the directory given as the ``path`` argument:
+Writes three gzip-compressed files into the directory given as the ``path``
+argument:
 
-* ``HIPPIE-current.mitab.txt`` — PSI-MI TAB 2.5 (15 mandatory columns + 3 HIPPIE
-  extension columns), one binary interaction per row.
-* ``HIPPIE-current.txt``      — compact tab format keyed on uniprot_accession,
+* ``HIPPIE-current.mitab.txt.gz`` — PSI-MI TAB 2.5 (15 mandatory columns + 3
+  HIPPIE extension columns), one binary interaction per row.
+* ``HIPPIE-current.txt.gz``      — compact tab format keyed on uniprot_accession,
   uniprot_name retained for backwards compatibility.
-* ``HIPPIE-current.stats.txt`` — score quartiles and counts over a
+* ``HIPPIE-current.stats.txt.gz`` — score quartiles and counts over a
   3x3 matrix: {interactions, non-interactions, both} x {all, isoforms-only,
   non-isoforms-only}.
 
@@ -14,6 +15,7 @@ The two download files cover Interactions only. NonInteractions carry no
 evidence (sources / pmids / experiments), so they appear in the stats file only.
 """
 
+import gzip
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,9 +35,9 @@ from hippie_website.models import (
 )
 from hippie_website.stats_utils import compute_quartiles
 
-MITAB_FILENAME = "HIPPIE-current.mitab.txt"
-TXT_FILENAME = "HIPPIE-current.txt"
-STATS_FILENAME = "HIPPIE-current.stats.txt"
+MITAB_FILENAME = "HIPPIE-current.mitab.txt.gz"
+TXT_FILENAME = "HIPPIE-current.txt.gz"
+STATS_FILENAME = "HIPPIE-current.stats.txt.gz"
 
 NULL = "-"
 CHUNK = 10_000
@@ -306,8 +308,8 @@ class Command(BaseCommand):
         txt_path = out_dir / TXT_FILENAME
         written = 0
         with (
-            mitab_path.open("w", encoding="utf-8") as mitab,
-            txt_path.open("w", encoding="utf-8") as txt,
+            gzip.open(mitab_path, "wt", encoding="utf-8") as mitab,
+            gzip.open(txt_path, "wt", encoding="utf-8") as txt,
         ):
             mitab.write("\t".join(MITAB_HEADER) + "\n")
             txt.write("\t".join(TXT_HEADER) + "\n")
@@ -362,7 +364,7 @@ class Command(BaseCommand):
         }
 
         path = out_dir / STATS_FILENAME
-        with path.open("w", encoding="utf-8") as f:
+        with gzip.open(path, "wt", encoding="utf-8") as f:
             f.write("HIPPIE downloadable data - summary statistics\n")
             f.write(f"Generated: {timezone.now():%Y-%m-%d %H:%M %Z}\n")
 
