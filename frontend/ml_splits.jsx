@@ -32,7 +32,7 @@ const PROTEIN_INIT = {
   minRpkm:         toNum(initial.min_rpkm, 0),
   minDegree:       parseInt(initial.min_degree) || 0,
   minAvgScore:     toNum(initial.min_avg_score, 0),
-  includeIsoforms: !!initial.include_isoforms,
+  isoformMode:     initial.isoform_mode || "general",
 };
 const INTERACTION_INIT = {
   minScore:   toNum(initial.min_score, 0),
@@ -97,12 +97,19 @@ function ProteinFilterPanel({ filters, onChange }) {
       <input type="range" className="form-range mb-3" min="0" max="1" step="0.01"
              value={filters.minAvgScore || 0}
              onChange={e => set({ minAvgScore: parseFloat(e.target.value) })} />
-      <label style={{display:"inline-flex",alignItems:"center",gap:".5rem",cursor:"pointer",userSelect:"none"}}>
-        <input type="checkbox" checked={filters.includeIsoforms}
-               onChange={e => set({ includeIsoforms: e.target.checked })}
-               style={{cursor:"pointer"}} />
-        <span className="text-muted-sm">Include isoforms</span>
-      </label>
+      <div className="filter-section-label mt-3">Isoforms</div>
+      <div className="mode-toggle">
+        {[
+          ["general", "General"],
+          ["isoforms", "Isoforms"],
+          ["both", "Both"],
+        ].map(([k, label]) => (
+          <button key={k} className={filters.isoformMode === k ? "active" : ""}
+                  onClick={() => set({ isoformMode: k })}>
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -202,7 +209,7 @@ const DL = (rows) =>
 
 const PROTEIN_STATS_HELP = DL([
   ["Proteins", "Filtered proteins that still have at least one surviving interaction under the current interaction filter."],
-  ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when “include isoforms” is on."],
+  ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when the isoform mode is “Isoforms” or “Both”."],
   ["Median degree", "Median number of surviving interactions per protein, counted only over edges that pass the current filter."],
   ["Median avg score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
   ["Proteins filtered out", "Proteins removed by the protein-level filter (tissue, RPKM, min-degree, min-avg-score, isoform exclusion) relative to the full protein table. Separate from “Orphaned by filter”, which counts proteins that pass the protein filter but lose all edges."],
@@ -404,7 +411,8 @@ function paramSummary(p) {
   if (p.min_rpkm > 0)           parts.push(`min rpkm≥${p.min_rpkm}`);
   if (p.min_degree > 0)         parts.push(`min deg≥${p.min_degree}`);
   if (p.min_avg_score > 0)      parts.push(`min avg≥${toNum(p.min_avg_score, 0).toFixed(2)}`);
-  if (p.include_isoforms)       parts.push("including isoforms");
+  if (p.isoform_mode === "isoforms") parts.push("isoforms only");
+  else if (p.isoform_mode === "both") parts.push("including isoforms");
   parts.push(`neg ratio ${p.neg_ratio}`);
   parts.push(`seed ${p.seed}`);
   return parts.join(" · ");
@@ -649,7 +657,7 @@ function App() {
       min_rpkm:   proteinFilters.minRpkm,
       min_degree: proteinFilters.minDegree,
       min_avg_score: proteinFilters.minAvgScore,
-      include_isoforms: proteinFilters.includeIsoforms,
+      isoform_mode: proteinFilters.isoformMode,
       // sampling
       neg_ratio:  toNum(negRatio, 1.0),
       seed:       parseInt(seed) || 0,

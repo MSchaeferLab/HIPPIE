@@ -21,6 +21,7 @@ from ..views import (
     _safe_int,
     _safe_float,
 )
+from ..query_filters import isoform_only_q, parse_isoform_mode
 from .factories import (
     HippieTestCase,
     make_protein,
@@ -675,6 +676,47 @@ class GetIsoformsTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
+# 17a. query_filters.isoform_only_q / parse_isoform_mode
+# ---------------------------------------------------------------------------
+
+
+class ParseIsoformModeTest(TestCase):
+    def test_valid_modes_pass_through(self):
+        for mode in ("general", "isoforms", "both"):
+            self.assertEqual(parse_isoform_mode(mode), mode)
+
+    def test_case_and_whitespace_insensitive(self):
+        self.assertEqual(parse_isoform_mode(" Isoforms \n"), "isoforms")
+        self.assertEqual(parse_isoform_mode("BOTH"), "both")
+
+    def test_none_defaults_to_general(self):
+        self.assertEqual(parse_isoform_mode(None), "general")
+
+    def test_missing_or_garbage_falls_back_to_general(self):
+        for garbage in ("", "bogus", "1", "true", "yes"):
+            self.assertEqual(parse_isoform_mode(garbage), "general")
+
+
+class IsoformOnlyQTest(HippieTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.isoform = Isoform.objects.create(
+            gene=cls.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-2",
+            general_protein=cls.brca1,
+        )
+        cls.iso_ix = make_interaction(cls.isoform, cls.egfr, score=0.9)
+
+    def test_keeps_only_edges_touching_an_isoform(self):
+        qs = Interaction.objects.filter(isoform_only_q())
+        pks = set(qs.values_list("pk", flat=True))
+        self.assertIn(self.iso_ix.pk, pks)
+        self.assertNotIn(self.ix.pk, pks)
+
+
+# ---------------------------------------------------------------------------
 # 17b. browse_interactions_api — denormalised involves_isoform flag
 # ---------------------------------------------------------------------------
 
@@ -708,10 +750,19 @@ class BrowseInteractionsIsoformTest(HippieTestCase):
     def test_include_isoforms_includes_them(self):
         r = self.client.get(
             reverse("hippie_website:browse_interactions_api"),
-            {"include_isoforms": "1"},
+            {"isoform_mode": "both"},
         )
         ids = [row["id"] for row in r.json()["interactions"]]
         self.assertIn(self.iso_ix.pk, ids)
+
+    def test_isoforms_only_excludes_canonical(self):
+        r = self.client.get(
+            reverse("hippie_website:browse_interactions_api"),
+            {"isoform_mode": "isoforms"},
+        )
+        ids = [row["id"] for row in r.json()["interactions"]]
+        self.assertIn(self.iso_ix.pk, ids)
+        self.assertNotIn(self.ix.pk, ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1210,7 +1261,22 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
         results = self._post(
             [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
             show="both",
-            include_isoforms=True,
+            isoform_mode="both",
+        )
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0]["is_noninteraction"])
+        self.assertGreaterEqual(results[0]["score"], 0)
+
+    def test_isoform_isoforms_noninteraction_yields_single_row(self):
+        # Same pair, "isoforms" mode: no isoform-involving Interaction exists
+        # (the not-found fallback), but the plain canonical NonInteraction is
+        # still found (NonInteraction isn't isoform-expanded) — still exactly
+        # one row, not two.
+        make_noninteraction(self.brca1, self.egfr, score=0.3)
+        results = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
+            show="both",
+            isoform_mode="isoforms",
         )
         self.assertEqual(len(results), 1)
         self.assertTrue(results[0]["is_noninteraction"])
@@ -1367,12 +1433,31 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
 
         results = self._post(
             [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
-            include_isoforms=True,
+            isoform_mode="both",
             reviewed="reviewed",
         )
         isoform_tags = {r["isoform_uniprot_a"] for r in results}
         self.assertIn("P38398-2", isoform_tags)
         self.assertNotIn("P38398-3", isoform_tags)
+
+    def test_isoform_mode_isoforms_drops_canonical_combo(self):
+        iso_ok = Isoform.objects.create(
+            gene=self.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-2",
+            general_protein=self.brca1,
+            is_reviewed=True,
+        )
+        make_interaction(iso_ok, self.tp53, score=0.7)
+
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            isoform_mode="isoforms",
+        )
+        # Only the isoform-involving combo is returned — the pure canonical
+        # BRCA1-TP53 combo (isoform_uniprot_a is None) is dropped.
+        isoform_tags = {r["isoform_uniprot_a"] for r in results}
+        self.assertEqual(isoform_tags, {"P38398-2"})
 
 
 class Batch3FilterMetaInteractionTypesTest(HippieTestCase):

@@ -10,7 +10,7 @@ import React, { useEffect, useState } from "react";
 // ── Unified filter state ────────────────────────────────────────────────────
 export const FILTER_DEFAULTS = {
   showMode: "interactions", // interactions | noninteractions | both
-  includeIsoforms: false,
+  isoformMode: "general", // general | isoforms | both
   minScore: 0,
   maxScore: 1,
   source: [], // ids
@@ -162,7 +162,7 @@ export function countActiveFilters(f, controls = ALL_CONTROLS) {
   const on = new Set(controls);
   let n = 0;
   if (on.has("showMode") && f.showMode !== "interactions") n++;
-  if (on.has("isoforms") && f.includeIsoforms) n++;
+  if (on.has("isoforms") && f.isoformMode !== "general") n++;
   if (on.has("score") && (f.minScore > 0 || f.maxScore < 1)) n++;
   if (on.has("source")) n += f.source.length;
   if (on.has("experiment")) n += f.experiment.length;
@@ -183,7 +183,7 @@ export function filtersEqual(a, b) {
 function _serialize(f) {
   const scalars = { show: f.showMode };
   const lists = {};
-  if (f.includeIsoforms) scalars.include_isoforms = "1";
+  if (f.isoformMode !== "general") scalars.isoform_mode = f.isoformMode;
   if (f.minScore > 0) scalars.min_score = f.minScore;
   if (f.maxScore < 1) scalars.max_score = f.maxScore;
   if (f.source.length) lists.source = f.source;
@@ -407,15 +407,17 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
         {on.has("isoforms") && (
           <div className={colCls}>
             <div className="filter-section-label">Isoforms</div>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: ".5rem", cursor: "pointer", userSelect: "none" }}>
-              <input
-                type="checkbox"
-                checked={f.includeIsoforms}
-                onChange={(e) => set({ includeIsoforms: e.target.checked })}
-                style={{ cursor: "pointer" }}
-              />
-              <span className="text-muted-sm">Include isoforms</span>
-            </label>
+            <div className="mode-toggle">
+              {[
+                ["general", "General"],
+                ["isoforms", "Isoforms"],
+                ["both", "Both"],
+              ].map(([k, label]) => (
+                <button key={k} className={f.isoformMode === k ? "active" : ""} onClick={() => set({ isoformMode: k })}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

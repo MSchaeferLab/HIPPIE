@@ -182,13 +182,13 @@ function App() {
       if (f.minDegree > 0) p.set("min_degree", f.minDegree);
       if (f.minAvgScore > 0) p.set("min_avg_score", f.minAvgScore);
       if (f.tissue.length > 0 && f.minRpkm > 0) p.set("min_rpkm", f.minRpkm);
-      if (f.includeIsoforms) p.set("include_isoforms", "1");
+      if (f.isoformMode !== "general") p.set("isoform_mode", f.isoformMode);
     } else {
       if (f.minScore > 0) p.set("min_score", f.minScore);
       if (f.maxScore < 1) p.set("max_score", f.maxScore);
       f.source.forEach((s) => p.append("source", s));
       f.experiment.forEach((e) => p.append("experiment", e));
-      if (f.includeIsoforms) p.set("include_isoforms", "1");
+      if (f.isoformMode !== "general") p.set("isoform_mode", f.isoformMode);
     }
     const qs = p.toString();
     window.location.href = mlSplitsUrl + (qs ? "?" + qs : "");

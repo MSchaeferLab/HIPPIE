@@ -25,6 +25,20 @@ def canonical_or_queried_q(protein_pks) -> Q:
     )
 
 
+def isoform_only_q() -> Q:
+    """Keep an edge only when at least one endpoint IS a non-canonical isoform."""
+    return Q(protein_1__isoform__isnull=False) | Q(protein_2__isoform__isnull=False)
+
+
+_ISOFORM_MODES = {"general", "isoforms", "both"}
+
+
+def parse_isoform_mode(raw_mode) -> str:
+    """Validate an isoform_mode query/body value, defaulting to 'general'."""
+    mode = (raw_mode or "general").strip().lower()
+    return mode if mode in _ISOFORM_MODES else "general"
+
+
 def apply_interaction_level_filters(
     qs,
     *,

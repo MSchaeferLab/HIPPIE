@@ -27,7 +27,7 @@ class SplitParams:
     min_rpkm: float = 0.0
     min_degree: int = 0
     min_avg_score: float = 0.0
-    include_isoforms: bool = False
+    isoform_mode: str = "general"  # general | isoforms | both
 
     # ── Negative sampling ─────────────────────────────────────────────────
     neg_ratio: float = 1.0
@@ -99,8 +99,10 @@ def build_interaction_queryset(params: SplitParams):
     )
 
     # ── Isoform handling (denormalised flag — one indexed column) ────────
-    if not params.include_isoforms:
+    if params.isoform_mode == "general":
         qs = qs.filter(involves_isoform=False)
+    elif params.isoform_mode == "isoforms":
+        qs = qs.filter(involves_isoform=True)
 
     # ── Protein-level node gating ────────────────────────────────────────
     pid_qs = allowed_protein_id_qs(params)

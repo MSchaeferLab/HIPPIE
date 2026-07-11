@@ -15,6 +15,7 @@ from .factories import (
     make_protein,
     make_interaction,
     recompute_stats,
+    recompute_flags,
 )
 
 
@@ -115,6 +116,62 @@ class MLSplitStatsTest(TestCase):
         }
         self.assertEqual(degree_hist["1"], 2)
         self.assertEqual(degree_hist["2"], 1)
+
+
+class MLSplitIsoformModeTest(TestCase):
+    """3-way ``isoform_mode`` gate on ``build_interaction_queryset`` and the
+    protein-side stats (``_protein_filtered_qs`` / ``_protein_stats``)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.a = make_protein("ISO_A", accession="ISOACC_A")
+        cls.b = make_protein("ISO_B", accession="ISOACC_B")
+        cls.iso_a = Isoform.objects.create(
+            gene=cls.a.gene,
+            uniprot_name="",
+            uniprot_accession="ISOACC_A-2",
+            general_protein=cls.a,
+        )
+        cls.canonical_ix = make_interaction(cls.a, cls.b, score=0.9)
+        cls.isoform_ix = make_interaction(cls.iso_a, cls.b, score=0.8)
+        recompute_stats()
+        recompute_flags()
+
+    def _iqs_pks(self, isoform_mode):
+        from ..services.generate_splits import SplitParams, build_interaction_queryset
+
+        qs = build_interaction_queryset(SplitParams(isoform_mode=isoform_mode))
+        return set(qs.values_list("pk", flat=True))
+
+    def test_general_excludes_isoform_edges(self):
+        pks = self._iqs_pks("general")
+        self.assertIn(self.canonical_ix.pk, pks)
+        self.assertNotIn(self.isoform_ix.pk, pks)
+
+    def test_isoforms_mode_keeps_only_isoform_edges(self):
+        pks = self._iqs_pks("isoforms")
+        self.assertNotIn(self.canonical_ix.pk, pks)
+        self.assertIn(self.isoform_ix.pk, pks)
+
+    def test_both_mode_keeps_every_edge(self):
+        pks = self._iqs_pks("both")
+        self.assertIn(self.canonical_ix.pk, pks)
+        self.assertIn(self.isoform_ix.pk, pks)
+
+    def test_protein_stats_n_isoforms_only_counted_outside_general(self):
+        from ..services.generate_splits import SplitParams, build_interaction_queryset
+        from ..views import _interaction_stats, _protein_stats
+
+        for mode, expect_isoforms in (
+            ("general", 0),
+            ("isoforms", 1),
+            ("both", 1),
+        ):
+            params = SplitParams(isoform_mode=mode)
+            iqs = build_interaction_queryset(params)
+            _interaction, degree_by_node, score_sum_by_node = _interaction_stats(iqs)
+            protein = _protein_stats(params, degree_by_node, score_sum_by_node, iqs)
+            self.assertEqual(protein["n_isoforms"], expect_isoforms, mode)
 
 
 class MLSplitPruneUnitTest(SimpleTestCase):

@@ -52,6 +52,8 @@ from .query_filters import (
     apply_protein_level_filters,
     canonical_or_queried_q,
     group_by_side,
+    isoform_only_q,
+    parse_isoform_mode,
 )
 
 
@@ -180,7 +182,7 @@ def protein_query_view(request):
 @dataclass
 class CommonFilters:
     show: str = "interactions"  # interactions | noninteractions | both
-    include_isoforms: bool = False
+    isoform_mode: str = "general"  # general | isoforms | both
     min_score: float | None = None
     max_score: float | None = None
     source_ids: list[int] = field(default_factory=list)
@@ -221,8 +223,7 @@ def _build_common_filters(get_scalar, get_list) -> CommonFilters:
         reviewed = "both"
     return CommonFilters(
         show=show,
-        include_isoforms=str(get_scalar("include_isoforms", ""))
-        in ("1", "true", "yes", "True"),
+        isoform_mode=parse_isoform_mode(get_scalar("isoform_mode")),
         min_score=_safe_float(get_scalar("min_score")),
         max_score=_safe_float(get_scalar("max_score")),
         source_ids=_int_id_list(get_list("source")),
@@ -324,25 +325,29 @@ def _protein_passes(
 
 def _interaction_edge_qs(protein_pks, f: CommonFilters):
     """Ordered, filter-applied Interaction queryset for the query / network
-    pages: every interaction touching a queried protein, with the canonical-or-
-    queried isoform gate (unless isoforms are included) and the interaction-level
-    filters applied. Callers keep their own per-row protein-level filtering."""
+    pages: every interaction touching a queried protein, gated by the isoform
+    mode (general: canonical-or-queried; isoforms: at least one isoform
+    endpoint; both: no isoform filter), plus the interaction-level filters.
+    Callers keep their own per-row protein-level filtering."""
     qs = (
         Interaction.objects.for_proteins(protein_pks)
         .with_proteins()
         .prefetch_related("sources", "experiments")
         .order_by("-score")
     )
-    if not f.include_isoforms:
+    if f.isoform_mode == "general":
         qs = qs.filter(canonical_or_queried_q(protein_pks))
+    elif f.isoform_mode == "isoforms":
+        qs = qs.filter(isoform_only_q())
     return _apply_interaction_level_filters(qs, f)
 
 
 def _noninteraction_edge_qs(protein_pks, f: CommonFilters):
     """Ordered NonInteraction queryset for the query / network pages: the
-    canonical-or-queried isoform gate plus the score range. Non-interactions
-    carry no source / experiment / type evidence, so those filters never apply
-    (callers gate the whole leg out when a source-like filter is active)."""
+    isoform-mode gate (see _interaction_edge_qs) plus the score range.
+    Non-interactions carry no source / experiment / type evidence, so those
+    filters never apply (callers gate the whole leg out when a source-like
+    filter is active)."""
     qs = (
         NonInteraction.objects.filter(
             Q(protein_1_id__in=protein_pks) | Q(protein_2_id__in=protein_pks)
@@ -350,8 +355,10 @@ def _noninteraction_edge_qs(protein_pks, f: CommonFilters):
         .select_related("protein_1", "protein_1__gene", "protein_2", "protein_2__gene")
         .order_by("-score")
     )
-    if not f.include_isoforms:
+    if f.isoform_mode == "general":
         qs = qs.filter(canonical_or_queried_q(protein_pks))
+    elif f.isoform_mode == "isoforms":
+        qs = qs.filter(isoform_only_q())
     if f.min_score is not None:
         qs = qs.filter(score__gte=f.min_score)
     if f.max_score is not None:
@@ -362,15 +369,15 @@ def _noninteraction_edge_qs(protein_pks, f: CommonFilters):
 @require_GET
 def protein_query_api(request):
     """
-    GET /api/query/?q=<identifier>[&include_isoforms=1]
+    GET /api/query/?q=<identifier>[&isoform_mode=general|isoforms|both]
 
     Resolves the identifier via Protein.objects.resolve(), then fetches
     all interactions via Interaction.objects.for_proteins().with_proteins()
     so that partner identifier mappings are available in a single round-trip.
 
-    When include_isoforms=1 and the resolved protein is a canonical (not
-    itself an isoform), the query is also run for every known isoform of
-    that protein, and all results are returned together.
+    When isoform_mode is "isoforms" or "both" and the resolved protein is a
+    canonical (not itself an isoform), the query is also run for every known
+    isoform of that protein, and all results are returned together.
 
     Response shape:
     {
@@ -394,7 +401,7 @@ def protein_query_api(request):
     """
     q = request.GET.get("q", "").strip()
     f = _common_filters_from_get(request.GET)
-    include_isoforms = f.include_isoforms
+    expand_isoforms = f.isoform_mode in ("isoforms", "both")
     show = f.show
     tissue_pks = _tissue_pk_set(f)
 
@@ -424,7 +431,7 @@ def protein_query_api(request):
     # ── Optionally expand to isoforms ─────────────────────────────────
     isoforms: list = []
     protein_pks: list[int] = [protein.pk]
-    if include_isoforms:
+    if expand_isoforms:
         isoforms = _get_isoforms(protein.pk)
         protein_pks.extend(iso.pk for iso in isoforms)
 
@@ -499,7 +506,7 @@ def protein_query_api(request):
     return JsonResponse(
         {
             "query_protein": _protein_display(protein),
-            "isoforms_included": include_isoforms,
+            "isoforms_included": expand_isoforms,
             "expanded_proteins": [_protein_display(iso) for iso in isoforms],
             "interactions": results,
             "error": None,
@@ -531,7 +538,7 @@ def interaction_query_api(request):
             { "a": "<id>", "b": "<id>", "input_order": <int> },
             ...
         ],
-        "include_isoforms": <bool>   // optional, default false
+        "isoform_mode": "general" | "isoforms" | "both"   // optional, default "general"
     }
 
     Response (JSON):
@@ -561,7 +568,7 @@ def interaction_query_api(request):
 
     raw_pairs = body.get("pairs", [])
     f = _common_filters_from_body(body)
-    include_isoforms = f.include_isoforms
+    expand_isoforms = f.isoform_mode in ("isoforms", "both")
     show = f.show
     tissue_pks = _tissue_pk_set(f)
 
@@ -584,12 +591,18 @@ def interaction_query_api(request):
         input_b = str(item.get("b", "")).strip()
         input_order = int(item.get("input_order", 0))
 
-        if include_isoforms:
+        if expand_isoforms:
             # Isoform expansion only applies to the Interaction table.
             int_rows: list[dict] = []
             if show in ("interactions", "both"):
                 int_rows = _resolve_interaction_pair_with_isoforms(
-                    input_a, input_b, input_order, isoform_cache, f, tissue_pks
+                    input_a,
+                    input_b,
+                    input_order,
+                    isoform_cache,
+                    f,
+                    tissue_pks,
+                    isoform_mode=f.isoform_mode,
                 )
             nonint_rows: list[dict] = []
             if show in ("noninteractions", "both"):
@@ -861,6 +874,7 @@ def _resolve_interaction_pair_with_isoforms(
     isoform_cache: dict,
     f: CommonFilters | None = None,
     tissue_pks: set[int] | None = None,
+    isoform_mode: str = "both",
 ) -> list[dict]:
     """
     Like _resolve_interaction_pair but expands each canonical protein side to
@@ -873,6 +887,8 @@ def _resolve_interaction_pair_with_isoforms(
       • Only interactions that actually exist in the database are returned.
       • If no combination has a recorded interaction, fall back to returning the
         original pair as "not found" (score = -1), preserving the existing UX.
+      • In "isoforms" mode, the pure canonical×canonical combo (the original,
+        unsubstituted pair) is dropped — that combo belongs to "general" mode.
 
     isoform_cache: a per-request dict[protein_pk -> list[Isoform]] to avoid
     repeated DB lookups when the same protein appears in multiple pairs.
@@ -920,7 +936,25 @@ def _resolve_interaction_pair_with_isoforms(
                 # (for correct display ordering in the response).
                 canonical_pairs[(p1_pk, p2_pk)] = (pa_pk, pb_pk)
 
+    if isoform_mode == "isoforms":
+        canonical_pairs = {
+            key: origin
+            for key, origin in canonical_pairs.items()
+            if origin != (protein_a.pk, protein_b.pk)
+        }
+
     if not canonical_pairs:
+        if isoform_mode == "isoforms":
+            return [
+                _pair_not_found(
+                    input_a,
+                    input_b,
+                    input_order,
+                    is_noninteraction=False,
+                    ua=_protein_display(protein_a),
+                    ub=_protein_display(protein_b),
+                )
+            ]
         return [_resolve_interaction_pair(input_a, input_b, input_order, f, tissue_pks)]
 
     # Fetch all interactions in a single query --------------------------------
@@ -976,6 +1010,17 @@ def _resolve_interaction_pair_with_isoforms(
 
     # If no isoform combination found anything, show original pair as not-found.
     if not found_results:
+        if isoform_mode == "isoforms":
+            return [
+                _pair_not_found(
+                    input_a,
+                    input_b,
+                    input_order,
+                    is_noninteraction=False,
+                    ua=_protein_display(protein_a),
+                    ub=_protein_display(protein_b),
+                )
+            ]
         return [_resolve_interaction_pair(input_a, input_b, input_order, f, tissue_pks)]
 
     return found_results
@@ -1009,7 +1054,7 @@ def network_query_api(request):
             "proteins": "<newline/space-separated seed identifiers>",
             ...shared FilterBox params (show, min_score, max_score, source[],
                experiment[], interaction_type[], tissue[], min_rpkm,
-               min_degree, min_avg_score, reviewed, include_isoforms)
+               min_degree, min_avg_score, reviewed, isoform_mode)
         }
 
     Builds the first-shell sub-network around the seed proteins — every edge
@@ -1058,7 +1103,7 @@ def _run_network_query(raw_proteins: str, f: CommonFilters) -> dict:
         seed_ids = seed_ids[:MAX_SEED_PROTEINS]
 
     protein_pks = list(seed_ids)
-    if f.include_isoforms:
+    if f.isoform_mode in ("isoforms", "both"):
         for pk in list(seed_ids):
             protein_pks.extend(iso.pk for iso in _get_isoforms(pk))
         protein_pks = list(dict.fromkeys(protein_pks))
@@ -1225,8 +1270,10 @@ def _filtered_protein_qs(request):
     order = ("-" + sort_field) if descending else sort_field
 
     base_qs = Protein.objects.select_related("gene")
-    if not f.include_isoforms:
+    if f.isoform_mode == "general":
         base_qs = base_qs.filter(isoform__isnull=True)
+    elif f.isoform_mode == "isoforms":
+        base_qs = base_qs.filter(isoform__isnull=False)
 
     if f.tissue_ids:
         base_qs = base_qs.expressed_in(f.tissue_ids, min_rpkm=f.min_rpkm)
@@ -1355,18 +1402,22 @@ def _browse_interaction_base(request, f: "CommonFilters", q: str):
         filters either partner side via ``IN``.
     """
     int_qs = Interaction.objects.all()
-    if not f.include_isoforms:
+    if f.isoform_mode == "general":
         int_qs = int_qs.filter(involves_isoform=False)
+    elif f.isoform_mode == "isoforms":
+        int_qs = int_qs.filter(involves_isoform=True)
     int_qs = _apply_interaction_level_filters(int_qs, f)
 
     # Non-interactions carry no evidence M2Ms, so only score / isoform / search
-    # apply. Isoform exclusion uses the anti-join (no denormalised flag on this
+    # apply. Isoform gating uses the anti-join (no denormalised flag on this
     # far smaller table).
     nonint_qs = NonInteraction.objects.all()
-    if not f.include_isoforms:
+    if f.isoform_mode == "general":
         nonint_qs = nonint_qs.filter(
             protein_1__isoform__isnull=True, protein_2__isoform__isnull=True
         )
+    elif f.isoform_mode == "isoforms":
+        nonint_qs = nonint_qs.filter(isoform_only_q())
     if f.min_score is not None:
         nonint_qs = nonint_qs.filter(score__gte=f.min_score)
     if f.max_score is not None:
@@ -1484,7 +1535,7 @@ def browse_api(request):
 def browse_interactions_api(request):
     """
     GET /api/browse/interactions/?offset&limit&q&show&min_score&max_score
-        &source&experiment&interaction_type&include_isoforms&sort&dir
+        &source&experiment&interaction_type&isoform_mode&sort&dir
 
     Server-side paginated interaction table for the browse "Interactions" tab.
     Honours the unified filter contract including the interactions /
@@ -1938,7 +1989,7 @@ def _validate_split_params(body: dict) -> dict:
             "min_rpkm": float(body.get("min_rpkm", 0.0)),
             "min_degree": int(body.get("min_degree", 0)),
             "min_avg_score": float(body.get("min_avg_score", 0.0)),
-            "include_isoforms": bool(body.get("include_isoforms", False)),
+            "isoform_mode": parse_isoform_mode(body.get("isoform_mode")),
             # negative sampling
             "neg_ratio": float(body.get("neg_ratio", 1.0)),
             "seed": int(body.get("seed", 78539105873)),
@@ -1989,7 +2040,7 @@ def ml_splits_view(request):
         "min_rpkm": _float("min_rpkm"),
         "min_degree": request.GET.get("min_degree", ""),
         "min_avg_score": _float("min_avg_score"),
-        "include_isoforms": request.GET.get("include_isoforms", "") in ("1", "true"),
+        "isoform_mode": parse_isoform_mode(request.GET.get("isoform_mode")),
     }
     return render(
         request,
@@ -2015,8 +2066,10 @@ def browse_splits_create(request):
 def _protein_filtered_qs(params):
     """Protein queryset after the protein-level filters (for the stats box)."""
     pqs = Protein.objects.all()
-    if not params.include_isoforms:
+    if params.isoform_mode == "general":
         pqs = pqs.filter(isoform__isnull=True)
+    elif params.isoform_mode == "isoforms":
+        pqs = pqs.filter(isoform__isnull=False)
     return apply_protein_level_filters(
         pqs,
         tissue_ids=params.tissue_ids,
@@ -2066,19 +2119,20 @@ def _protein_stats(
     # ``pk IN (...20k ids...)`` clause).
     n_isoforms = (
         len(degree_by_node.keys() & set(Isoform.objects.values_list("pk", flat=True)))
-        if params.include_isoforms
+        if params.isoform_mode != "general"
         else 0
     )
 
     # Proteins removed by the protein-level filter, relative to the full protein
-    # universe (respecting the isoform-inclusion toggle so the base matches the
-    # start of ``_protein_filtered_qs``). Distinct from ``n_orphaned_by_filter``,
-    # which counts proteins that pass this filter but lose all edges.
-    base_universe = (
-        Protein.objects.count()
-        if params.include_isoforms
-        else Protein.objects.filter(isoform__isnull=True).count()
-    )
+    # universe (respecting the isoform mode so the base matches the start of
+    # ``_protein_filtered_qs``). Distinct from ``n_orphaned_by_filter``, which
+    # counts proteins that pass this filter but lose all edges.
+    if params.isoform_mode == "general":
+        base_universe = Protein.objects.filter(isoform__isnull=True).count()
+    elif params.isoform_mode == "isoforms":
+        base_universe = Protein.objects.filter(isoform__isnull=False).count()
+    else:
+        base_universe = Protein.objects.count()
     n_filtered_out = base_universe - n_pass_protein_filter
 
     return {

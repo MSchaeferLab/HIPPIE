@@ -63,10 +63,15 @@ python manage.py runserver
 - Use `order by pk` for stable offset/limit pagination across chunks
 
 ## Isoform Handling
-- Canonical proteins expand to isoforms via: `ProteinUniProt → UniProtAccession → Isoform.isoform_uniprot_id`
-- Isoform input (e.g. `P37163-2`) is NOT expanded — returned as-is
+- `Isoform` is a multi-table-inheritance subclass of `Protein` (`Isoform(Protein)`); an isoform row's PK is also a `Protein` PK, joined via the implicit `protein_ptr` FK
+- On a queryset joined to `Isoform`, `isoform__isnull=True` means "canonical" (no isoform row for this protein), `isoform__isnull=False` means "is an isoform"
+- Canonical proteins expand to isoforms via `Isoform.uniprot_accession` prefix match on the canonical `Protein.uniprot_accession` (see `_get_isoforms(protein_pk)` in views.py)
+- Isoform input (e.g. `P37163-2`) is NOT expanded further — returned as-is
 - Interaction lookups across isoforms: batch all (A-isoform × B-isoform) combos in a single query per pair
-- Helper `_get_isoforms(protein_pk)` in views.py resolves canonical → isoforms
+- Isoform filtering is a 3-way `isoform_mode` param (`general | isoforms | both`) on every query/browse/ML-splits endpoint, parsed by `query_filters.parse_isoform_mode()`. Two gate predicates in `query_filters.py`:
+  - `canonical_or_queried_q(protein_pks)` — general mode: canonical-or-explicitly-queried
+  - `isoform_only_q()` — isoforms mode: at least one endpoint is a non-canonical isoform
+  - "both" mode applies neither predicate (no isoform filter)
 
 ## Project Structure
 ```
