@@ -13,16 +13,10 @@ import time
 
 from django.core.cache import cache
 from django.core.management.base import BaseCommand
-from django.db.models import Count, F, Sum
+from django.db.models import F
 
 from hippie_website.models import Interaction, Protein
-
-
-def _group(qs, col: str) -> dict[int, tuple[int, float]]:
-    return {
-        row[col]: (row["cnt"], row["sm"] or 0.0)
-        for row in qs.values(col).annotate(cnt=Count("id"), sm=Sum("score"))
-    }
+from hippie_website.query_filters import group_by_side
 
 
 class Command(BaseCommand):
@@ -40,9 +34,9 @@ class Command(BaseCommand):
         batch_size: int = options["batch_size"]
 
         self.stdout.write("Aggregating interaction counts…")
-        side1 = _group(Interaction.objects.all(), "protein_1_id")
-        side2 = _group(Interaction.objects.all(), "protein_2_id")
-        self_loops = _group(
+        side1 = group_by_side(Interaction.objects.all(), "protein_1_id")
+        side2 = group_by_side(Interaction.objects.all(), "protein_2_id")
+        self_loops = group_by_side(
             Interaction.objects.filter(protein_1_id=F("protein_2_id")), "protein_1_id"
         )
 

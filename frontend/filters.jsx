@@ -5,7 +5,7 @@
 // draft). FilterBox only renders controls and calls `onChange` with the next
 // value. One component → one place to change filters everywhere.
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 
 // ── Unified filter state ────────────────────────────────────────────────────
 export const FILTER_DEFAULTS = {
@@ -36,6 +36,56 @@ export const ALL_CONTROLS = [
   "reviewed",
   "isoforms",
 ];
+
+// Empty filter-metadata shape + loader hook. Every query page fetches the same
+// tissue/source/experiment/interaction-type option lists from its filterMetaUrl;
+// this centralises the empty default and the fetch effect.
+export const EMPTY_META = {
+  tissues: [],
+  sources: [],
+  experiments: [],
+  interaction_types: [],
+};
+
+export function useFilterMeta(url) {
+  const [meta, setMeta] = useState(EMPTY_META);
+  useEffect(() => {
+    if (url)
+      fetch(url)
+        .then((r) => r.json())
+        .then(setMeta)
+        .catch(() => {});
+  }, [url]);
+  return meta;
+}
+
+// The funnel "Filters" toggle button with its active-count badge, shared by the
+// Protein / Interaction / Browse query pages (byte-identical markup).
+export function FilterToggleButton({ activeCount, filtersOpen, onClick }) {
+  return (
+    <button
+      className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
+      onClick={onClick}
+    >
+      <i className={`bi bi-funnel${activeCount > 0 ? "-fill" : ""}`}></i>
+      Filters
+      {activeCount > 0 && (
+        <span
+          style={{
+            background: "var(--hippie-teal)",
+            color: "#fff",
+            borderRadius: "100px",
+            fontSize: ".65rem",
+            padding: ".05rem .4rem",
+            marginLeft: ".1rem",
+          }}
+        >
+          {activeCount}
+        </span>
+      )}
+    </button>
+  );
+}
 
 const _REL = (typeof window !== "undefined" && window.HIPPIE_RELEASE) || {};
 

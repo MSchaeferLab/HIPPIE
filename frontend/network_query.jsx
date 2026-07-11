@@ -13,6 +13,7 @@ import {
   filtersToBody,
   filtersEqual,
   confThresholds,
+  useFilterMeta,
 } from "./filters.jsx";
 
 const { apiUrl, filterMetaUrl, maxProteins } = window.HIPPIE_NQ_CONFIG;
@@ -273,7 +274,7 @@ function App() {
   const [filters, setFilters] = useState(FILTER_DEFAULTS);
   const [appliedFilters, setAppliedFilters] = useState(FILTER_DEFAULTS);
   const [appliedSeedKey, setAppliedSeedKey] = useState("");
-  const [meta, setMeta] = useState({ tissues: [], sources: [], experiments: [], interaction_types: [] });
+  const meta = useFilterMeta(filterMetaUrl);
 
   // Results ------------------------------------------------------------------
   const [rows, setRows] = useState([]);
@@ -284,10 +285,6 @@ function App() {
   const [showGraph, setShowGraph] = useState(true);
   const [searched, setSearched] = useState(false);
   const abortRef = useRef(null);
-
-  useEffect(() => {
-    if (filterMetaUrl) fetch(filterMetaUrl).then((r) => r.json()).then(setMeta).catch(() => {});
-  }, []);
 
   const runQuery = useCallback(async (seeds, f) => {
     if (abortRef.current) abortRef.current.abort();

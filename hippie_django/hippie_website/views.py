@@ -47,11 +47,27 @@ from .models import (
 )
 
 from .tasks import run_split_job
+from .query_filters import (
+    apply_interaction_level_filters,
+    apply_protein_level_filters,
+    canonical_or_queried_q,
+    group_by_side,
+)
 
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_json_body(request):
+    """Parse a JSON request body. Returns ``(body, None)`` on success or
+    ``(None, <400 JsonResponse>)`` when the body is not valid JSON, so every
+    POST endpoint rejects malformed input the same way."""
+    try:
+        return json.loads(request.body), None
+    except json.JSONDecodeError:
+        return None, JsonResponse({"error": "Invalid JSON body."}, status=400)
 
 
 def _protein_display(protein: Protein, isoform_uid: str | None = None) -> dict:
@@ -241,39 +257,16 @@ def _common_filters_from_body(body: dict) -> CommonFilters:
 
 
 def _apply_interaction_level_filters(qs, f: CommonFilters):
-    """Apply score / source / experiment / interaction-type filters to an
-    Interaction queryset using EXISTS over the indexed M2M through tables."""
-    if f.min_score is not None:
-        qs = qs.filter(score__gte=f.min_score)
-    if f.max_score is not None:
-        qs = qs.filter(score__lte=f.max_score)
-    if f.source_ids:
-        qs = qs.filter(
-            Exists(
-                Interaction.sources.through.objects.filter(
-                    interaction_id=OuterRef("pk"), source_id__in=f.source_ids
-                )
-            )
-        )
-    if f.experiment_ids:
-        qs = qs.filter(
-            Exists(
-                Interaction.experiments.through.objects.filter(
-                    interaction_id=OuterRef("pk"),
-                    experimenttype_id__in=f.experiment_ids,
-                )
-            )
-        )
-    if f.interaction_type_ids:
-        qs = qs.filter(
-            Exists(
-                Interaction.interaction_types.through.objects.filter(
-                    interaction_id=OuterRef("pk"),
-                    interactiontype_id__in=f.interaction_type_ids,
-                )
-            )
-        )
-    return qs
+    """Apply the CommonFilters interaction-level gates (score / source /
+    experiment / interaction-type) via the shared query_filters helper."""
+    return apply_interaction_level_filters(
+        qs,
+        min_score=f.min_score,
+        max_score=f.max_score,
+        source_ids=f.source_ids,
+        experiment_ids=f.experiment_ids,
+        type_ids=f.interaction_type_ids,
+    )
 
 
 def _interaction_matches(interaction, f: CommonFilters) -> bool:
@@ -327,6 +320,43 @@ def _protein_passes(
     if tissue_pks is not None and protein.pk not in tissue_pks:
         return False
     return True
+
+
+def _interaction_edge_qs(protein_pks, f: CommonFilters):
+    """Ordered, filter-applied Interaction queryset for the query / network
+    pages: every interaction touching a queried protein, with the canonical-or-
+    queried isoform gate (unless isoforms are included) and the interaction-level
+    filters applied. Callers keep their own per-row protein-level filtering."""
+    qs = (
+        Interaction.objects.for_proteins(protein_pks)
+        .with_proteins()
+        .prefetch_related("sources", "experiments")
+        .order_by("-score")
+    )
+    if not f.include_isoforms:
+        qs = qs.filter(canonical_or_queried_q(protein_pks))
+    return _apply_interaction_level_filters(qs, f)
+
+
+def _noninteraction_edge_qs(protein_pks, f: CommonFilters):
+    """Ordered NonInteraction queryset for the query / network pages: the
+    canonical-or-queried isoform gate plus the score range. Non-interactions
+    carry no source / experiment / type evidence, so those filters never apply
+    (callers gate the whole leg out when a source-like filter is active)."""
+    qs = (
+        NonInteraction.objects.filter(
+            Q(protein_1_id__in=protein_pks) | Q(protein_2_id__in=protein_pks)
+        )
+        .select_related("protein_1", "protein_1__gene", "protein_2", "protein_2__gene")
+        .order_by("-score")
+    )
+    if not f.include_isoforms:
+        qs = qs.filter(canonical_or_queried_q(protein_pks))
+    if f.min_score is not None:
+        qs = qs.filter(score__gte=f.min_score)
+    if f.max_score is not None:
+        qs = qs.filter(score__lte=f.max_score)
+    return qs
 
 
 @require_GET
@@ -409,22 +439,7 @@ def protein_query_api(request):
 
     results = []
     if show in ("interactions", "both"):
-        interactions_qs = (
-            Interaction.objects.for_proteins(protein_pks)
-            .with_proteins()
-            .prefetch_related("sources", "experiments")
-            .order_by("-score")
-        )
-        if not include_isoforms:
-            # Drop interactions whose partner is an isoform, but keep any
-            # isoform the user explicitly queried (protein_pks). A side is
-            # allowed when it is canonical OR is a queried protein. FK anti-join
-            # instead of a ``NOT IN (7.6k-row subquery)`` ORed across both sides.
-            interactions_qs = interactions_qs.filter(
-                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
-                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
-            )
-        interactions_qs = _apply_interaction_level_filters(interactions_qs, f)
+        interactions_qs = _interaction_edge_qs(protein_pks, f)
         for interaction in interactions_qs:
             if interaction.protein_1_id in protein_pks_set:
                 query_side, partner = interaction.protein_1, interaction.protein_2
@@ -451,25 +466,7 @@ def protein_query_api(request):
             )
 
     if show in ("noninteractions", "both") and not f.has_source_like:
-        noninteractions_qs = (
-            NonInteraction.objects.filter(
-                Q(protein_1_id__in=protein_pks) | Q(protein_2_id__in=protein_pks)
-            )
-            .select_related(
-                "protein_1", "protein_1__gene", "protein_2", "protein_2__gene"
-            )
-            .order_by("-score")
-        )
-        if not include_isoforms:
-            # See the interactions branch above — same canonical-or-queried rule.
-            noninteractions_qs = noninteractions_qs.filter(
-                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
-                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
-            )
-        if f.min_score is not None:
-            noninteractions_qs = noninteractions_qs.filter(score__gte=f.min_score)
-        if f.max_score is not None:
-            noninteractions_qs = noninteractions_qs.filter(score__lte=f.max_score)
+        noninteractions_qs = _noninteraction_edge_qs(protein_pks, f)
         for ni in noninteractions_qs:
             if ni.protein_1_id in protein_pks_set:
                 query_side, partner = ni.protein_1, ni.protein_2
@@ -558,10 +555,9 @@ def interaction_query_api(request):
         ]
     }
     """
-    try:
-        body = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+    body, err = _parse_json_body(request)
+    if err:
+        return err
 
     raw_pairs = body.get("pairs", [])
     f = _common_filters_from_body(body)
@@ -651,89 +647,65 @@ def interaction_query_api(request):
     return JsonResponse({"results": results})
 
 
-def _resolve_interaction_pair(
+def _pair_not_found(
     input_a: str,
     input_b: str,
     input_order: int,
-    f: CommonFilters | None = None,
-    tissue_pks: set[int] | None = None,
+    *,
+    is_noninteraction: bool,
+    ua: dict | None = None,
+    ub: dict | None = None,
 ) -> dict:
-    """
-    Resolve two identifiers to proteins, look up their interaction,
-    and return a result row.
+    """Build the not-found (score -1) row for an input pair.
 
-    A score of -1.0 signals "not found" (either protein unknown, or
-    no interaction recorded between them).
+    When ``ua`` / ``ub`` (the ``_protein_display`` dicts) are given the proteins
+    resolved but no (non-)interaction was recorded / it failed the filters;
+    otherwise an identifier was unknown. Non-interactions carry no evidence
+    counts (``None``); interactions report ``0``.
     """
-    NOT_FOUND = {
+    counts = None if is_noninteraction else 0
+    return {
         "input_order": input_order,
         "input_a": input_a,
         "input_b": input_b,
-        "symbol_a": input_a,
-        "symbol_b": input_b,
-        "uniprot_a": "",
-        "uniprot_b": "",
-        "isoform_uniprot_a": None,
-        "isoform_uniprot_b": None,
+        "symbol_a": ua["symbol"] if ua else input_a,
+        "symbol_b": ub["symbol"] if ub else input_b,
+        "uniprot_a": ua["uniprot_id"] if ua else "",
+        "uniprot_b": ub["uniprot_id"] if ub else "",
+        "isoform_uniprot_a": ua["isoform_uniprot_id"] if ua else None,
+        "isoform_uniprot_b": ub["isoform_uniprot_id"] if ub else None,
         "score": -1.0,
-        "source_count": 0,
-        "experiment_count": 0,
-        "entrez_a": None,
-        "entrez_b": None,
-        "is_reviewed_a": None,
-        "is_reviewed_b": None,
-        "is_noninteraction": False,
+        "source_count": counts,
+        "experiment_count": counts,
+        "entrez_a": ua["gene_id"] if ua else None,
+        "entrez_b": ub["gene_id"] if ub else None,
+        "is_reviewed_a": ua["is_reviewed"] if ua else None,
+        "is_reviewed_b": ub["is_reviewed"] if ub else None,
+        "is_noninteraction": is_noninteraction,
         "interaction_id": None,
         "detail_url": "",
     }
 
-    protein_a = Protein.objects.resolve(input_a).select_related("gene").first()
-    protein_b = Protein.objects.resolve(input_b).select_related("gene").first()
 
-    if protein_a is None or protein_b is None:
-        return NOT_FOUND
-
-    p1, p2 = (
-        (protein_a, protein_b)
-        if protein_a.pk <= protein_b.pk
-        else (protein_b, protein_a)
+def _pair_row(
+    ua: dict,
+    ub: dict,
+    *,
+    input_a: str,
+    input_b: str,
+    input_order: int,
+    score: float,
+    source_count,
+    experiment_count,
+    obj_pk: int,
+    is_noninteraction: bool,
+) -> dict:
+    """Build a found-pair result row from two ``_protein_display`` dicts."""
+    route = (
+        "hippie_website:noninteraction_detail"
+        if is_noninteraction
+        else "hippie_website:interaction_detail"
     )
-
-    ua = _protein_display(protein_a)
-    ub = _protein_display(protein_b)
-    resolved_not_found = {
-        **NOT_FOUND,
-        "symbol_a": ua["symbol"],
-        "symbol_b": ub["symbol"],
-        "uniprot_a": ua["uniprot_id"],
-        "uniprot_b": ub["uniprot_id"],
-        "entrez_a": ua["gene_id"],
-        "entrez_b": ub["gene_id"],
-        "is_reviewed_a": ua["is_reviewed"],
-        "is_reviewed_b": ub["is_reviewed"],
-        "isoform_uniprot_a": ua["isoform_uniprot_id"],
-        "isoform_uniprot_b": ub["isoform_uniprot_id"],
-    }
-
-    try:
-        interaction = (
-            Interaction.objects.with_proteins()
-            .prefetch_related("sources", "experiments", "interaction_types")
-            .get(protein_1=p1, protein_2=p2)
-        )
-    except Interaction.DoesNotExist:
-        # Proteins resolved but no interaction on record.
-        return resolved_not_found
-
-    # A found interaction that fails the active filters is reported as
-    # not-found (score -1) rather than dropped, so every input pair keeps a row.
-    if f is not None and (
-        not _interaction_matches(interaction, f)
-        or not _protein_passes(protein_a, f, tissue_pks)
-        or not _protein_passes(protein_b, f, tissue_pks)
-    ):
-        return resolved_not_found
-
     return {
         "input_order": input_order,
         "input_a": input_a,
@@ -748,15 +720,125 @@ def _resolve_interaction_pair(
         "isoform_uniprot_b": ub["isoform_uniprot_id"],
         "is_reviewed_a": ua["is_reviewed"],
         "is_reviewed_b": ub["is_reviewed"],
-        "score": round(interaction.score, 4),
-        "source_count": interaction.sources.all().count(),
-        "experiment_count": interaction.experiments.all().count(),
-        "interaction_id": interaction.pk,
-        "is_noninteraction": False,
-        "detail_url": reverse(
-            "hippie_website:interaction_detail", args=[interaction.pk]
-        ),
+        "score": round(score, 4),
+        "source_count": source_count,
+        "experiment_count": experiment_count,
+        "interaction_id": obj_pk,
+        "is_noninteraction": is_noninteraction,
+        "detail_url": reverse(route, args=[obj_pk]),
     }
+
+
+def _resolve_pair(
+    input_a: str,
+    input_b: str,
+    input_order: int,
+    f: CommonFilters | None = None,
+    tissue_pks: set[int] | None = None,
+    *,
+    is_noninteraction: bool,
+) -> dict:
+    """
+    Resolve two identifiers to proteins and look up their (non-)interaction,
+    returning a result row. A score of -1.0 signals "not found" (either protein
+    unknown, or no record between them / it failed the active filters).
+
+    A found (non-)interaction that fails the active filters is reported as
+    not-found rather than dropped, so every input pair keeps exactly one row.
+    """
+    protein_a = Protein.objects.resolve(input_a).select_related("gene").first()
+    protein_b = Protein.objects.resolve(input_b).select_related("gene").first()
+
+    if protein_a is None or protein_b is None:
+        return _pair_not_found(
+            input_a, input_b, input_order, is_noninteraction=is_noninteraction
+        )
+
+    p1, p2 = (
+        (protein_a, protein_b)
+        if protein_a.pk <= protein_b.pk
+        else (protein_b, protein_a)
+    )
+    ua = _protein_display(protein_a)
+    ub = _protein_display(protein_b)
+
+    def _nf() -> dict:
+        return _pair_not_found(
+            input_a,
+            input_b,
+            input_order,
+            is_noninteraction=is_noninteraction,
+            ua=ua,
+            ub=ub,
+        )
+
+    if is_noninteraction:
+        try:
+            obj = NonInteraction.objects.get(protein_1=p1, protein_2=p2)
+        except NonInteraction.DoesNotExist:
+            return _nf()
+        # Non-interactions carry no sources / experiments / interaction-types, so
+        # any source-like filter excludes them; score + protein filters still apply.
+        if f is not None and (
+            f.has_source_like
+            or (f.min_score is not None and obj.score < f.min_score)
+            or (f.max_score is not None and obj.score > f.max_score)
+            or not _protein_passes(protein_a, f, tissue_pks)
+            or not _protein_passes(protein_b, f, tissue_pks)
+        ):
+            return _nf()
+        return _pair_row(
+            ua,
+            ub,
+            input_a=input_a,
+            input_b=input_b,
+            input_order=input_order,
+            score=obj.score,
+            source_count=None,
+            experiment_count=None,
+            obj_pk=obj.pk,
+            is_noninteraction=True,
+        )
+
+    try:
+        obj = (
+            Interaction.objects.with_proteins()
+            .prefetch_related("sources", "experiments", "interaction_types")
+            .get(protein_1=p1, protein_2=p2)
+        )
+    except Interaction.DoesNotExist:
+        return _nf()
+    if f is not None and (
+        not _interaction_matches(obj, f)
+        or not _protein_passes(protein_a, f, tissue_pks)
+        or not _protein_passes(protein_b, f, tissue_pks)
+    ):
+        return _nf()
+    return _pair_row(
+        ua,
+        ub,
+        input_a=input_a,
+        input_b=input_b,
+        input_order=input_order,
+        score=obj.score,
+        source_count=obj.sources.all().count(),
+        experiment_count=obj.experiments.all().count(),
+        obj_pk=obj.pk,
+        is_noninteraction=False,
+    )
+
+
+def _resolve_interaction_pair(
+    input_a: str,
+    input_b: str,
+    input_order: int,
+    f: CommonFilters | None = None,
+    tissue_pks: set[int] | None = None,
+) -> dict:
+    """Resolve a pair against the Interaction table (see _resolve_pair)."""
+    return _resolve_pair(
+        input_a, input_b, input_order, f, tissue_pks, is_noninteraction=False
+    )
 
 
 def _resolve_noninteraction_pair(
@@ -766,100 +848,10 @@ def _resolve_noninteraction_pair(
     f: CommonFilters | None = None,
     tissue_pks: set[int] | None = None,
 ) -> dict:
-    """
-    Resolve two identifiers to proteins, look up their non-interaction record
-    in the NonInteraction table, and return a result row.
-
-    A score of -1.0 signals "not found".  Non-interactions never have source or
-    experiment counts (those fields are None in the response).
-    """
-    NOT_FOUND = {
-        "input_order": input_order,
-        "input_a": input_a,
-        "input_b": input_b,
-        "symbol_a": input_a,
-        "symbol_b": input_b,
-        "uniprot_a": "",
-        "uniprot_b": "",
-        "isoform_uniprot_a": None,
-        "isoform_uniprot_b": None,
-        "score": -1.0,
-        "source_count": None,
-        "experiment_count": None,
-        "entrez_a": None,
-        "entrez_b": None,
-        "is_reviewed_a": None,
-        "is_reviewed_b": None,
-        "is_noninteraction": True,
-        "interaction_id": None,
-        "detail_url": "",
-    }
-
-    protein_a = Protein.objects.resolve(input_a).select_related("gene").first()
-    protein_b = Protein.objects.resolve(input_b).select_related("gene").first()
-
-    if protein_a is None or protein_b is None:
-        return NOT_FOUND
-
-    p1, p2 = (
-        (protein_a, protein_b)
-        if protein_a.pk <= protein_b.pk
-        else (protein_b, protein_a)
+    """Resolve a pair against the NonInteraction table (see _resolve_pair)."""
+    return _resolve_pair(
+        input_a, input_b, input_order, f, tissue_pks, is_noninteraction=True
     )
-
-    ua = _protein_display(protein_a)
-    ub = _protein_display(protein_b)
-    resolved_not_found = {
-        **NOT_FOUND,
-        "symbol_a": ua["symbol"],
-        "symbol_b": ub["symbol"],
-        "uniprot_a": ua["uniprot_id"],
-        "uniprot_b": ub["uniprot_id"],
-        "entrez_a": ua["gene_id"],
-        "entrez_b": ub["gene_id"],
-        "is_reviewed_a": ua["is_reviewed"],
-        "is_reviewed_b": ub["is_reviewed"],
-        "isoform_uniprot_a": ua["isoform_uniprot_id"],
-        "isoform_uniprot_b": ub["isoform_uniprot_id"],
-    }
-
-    try:
-        ni = NonInteraction.objects.get(protein_1=p1, protein_2=p2)
-    except NonInteraction.DoesNotExist:
-        return resolved_not_found
-
-    # Non-interactions carry no sources / experiments / interaction-types, so any
-    # source-like filter excludes them; score + protein-level filters still apply.
-    if f is not None and (
-        f.has_source_like
-        or (f.min_score is not None and ni.score < f.min_score)
-        or (f.max_score is not None and ni.score > f.max_score)
-        or not _protein_passes(protein_a, f, tissue_pks)
-        or not _protein_passes(protein_b, f, tissue_pks)
-    ):
-        return resolved_not_found
-
-    return {
-        "input_order": input_order,
-        "input_a": input_a,
-        "input_b": input_b,
-        "symbol_a": ua["symbol"],
-        "symbol_b": ub["symbol"],
-        "uniprot_a": ua["uniprot_id"],
-        "uniprot_b": ub["uniprot_id"],
-        "entrez_a": ua["gene_id"],
-        "entrez_b": ub["gene_id"],
-        "isoform_uniprot_a": ua["isoform_uniprot_id"],
-        "isoform_uniprot_b": ub["isoform_uniprot_id"],
-        "is_reviewed_a": ua["is_reviewed"],
-        "is_reviewed_b": ub["is_reviewed"],
-        "score": round(ni.score, 4),
-        "source_count": None,
-        "experiment_count": None,
-        "is_noninteraction": True,
-        "interaction_id": ni.pk,
-        "detail_url": reverse("hippie_website:noninteraction_detail", args=[ni.pk]),
-    }
 
 
 def _resolve_interaction_pair_with_isoforms(
@@ -968,29 +960,18 @@ def _resolve_interaction_pair_with_isoforms(
         ua = _protein_display(pa, isoform_uid_map.get(pa_pk))
         ub = _protein_display(pb, isoform_uid_map.get(pb_pk))
         found_results.append(
-            {
-                "input_order": input_order,
-                "input_a": input_a,
-                "input_b": input_b,
-                "symbol_a": ua["symbol"],
-                "symbol_b": ub["symbol"],
-                "uniprot_a": ua["uniprot_id"],
-                "uniprot_b": ub["uniprot_id"],
-                "entrez_a": ua["gene_id"],
-                "entrez_b": ub["gene_id"],
-                "isoform_uniprot_a": ua["isoform_uniprot_id"],
-                "isoform_uniprot_b": ub["isoform_uniprot_id"],
-                "is_reviewed_a": ua["is_reviewed"],
-                "is_reviewed_b": ub["is_reviewed"],
-                "score": round(interaction.score, 4),
-                "source_count": interaction.sources.all().count(),
-                "experiment_count": interaction.experiments.all().count(),
-                "interaction_id": interaction.pk,
-                "is_noninteraction": False,
-                "detail_url": reverse(
-                    "hippie_website:interaction_detail", args=[interaction.pk]
-                ),
-            }
+            _pair_row(
+                ua,
+                ub,
+                input_a=input_a,
+                input_b=input_b,
+                input_order=input_order,
+                score=interaction.score,
+                source_count=interaction.sources.all().count(),
+                experiment_count=interaction.experiments.all().count(),
+                obj_pk=interaction.pk,
+                is_noninteraction=False,
+            )
         )
 
     # If no isoform combination found anything, show original pair as not-found.
@@ -1003,21 +984,6 @@ def _resolve_interaction_pair_with_isoforms(
 # ---------------------------------------------------------------------------
 # Network query
 # ---------------------------------------------------------------------------
-
-# Choices passed to the template for the filter form
-# _DIRECTIONALITY_CHOICES = [
-#    ("any",      "Any"),
-#    ("directed", "Directed only"),
-#    ("undirected","Undirected only"),
-# ]
-
-# _EFFECT_CHOICES = [
-#    ("activation",  "Activation"),
-#    ("inhibition",  "Inhibition"),
-#    ("binding",     "Binding"),
-#    ("reaction",    "Reaction"),
-#    ("other",       "Other / unknown"),
-# ]
 
 
 # Seed / edge caps. Layer semantics are fixed to first-shell ("set vs. HIPPIE")
@@ -1066,10 +1032,9 @@ def network_query_api(request):
 
     ``a`` / ``b`` are _protein_display() dicts for protein_1 / protein_2.
     """
-    try:
-        body = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+    body, err = _parse_json_body(request)
+    if err:
+        return err
 
     f = _common_filters_from_body(body)
     result = _run_network_query(str(body.get("proteins", "")), f)
@@ -1125,21 +1090,7 @@ def _run_network_query(raw_proteins: str, f: CommonFilters) -> dict:
 
     # -- 2. Interactions --------------------------------------------------
     if f.show in ("interactions", "both"):
-        qs = (
-            Interaction.objects.for_proteins(protein_pks)
-            .with_proteins()
-            .prefetch_related("sources", "experiments")
-            .order_by("-score")
-        )
-        if not f.include_isoforms:
-            # Drop edges whose partner is an isoform, but keep any isoform the
-            # user explicitly seeded (same canonical-or-queried rule as the
-            # Protein / Interaction query pages).
-            qs = qs.filter(
-                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
-                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
-            )
-        qs = _apply_interaction_level_filters(qs, f)
+        qs = _interaction_edge_qs(protein_pks, f)
         for ix in qs:
             p1, p2 = ix.protein_1, ix.protein_2
             if not _passes_protein_level(p1, p2):
@@ -1165,24 +1116,7 @@ def _run_network_query(raw_proteins: str, f: CommonFilters) -> dict:
     # NonInteractions carry no sources / experiments / interaction types, so a
     # source-like filter excludes them entirely (mirrors protein_query_api).
     if f.show in ("noninteractions", "both") and not f.has_source_like:
-        nqs = (
-            NonInteraction.objects.filter(
-                Q(protein_1_id__in=protein_pks) | Q(protein_2_id__in=protein_pks)
-            )
-            .select_related(
-                "protein_1", "protein_1__gene", "protein_2", "protein_2__gene"
-            )
-            .order_by("-score")
-        )
-        if not f.include_isoforms:
-            nqs = nqs.filter(
-                (Q(protein_1__isoform__isnull=True) | Q(protein_1_id__in=protein_pks))
-                & (Q(protein_2__isoform__isnull=True) | Q(protein_2_id__in=protein_pks))
-            )
-        if f.min_score is not None:
-            nqs = nqs.filter(score__gte=f.min_score)
-        if f.max_score is not None:
-            nqs = nqs.filter(score__lte=f.max_score)
+        nqs = _noninteraction_edge_qs(protein_pks, f)
         for ni in nqs:
             p1, p2 = ni.protein_1, ni.protein_2
             if not _passes_protein_level(p1, p2):
@@ -1769,6 +1703,29 @@ def _safe_float(value):
         return None
 
 
+def _filter_option_lists() -> dict:
+    """Tissue / source / experiment / interaction-type option lists for the
+    filter controls. Shared by ``browse_filter_meta`` (the query pages) and
+    ``_ml_filter_meta`` (the ML-splits page). Sources are limited to those with
+    at least one connected interaction."""
+    from .models import Source, ExperimentType
+
+    return {
+        "tissues": list(Tissue.objects.order_by("name").values("id", "name")),
+        "sources": list(
+            Source.objects.filter(n_connected_interactions__gt=0)
+            .order_by("name")
+            .values("id", "name")
+        ),
+        "experiments": list(
+            ExperimentType.objects.order_by("name").values("id", "name")
+        ),
+        "interaction_types": list(
+            InteractionType.objects.order_by("name").values("id", "name")
+        ),
+    }
+
+
 @require_GET
 def browse_filter_meta(request):
     """
@@ -1778,34 +1735,27 @@ def browse_filter_meta(request):
     {
         "tissues":     [{ "id": <int>, "name": "<str>" }, ...],
         "sources":     [{ "id": <int>, "name": "<str>" }, ...],
-        "experiments": [{ "id": <int>, "name": "<str>" }, ...]   # interactions mode
+        "experiments": [{ "id": <int>, "name": "<str>" }, ...],
+        "interaction_types": [{ "id": <int>, "name": "<str>" }, ...]
     }
     """
-    from .models import Tissue, Source, ExperimentType
-
-    tissues = list(Tissue.objects.order_by("name").values("id", "name"))
-    sources = list(
-        Source.objects.filter(n_connected_interactions__gt=0)
-        .order_by("name")
-        .values("id", "name")
-    )
-    experiments = list(ExperimentType.objects.order_by("name").values("id", "name"))
-    interaction_types = list(
-        InteractionType.objects.order_by("name").values("id", "name")
-    )
-    return JsonResponse(
-        {
-            "tissues": tissues,
-            "sources": sources,
-            "experiments": experiments,
-            "interaction_types": interaction_types,
-        }
-    )
+    return JsonResponse(_filter_option_lists())
 
 
 # ---------------------------------------------------------------------------
 # Interaction detail view
 # ---------------------------------------------------------------------------
+
+
+def _protein_detail_ctx(protein) -> dict:
+    """Interactor context dict for the detail templates (protein_pair_base.html):
+    the raw protein plus its display accession, Entrez id, and gene symbol."""
+    return {
+        "protein": protein,
+        "uniprot_id": protein.uniprot_accession,
+        "gene_id": protein.gene.entrez_id or None,
+        "symbol": protein.gene.entrez_name or protein.uniprot_name,
+    }
 
 
 @require_GET
@@ -1857,18 +1807,8 @@ def interaction_detail_view(request, pk: int):
 
     context = {
         "interaction": interaction,
-        "p1": {
-            "protein": p1,
-            "uniprot_id": p1.uniprot_accession,
-            "gene_id": p1.gene.entrez_id or None,
-            "symbol": p1.gene.entrez_name or p1.uniprot_name,
-        },
-        "p2": {
-            "protein": p2,
-            "uniprot_id": p2.uniprot_accession,
-            "gene_id": p2.gene.entrez_id or None,
-            "symbol": p2.gene.entrez_name or p2.uniprot_name,
-        },
+        "p1": _protein_detail_ctx(p1),
+        "p2": _protein_detail_ctx(p2),
         # All prefetched — .all() hits the cache.
         "sources": sources,
         "publications": interaction.publications.all(),
@@ -1915,18 +1855,8 @@ def noninteraction_detail_view(request, pk: int):
     p2 = noninteraction.protein_2
     context = {
         "noninteraction": noninteraction,
-        "p1": {
-            "protein": p1,
-            "uniprot_id": p1.uniprot_accession,
-            "gene_id": p1.gene.entrez_id or None,
-            "symbol": p1.gene.entrez_name or p1.uniprot_name,
-        },
-        "p2": {
-            "protein": p2,
-            "uniprot_id": p2.uniprot_accession,
-            "gene_id": p2.gene.entrez_id or None,
-            "symbol": p2.gene.entrez_name or p2.uniprot_name,
-        },
+        "p1": _protein_detail_ctx(p1),
+        "p2": _protein_detail_ctx(p2),
         "bait_prey_total_tested": bait_prey_total_tested,
         "bait_prey_times_observed": bait_prey_times_observed,
         # Shared with protein_pair_base.html
@@ -2034,22 +1964,7 @@ def _validate_split_params(body: dict) -> dict:
 
 def _ml_filter_meta() -> dict:
     """Filter option lists for the editable ML-splits controls."""
-    from .models import Source, ExperimentType
-
-    return {
-        "tissues": list(Tissue.objects.order_by("name").values("id", "name")),
-        "sources": list(
-            Source.objects.filter(n_connected_interactions__gt=0)
-            .order_by("name")
-            .values("id", "name")
-        ),
-        "experiments": list(
-            ExperimentType.objects.order_by("name").values("id", "name")
-        ),
-        "interaction_types": list(
-            InteractionType.objects.order_by("name").values("id", "name")
-        ),
-    }
+    return _filter_option_lists()
 
 
 @require_GET
@@ -2088,7 +2003,9 @@ def ml_splits_view(request):
 
 @require_POST
 def browse_splits_create(request):
-    body = json.loads(request.body)
+    body, err = _parse_json_body(request)
+    if err:
+        return err
     params = _validate_split_params(body)  # raises 400 on bad input
     job = SplitJob.objects.create(params=params)
     run_split_job.delay(str(job.id))
@@ -2100,16 +2017,13 @@ def _protein_filtered_qs(params):
     pqs = Protein.objects.all()
     if not params.include_isoforms:
         pqs = pqs.filter(isoform__isnull=True)
-    if params.tissue_ids:
-        pqs = pqs.expressed_in(
-            list(params.tissue_ids),
-            min_rpkm=params.min_rpkm if params.min_rpkm > 0 else None,
-        )
-    if params.min_degree > 0:
-        pqs = pqs.filter(degree__gte=params.min_degree)
-    if params.min_avg_score > 0:
-        pqs = pqs.filter(avg_score__gte=params.min_avg_score)
-    return pqs
+    return apply_protein_level_filters(
+        pqs,
+        tissue_ids=params.tissue_ids,
+        min_rpkm=params.min_rpkm,
+        min_degree=params.min_degree,
+        min_avg_score=params.min_avg_score,
+    )
 
 
 def _protein_stats(
@@ -2207,25 +2121,19 @@ def _bucket_degrees(degree_by_node: dict) -> list:
 
 
 def _interaction_stats(iqs) -> tuple[dict, dict[int, int], dict[int, float]]:
-    from django.db.models import Count, F, Sum
+    from django.db.models import Count, F
     from django.db.models.functions import Floor
 
     from .models import Interaction
 
     # Per-node degree + score-sum via DB-side GROUP BY (one per FK side), riding
     # the (protein_1, score) / (protein_2, score) covering indexes — so we never
-    # stream the filtered edges into Python. Same pattern as
-    # recompute_protein_stats._group. A self-loop (protein_1 == protein_2) lands
+    # stream the filtered edges into Python. Shared with recompute_protein_stats
+    # via query_filters.group_by_side. A self-loop (protein_1 == protein_2) lands
     # in both side1 and side2, so it counts twice — matching the old
     # edge-by-edge loop that incremented both endpoints.
-    side1 = {
-        r["protein_1_id"]: (r["c"], r["s"] or 0.0)
-        for r in iqs.values("protein_1_id").annotate(c=Count("id"), s=Sum("score"))
-    }
-    side2 = {
-        r["protein_2_id"]: (r["c"], r["s"] or 0.0)
-        for r in iqs.values("protein_2_id").annotate(c=Count("id"), s=Sum("score"))
-    }
+    side1 = group_by_side(iqs, "protein_1_id")
+    side2 = group_by_side(iqs, "protein_2_id")
     degree_by_node: dict[int, int] = {}
     score_sum_by_node: dict[int, float] = {}
     for pk in side1.keys() | side2.keys():
@@ -2288,7 +2196,9 @@ def browse_splits_stats(request):
     ``browse_splits_create``."""
     from .services.generate_splits import SplitParams, build_interaction_queryset
 
-    body = json.loads(request.body)
+    body, err = _parse_json_body(request)
+    if err:
+        return err
     params = SplitParams(**_validate_split_params(body))
     iqs = build_interaction_queryset(params)
     interaction_stats, degree_by_node, score_sum_by_node = _interaction_stats(iqs)

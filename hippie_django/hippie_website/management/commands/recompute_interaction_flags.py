@@ -21,23 +21,10 @@ import time
 
 from django.core.cache import cache
 from django.core.management.base import BaseCommand
-from django.db.models import Count, OuterRef, Q, Subquery
-from django.db.models.functions import Coalesce
+from django.db.models import Q
 
 from hippie_website.models import Interaction, Isoform
-
-
-def _edge_count_subquery(through):
-    """Correlated per-interaction edge count over one M2M through table."""
-    return Coalesce(
-        Subquery(
-            through.objects.filter(interaction_id=OuterRef("pk"))
-            .values("interaction_id")
-            .annotate(c=Count("pk"))
-            .values("c")
-        ),
-        0,
-    )
+from hippie_website.query_filters import recompute_evidence_counts
 
 
 class Command(BaseCommand):
@@ -59,10 +46,7 @@ class Command(BaseCommand):
             ).update(involves_isoform=True)
 
         # Refresh denormalised evidence counts from the M2M through tables.
-        Interaction.objects.update(
-            n_sources=_edge_count_subquery(Interaction.sources.through),
-            n_experiments=_edge_count_subquery(Interaction.experiments.through),
-        )
+        recompute_evidence_counts(Interaction.objects.all())
 
         # Invalidate cached browse totals (epoch bump — see views._cached_total).
         cache.set("browse:epoch", int(time.time()))

@@ -11,6 +11,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import re
@@ -23,6 +24,7 @@ from django.core.management.base import BaseCommand, CommandParser
 from django.db import connection, transaction
 from django.db.models.functions import Lower
 
+from ._mitab import open_mitab
 
 from hippie_website.models import (
     ExperimentType,
@@ -344,13 +346,9 @@ def _parse_intact_or_biogrid(
         id_idx_1 = 2
         id_idx_2 = 3
 
-    with open(path, encoding="utf-8", errors="replace") as fh:
+    with contextlib.closing(open_mitab(path)) as fh:
         for line in fh:
-            line = line.rstrip("\n")
-            if line.startswith("#") or not line:
-                continue
             total += 1
-            line = line.split("\t")
             both_human = line[9].startswith("taxid:9606") and line[10].startswith(
                 "taxid:9606"
             )

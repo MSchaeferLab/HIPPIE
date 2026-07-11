@@ -1,5 +1,6 @@
 from .hippie_update import get_human_gene_map
 from ._sources import data_path, mod_sources, stream_url
+from ._mitab import open_mitab
 from collections.abc import Iterator
 from django.core.management.base import BaseCommand
 from hippie_website.models import Gene, Interaction, Species, OrthologInteraction
@@ -267,36 +268,26 @@ def _stream_intact(source: str | None = None) -> Iterator[tuple[str, str, str, s
     """
     import os
 
-    if source and os.path.exists(source):
-        raw: io.BufferedIOBase | gzip.GzipFile = open(source, "rb")
-        if source.endswith(".gz"):
-            raw = gzip.GzipFile(fileobj=raw)
-    else:
-        raw = _open(INTACT_FTP_URL)
-
-    text = io.TextIOWrapper(raw, encoding="utf-8", errors="replace")
-    try:
-        for line in text:
-            if line.startswith("#") or line.startswith("ID"):
-                continue
-            parts = line.split("\t")
-            if len(parts) < 11:
-                continue
-            taxon_a = _taxon_of(parts[9])
-            taxon_b = _taxon_of(parts[10])
-            if taxon_a is None or taxon_b is None:
-                continue
-            if not (taxon_a in TAXONS or taxon_b in TAXONS):
-                continue
-            if taxon_a != taxon_b and taxon_a != "9606" and taxon_b != "9606":
-                continue
-            raw_a = parts[0].replace("uniprotkb:", "").split("-")[0]
-            raw_b = parts[1].replace("uniprotkb:", "").split("-")[0]
-            if not raw_a or not raw_b or "|" in raw_a or "|" in raw_b:
-                continue
-            yield raw_a, raw_b, taxon_a, taxon_b
-    finally:
-        text.close()
+    src = source if (source and os.path.exists(source)) else INTACT_FTP_URL
+    for parts in open_mitab(src):
+        # open_mitab already skips '#'/blank lines; drop the MITAB header row too.
+        if parts[0].startswith("ID"):
+            continue
+        if len(parts) < 11:
+            continue
+        taxon_a = _taxon_of(parts[9])
+        taxon_b = _taxon_of(parts[10])
+        if taxon_a is None or taxon_b is None:
+            continue
+        if not (taxon_a in TAXONS or taxon_b in TAXONS):
+            continue
+        if taxon_a != taxon_b and taxon_a != "9606" and taxon_b != "9606":
+            continue
+        raw_a = parts[0].replace("uniprotkb:", "").split("-")[0]
+        raw_b = parts[1].replace("uniprotkb:", "").split("-")[0]
+        if not raw_a or not raw_b or "|" in raw_a or "|" in raw_b:
+            continue
+        yield raw_a, raw_b, taxon_a, taxon_b
 
 
 # ---------------------------------------------------------------------------

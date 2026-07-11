@@ -1,13 +1,15 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { getCookie } from "./shared.jsx";
 import { InteractionTable } from "./tables.jsx";
 import {
   FilterBox,
+  FilterToggleButton,
   FILTER_DEFAULTS,
   filtersToBody,
   countActiveFilters,
   filtersEqual,
+  useFilterMeta,
 } from "./filters.jsx";
 
 const { apiUrl, filterMetaUrl, maxPairs, batchSize } = window.HIPPIE_IQ_CONFIG;
@@ -93,7 +95,7 @@ function App() {
   const [filters, setFilters] = useState(FILTER_DEFAULTS);
   const [appliedFilters, setAppliedFilters] = useState(FILTER_DEFAULTS);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [meta, setMeta] = useState({ tissues: [], sources: [], experiments: [], interaction_types: [] });
+  const meta = useFilterMeta(filterMetaUrl);
 
   // Results ------------------------------------------------------------------
   const [rows, setRows] = useState([]);
@@ -101,10 +103,6 @@ function App() {
   const [progress, setProgress] = useState(0);
   const [globalErr, setGlobalErr] = useState(null);
   const abortRef = useRef(null);
-
-  useEffect(() => {
-    if (filterMetaUrl) fetch(filterMetaUrl).then((r) => r.json()).then(setMeta).catch(() => {});
-  }, []);
 
   const runQuery = useCallback(async (pairs, f) => {
     if (abortRef.current) abortRef.current.abort();
@@ -286,27 +284,11 @@ function App() {
             ))}
           </div>
           <div className="d-flex align-items-center gap-2">
-            <button
-              className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
+            <FilterToggleButton
+              activeCount={activeCount}
+              filtersOpen={filtersOpen}
               onClick={() => setFiltersOpen((o) => !o)}
-            >
-              <i className={`bi bi-funnel${activeCount > 0 ? "-fill" : ""}`}></i>
-              Filters
-              {activeCount > 0 && (
-                <span
-                  style={{
-                    background: "var(--hippie-teal)",
-                    color: "#fff",
-                    borderRadius: "100px",
-                    fontSize: ".65rem",
-                    padding: ".05rem .4rem",
-                    marginLeft: ".1rem",
-                  }}
-                >
-                  {activeCount}
-                </span>
-              )}
-            </button>
+            />
             <button
               className="btn-hippie"
               onClick={submit}

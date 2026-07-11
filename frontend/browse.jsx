@@ -1,12 +1,19 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { InteractionTable, ProteinTable } from "./tables.jsx";
+import {
+  InteractionTable,
+  ProteinTable,
+  DEFAULT_PAGE_SIZE,
+  defaultSortDir,
+} from "./tables.jsx";
 import {
   FilterBox,
+  FilterToggleButton,
   FILTER_DEFAULTS,
   filtersToQuery,
   countActiveFilters,
   filtersEqual,
+  useFilterMeta,
 } from "./filters.jsx";
 
 const {
@@ -26,7 +33,6 @@ const PROTEIN_CONTROLS = ["source", "tissue", "protein", "reviewed", "isoforms"]
 const INTERACTION_CONTROLS = ["showMode", "score", "source", "experiment", "interactionType", "isoforms"];
 
 const EXAMPLES = ["BRCA1", "TP53", "EGFR"];
-const DEFAULT_PAGE_SIZE = 25;
 
 // Default sort per tab (proteins: gene symbol asc; interactions: score desc).
 const DEFAULT_SORT = {
@@ -36,7 +42,7 @@ const DEFAULT_SORT = {
 
 function App() {
   const [mode, setMode] = useState("proteins");
-  const [meta, setMeta] = useState({ tissues: [], sources: [], experiments: [], interaction_types: [] });
+  const meta = useFilterMeta(filterMetaUrl);
 
   // ── Draft vs applied ────────────────────────────────────────────────────
   // The search box + FilterBox edit draft state; nothing is fetched until the
@@ -59,10 +65,6 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const abortRef = useRef(null);
-
-  useEffect(() => {
-    fetch(filterMetaUrl).then((r) => r.json()).then(setMeta).catch(() => {});
-  }, []);
 
   const controls = mode === "proteins" ? PROTEIN_CONTROLS : INTERACTION_CONTROLS;
   const activeCount = countActiveFilters(filters, controls);
@@ -102,7 +104,7 @@ function App() {
     setSort((s) =>
       s.key === key
         ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: key === "score" || key === "degree" || key === "avg_score" ? "desc" : "asc" },
+        : { key, dir: defaultSortDir(key) },
     );
     setPage(1);
   };
@@ -298,27 +300,11 @@ function App() {
             ))}
           </div>
           <div className="d-flex align-items-center gap-2">
-            <button
-              className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
+            <FilterToggleButton
+              activeCount={activeCount}
+              filtersOpen={filtersOpen}
               onClick={() => setFiltersOpen((o) => !o)}
-            >
-              <i className={`bi bi-funnel${activeCount > 0 ? "-fill" : ""}`}></i>
-              Filters
-              {activeCount > 0 && (
-                <span
-                  style={{
-                    background: "var(--hippie-teal)",
-                    color: "#fff",
-                    borderRadius: "100px",
-                    fontSize: ".65rem",
-                    padding: ".05rem .4rem",
-                    marginLeft: ".1rem",
-                  }}
-                >
-                  {activeCount}
-                </span>
-              )}
-            </button>
+            />
             <button
               className="btn-hippie"
               onClick={applySearch}

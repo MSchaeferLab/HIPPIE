@@ -3,10 +3,12 @@ import { createRoot } from "react-dom/client";
 import { InteractionTable } from "./tables.jsx";
 import {
   FilterBox,
+  FilterToggleButton,
   FILTER_DEFAULTS,
   filtersToQuery,
   countActiveFilters,
   filtersEqual,
+  useFilterMeta,
 } from "./filters.jsx";
 
 const { apiUrl, filterMetaUrl } = window.HIPPIE_CONFIG;
@@ -47,15 +49,11 @@ function App() {
   const [filters, setFilters] = useState(FILTER_DEFAULTS);
   const [appliedFilters, setAppliedFilters] = useState(FILTER_DEFAULTS);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [meta, setMeta] = useState({ tissues: [], sources: [], experiments: [], interaction_types: [] });
+  const meta = useFilterMeta(filterMetaUrl);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
-
-  useEffect(() => {
-    if (filterMetaUrl) fetch(filterMetaUrl).then((r) => r.json()).then(setMeta).catch(() => {});
-  }, []);
 
   // Nothing searches until the user commits: Search button, Enter, or an example.
   const runSearch = useCallback(async (q, f) => {
@@ -133,27 +131,11 @@ function App() {
             ))}
           </div>
           <div className="d-flex align-items-center gap-2">
-            <button
-              className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
+            <FilterToggleButton
+              activeCount={activeCount}
+              filtersOpen={filtersOpen}
               onClick={() => setFiltersOpen((o) => !o)}
-            >
-              <i className={`bi bi-funnel${activeCount > 0 ? "-fill" : ""}`}></i>
-              Filters
-              {activeCount > 0 && (
-                <span
-                  style={{
-                    background: "var(--hippie-teal)",
-                    color: "#fff",
-                    borderRadius: "100px",
-                    fontSize: ".65rem",
-                    padding: ".05rem .4rem",
-                    marginLeft: ".1rem",
-                  }}
-                >
-                  {activeCount}
-                </span>
-              )}
-            </button>
+            />
             <button
               className="btn-hippie"
               onClick={submit}

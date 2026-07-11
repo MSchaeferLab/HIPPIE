@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { confThresholds, CONF_CHIP_STYLE } from "./filters.jsx";
+import { getCookie } from "./shared.jsx";
+import { confThresholds, CONF_CHIP_STYLE, EMPTY_META } from "./filters.jsx";
 
 const cfg = window.SPLITS_CONFIG;
-const meta = cfg.meta || { tissues: [], sources: [], experiments: [], interaction_types: [] };
+const meta = cfg.meta || EMPTY_META;
 const initial = cfg.initial || {};
 
 const STEP_LABELS = {
@@ -19,11 +20,6 @@ const STEP_LABELS = {
 const TEAL  = "var(--hippie-teal)";
 const RED   = "var(--hippie-accent, #e8590c)";
 const GREY  = "var(--hippie-ink-muted)";
-
-function getCookie(name) {
-  const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
-  return m ? decodeURIComponent(m[1]) : "";
-}
 
 function toNum(v, fallback) {
   const n = parseFloat(v);
