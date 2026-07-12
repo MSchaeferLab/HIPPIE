@@ -1973,6 +1973,14 @@ def _digger_ctx(p1: Protein, p2: Protein) -> dict:
             ),
         }
 
+    def _transcript_with_fallback(i: Isoform) -> str:
+        """Return the ENST if present, else the ENSP, else empty string. Used for DIGGER links."""
+        if i.enst:
+            return i.enst
+        if i.ensp:
+            return i.ensp
+        return ""
+
     p1_iso = p1.pk in isos
     p2_iso = p2.pk in isos
     g1_ensg = isos[p1.pk].gene.ensg if p1_iso else p1.gene.ensg
@@ -1984,8 +1992,8 @@ def _digger_ctx(p1: Protein, p2: Protein) -> dict:
         "interaction": interaction_digger(
             p1_is_isoform=p1_iso,
             p2_is_isoform=p2_iso,
-            p1_acc=p1.uniprot_accession,
-            p2_acc=p2.uniprot_accession,
+            p1_enst_p=_transcript_with_fallback(isos[p1.pk]) if p1_iso else "",
+            p2_enst_p=_transcript_with_fallback(isos[p2.pk]) if p2_iso else "",
             g1_ensg=g1_ensg,
             g2_ensg=g2_ensg,
         ),

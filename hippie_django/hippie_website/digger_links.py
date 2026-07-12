@@ -62,8 +62,8 @@ def interaction_digger(
     *,
     p1_is_isoform: bool,
     p2_is_isoform: bool,
-    p1_acc: str,
-    p2_acc: str,
+    p1_enst_p: str,
+    p2_enst_p: str,
     g1_ensg: list[str],
     g2_ensg: list[str],
 ) -> dict[str, str]:
@@ -78,7 +78,7 @@ def interaction_digger(
     if p1_is_isoform and p2_is_isoform:
         return {
             "kind": "link",
-            "url": f"{BASE}/ID/gene/human/multiple/{p1_acc},{p2_acc}",
+            "url": f"{BASE}/ID/gene/human/multiple/{p1_enst_p},{p2_enst_p}",
         }
     if not p1_is_isoform and not p2_is_isoform:
         ensg1 = _first(g1_ensg)

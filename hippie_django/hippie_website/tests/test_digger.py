@@ -78,23 +78,23 @@ class DiggerLinksTest(HippieTestCase):
         res = interaction_digger(
             p1_is_isoform=True,
             p2_is_isoform=True,
-            p1_acc="Q00987-11",
-            p2_acc="P37163-2",
+            p1_enst_p="ENST00000258149",
+            p2_enst_p="ENST00000607003",
             g1_ensg=[],
             g2_ensg=[],
         )
         self.assertEqual(res["kind"], "link")
         self.assertEqual(
             res["url"],
-            "https://exbio.wzw.tum.de/digger/ID/gene/human/multiple/Q00987-11,P37163-2",
+            "https://exbio.wzw.tum.de/digger/ID/gene/human/multiple/ENST00000258149,ENST00000607003",
         )
 
     def test_interaction_both_canonical_builds_post_form(self):
         res = interaction_digger(
             p1_is_isoform=False,
             p2_is_isoform=False,
-            p1_acc="P38398",
-            p2_acc="P04637",
+            p1_enst_p="",
+            p2_enst_p="",
             g1_ensg=["ENSG00000012048"],
             g2_ensg=["ENSG00000141510"],
         )
@@ -108,8 +108,8 @@ class DiggerLinksTest(HippieTestCase):
         res = interaction_digger(
             p1_is_isoform=False,
             p2_is_isoform=False,
-            p1_acc="P38398",
-            p2_acc="P04637",
+            p1_enst_p="",
+            p2_enst_p="",
             g1_ensg=["ENSG00000012048"],
             g2_ensg=[],
         )
@@ -119,8 +119,8 @@ class DiggerLinksTest(HippieTestCase):
         res = interaction_digger(
             p1_is_isoform=True,
             p2_is_isoform=False,
-            p1_acc="Q00987-11",
-            p2_acc="P04637",
+            p1_enst_p="ENST00000258149",
+            p2_enst_p="",
             g1_ensg=[],
             g2_ensg=["ENSG00000141510"],
         )
