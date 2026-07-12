@@ -16,6 +16,10 @@ class Gene(models.Model):
 
     entrez_id = models.PositiveIntegerField(db_index=True, unique=True)
     entrez_name = models.CharField(max_length=40, blank=True, default="", db_index=True)
+    # Ensembl gene IDs (unversioned, e.g. "ENSG00000141510") linked to this gene.
+    # Populated by hippie_update from UniProt idmapping + Ensembl REST fallback.
+    # Empty list = unresolved. Used to build DIGGER cross-links on detail pages.
+    ensg = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "gene"
@@ -130,6 +134,12 @@ class Isoform(Protein):
         related_name="isoforms",
         help_text="Canonical parent protein for this isoform",
     )
+    # Ensembl transcript / translation IDs (unversioned, e.g. "ENST00000258149"
+    # / "ENSP00000258149") for this isoform accession. Populated by hippie_update
+    # from UniProt idmapping + Ensembl REST fallback. Empty list = unresolved.
+    # The isoform's ENSG fallback reads the connected ``gene.ensg`` instead.
+    enst = models.JSONField(default=list, blank=True)
+    ensp = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "isoform"

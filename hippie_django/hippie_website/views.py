@@ -1809,6 +1809,59 @@ def _protein_detail_ctx(protein) -> dict:
     }
 
 
+def _digger_ctx(p1: Protein, p2: Protein) -> dict:
+    """DIGGER cross-links for the "Further information" card, shared by the
+    interaction and non-interaction detail pages.
+
+    One extra query resolves which endpoints are isoforms (and loads their
+    ENST/ENSP); canonical proteins fall back to the already-``select_related``
+    ``gene``. See ``digger_links.py`` for the URL rules.
+    """
+    from hippie_website.digger_links import interaction_digger, protein_digger_url
+
+    isos = {
+        i.pk: i
+        for i in Isoform.objects.select_related("gene").filter(pk__in=[p1.pk, p2.pk])
+    }
+
+    def _one(p: Protein) -> dict:
+        iso = isos.get(p.pk)
+        if iso is not None:
+            return {
+                "is_isoform": True,
+                "url": protein_digger_url(
+                    is_isoform=True,
+                    ensg=iso.gene.ensg,
+                    enst=iso.enst,
+                    ensp=iso.ensp,
+                ),
+            }
+        return {
+            "is_isoform": False,
+            "url": protein_digger_url(
+                is_isoform=False, ensg=p.gene.ensg, enst=[], ensp=[]
+            ),
+        }
+
+    p1_iso = p1.pk in isos
+    p2_iso = p2.pk in isos
+    g1_ensg = isos[p1.pk].gene.ensg if p1_iso else p1.gene.ensg
+    g2_ensg = isos[p2.pk].gene.ensg if p2_iso else p2.gene.ensg
+
+    return {
+        "p1": _one(p1),
+        "p2": _one(p2),
+        "interaction": interaction_digger(
+            p1_is_isoform=p1_iso,
+            p2_is_isoform=p2_iso,
+            p1_acc=p1.uniprot_accession,
+            p2_acc=p2.uniprot_accession,
+            g1_ensg=g1_ensg,
+            g2_ensg=g2_ensg,
+        ),
+    }
+
+
 @require_GET
 def interaction_detail_view(request, pk: int):
     """
@@ -1872,6 +1925,7 @@ def interaction_detail_view(request, pk: int):
         "pair_score": interaction.score,
         "pair_label": "Interaction Evidence",
         "is_noninteraction": False,
+        "digger": _digger_ctx(p1, p2),
     }
     return render(request, "hippie_website/interaction_detail.html", context)
 
@@ -1914,6 +1968,7 @@ def noninteraction_detail_view(request, pk: int):
         "pair_score": noninteraction.score,
         "pair_label": "Non-Interaction Evidence",
         "is_noninteraction": True,
+        "digger": _digger_ctx(p1, p2),
     }
     return render(request, "hippie_website/noninteraction_detail.html", context)
 
