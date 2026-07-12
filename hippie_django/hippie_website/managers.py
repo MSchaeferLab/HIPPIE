@@ -85,6 +85,17 @@ class ProteinQuerySet(models.QuerySet):
         if qs.exists():
             return qs
 
+        # 6) Protein / gene synonym (last resort, after all exact ID/symbol
+        #    matches so real accessions and symbols always take priority).
+        #    ``synonyms__synonym`` = ProteinSynonym reverse FK;
+        #    ``gene__synonyms__synonym`` = GeneSynonym via the gene FK.
+        qs = self.filter(
+            Q(synonyms__synonym__iexact=identifier)
+            | Q(gene__synonyms__synonym__iexact=identifier)
+        ).distinct()
+        if qs.exists():
+            return qs
+
         return self.none()
 
     # ------------------------------------------------------------------

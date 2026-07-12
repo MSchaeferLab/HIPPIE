@@ -12,6 +12,8 @@ from ..models import (
     ExperimentType,
     Tissue,
     GeneTissue,
+    GeneSynonym,
+    ProteinSynonym,
 )
 from ..views import (
     _protein_display,
@@ -453,6 +455,118 @@ class ResolveTest(HippieTestCase):
     def test_resolve_unknown_returns_none_queryset(self):
         qs = Protein.objects.resolve("XXXXXXX")
         self.assertFalse(qs.exists())
+
+
+# ---------------------------------------------------------------------------
+# 7b. Synonym-aware search (resolve + browse) and Ensembl synonym persistence
+# ---------------------------------------------------------------------------
+
+
+class SynonymSearchTest(HippieTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        # Real cases from the bug report: a protein synonym (secondary
+        # accession) and a gene synonym that previously resolved to nothing.
+        ProteinSynonym.objects.create(protein=cls.brca1, synonym="X5D9C8")
+        GeneSynonym.objects.create(gene=cls.brca1.gene, synonym="NCRNA00291")
+
+    # -- resolve() ---------------------------------------------------------
+    def test_resolve_by_protein_synonym(self):
+        qs = Protein.objects.resolve("X5D9C8")
+        self.assertIn(self.brca1.pk, [p.pk for p in qs])
+
+    def test_resolve_by_gene_synonym(self):
+        qs = Protein.objects.resolve("NCRNA00291")
+        self.assertIn(self.brca1.pk, [p.pk for p in qs])
+
+    def test_resolve_synonym_case_insensitive(self):
+        qs = Protein.objects.resolve("x5d9c8")
+        self.assertIn(self.brca1.pk, [p.pk for p in qs])
+
+    def test_real_symbol_beats_synonym(self):
+        # A gene synonym on TP53 that collides with BRCA1's real symbol must not
+        # hijack resolution — the step-5 symbol match wins over step-6 synonym.
+        GeneSynonym.objects.create(gene=self.tp53.gene, synonym="BRCA1")
+        qs = Protein.objects.resolve("BRCA1")
+        self.assertEqual([p.pk for p in qs], [self.brca1.pk])
+
+    # -- browse_api --------------------------------------------------------
+    def _browse(self, **params):
+        r = self.client.get(reverse("hippie_website:browse_api"), params)
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def test_browse_finds_protein_synonym(self):
+        data = self._browse(q="X5D9C8")
+        self.assertIn(self.brca1.pk, [p["id"] for p in data["proteins"]])
+
+    def test_browse_finds_gene_synonym(self):
+        data = self._browse(q="NCRNA00291")
+        self.assertIn(self.brca1.pk, [p["id"] for p in data["proteins"]])
+
+    def test_browse_synonym_count_not_inflated(self):
+        # Two matching protein synonyms on the same protein must not duplicate
+        # the row or inflate the count (Exists subquery, not a reverse-FK join).
+        ProteinSynonym.objects.create(protein=self.brca1, synonym="ENST00000000001")
+        ProteinSynonym.objects.create(protein=self.brca1, synonym="ENST00000000002")
+        data = self._browse(q="ENST0000000000")
+        ids = [p["id"] for p in data["proteins"]]
+        self.assertEqual(ids.count(self.brca1.pk), 1)
+        self.assertEqual(data["total"], 1)
+
+    # -- _sync_ensembl_synonyms persistence --------------------------------
+    def test_sync_ensembl_synonyms_creates_tagged_rows(self):
+        from io import StringIO
+        from ..management.commands.hippie_update import _sync_ensembl_synonyms
+
+        gene = self.brca1.gene
+        gene.ensg = ["ENSG00000012048"]
+        isoform = Isoform.objects.create(
+            gene=gene,
+            uniprot_name="BRCA1_3_HUMAN",
+            uniprot_accession="P38398-3",
+            general_protein=self.brca1,
+        )
+        isoform.enst = ["ENST00000357654"]
+        isoform.ensp = ["ENSP00000350283"]
+
+        _sync_ensembl_synonyms(StringIO(), [gene], [isoform])
+
+        self.assertTrue(
+            GeneSynonym.objects.filter(
+                gene=gene,
+                synonym="ENSG00000012048",
+                additional_information="ensembl_gene",
+            ).exists()
+        )
+        self.assertTrue(
+            ProteinSynonym.objects.filter(
+                protein_id=isoform.pk,
+                synonym="ENST00000357654",
+                additional_information="ensembl_transcript",
+            ).exists()
+        )
+        self.assertTrue(
+            ProteinSynonym.objects.filter(
+                protein_id=isoform.pk,
+                synonym="ENSP00000350283",
+                additional_information="ensembl_translation",
+            ).exists()
+        )
+
+    def test_sync_ensembl_synonyms_idempotent(self):
+        from io import StringIO
+        from ..management.commands.hippie_update import _sync_ensembl_synonyms
+
+        gene = self.brca1.gene
+        gene.ensg = ["ENSG00000012048"]
+        _sync_ensembl_synonyms(StringIO(), [gene], [])
+        _sync_ensembl_synonyms(StringIO(), [gene], [])
+        self.assertEqual(
+            GeneSynonym.objects.filter(gene=gene, synonym="ENSG00000012048").count(),
+            1,
+        )
 
 
 # ---------------------------------------------------------------------------

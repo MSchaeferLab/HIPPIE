@@ -1509,30 +1509,75 @@ def _populate_ensembl_ids(stdout, *, skip_api: bool = False) -> None:
 
     if skip_api:
         stdout.write("  Skipping Ensembl network fallback (--skip-ensembl-api).")
-        return
+    else:
+        gene_by_pk = {g.pk: g for g in genes}
+        touched_genes: set[int] = set()
 
-    gene_by_pk = {g.pk: g for g in genes}
-    touched_genes: set[int] = set()
+        # Tier 2: one bulk BioMart pull resolves the vast majority of gaps in a
+        # few requests, replacing thousands of per-isoform REST calls.
+        try:
+            _fill_from_biomart(
+                stdout, isoforms, genes, acc_by_gene, gene_by_pk, touched_genes
+            )
+        except Exception as e:  # noqa: BLE001 — enrichment is best-effort, never fatal
+            stdout.write(f"    BioMart step failed ({e}); falling back to REST only.")
 
-    # Tier 2: one bulk BioMart pull resolves the vast majority of gaps in a few
-    # requests, replacing thousands of per-isoform REST calls.
-    try:
-        _fill_from_biomart(
-            stdout, isoforms, genes, acc_by_gene, gene_by_pk, touched_genes
-        )
-    except Exception as e:  # noqa: BLE001 — enrichment is best-effort, never fatal
-        stdout.write(f"    BioMart step failed ({e}); falling back to REST only.")
+        # Tier 3: per-item Ensembl REST for whatever BioMart still left empty.
+        # The fill helpers re-derive their own "still missing" sets, so this
+        # runs over a tiny remainder rather than every isoform/gene.
+        _fill_isoforms_from_ensembl(stdout, isoforms, gene_by_pk, touched_genes)
+        _fill_genes_from_ensembl(stdout, genes, touched_genes)
 
-    # Tier 3: per-item Ensembl REST for whatever BioMart still left empty. The
-    # fill helpers re-derive their own "still missing" sets, so this now runs over
-    # a tiny remainder rather than every isoform/gene.
-    _fill_isoforms_from_ensembl(stdout, isoforms, gene_by_pk, touched_genes)
-    _fill_genes_from_ensembl(stdout, genes, touched_genes)
+        if touched_genes:
+            Gene.objects.bulk_update(
+                [gene_by_pk[pk] for pk in touched_genes], ["ensg"], batch_size=5000
+            )
 
-    if touched_genes:
-        Gene.objects.bulk_update(
-            [gene_by_pk[pk] for pk in touched_genes], ["ensg"], batch_size=5000
-        )
+    # Mirror the finalized Ensembl IDs into the synonym tables so they become
+    # searchable. Runs for both local-only and full runs, on the final in-memory
+    # values (the API tiers mutate ``genes`` / ``isoforms`` in place).
+    _sync_ensembl_synonyms(stdout, genes, isoforms)
+
+
+def _sync_ensembl_synonyms(stdout, genes, isoforms) -> None:
+    """Mirror ``Gene.ensg`` / ``Isoform.enst`` / ``Isoform.ensp`` into the
+    synonym tables so the Ensembl IDs are searchable.
+
+    ``ignore_conflicts=True`` rides the existing ``unique_gene_synonym`` /
+    ``unique_protein_synonym`` constraints, making this idempotent across
+    re-runs. ENST/ENSP attach to the isoform's own row (``iso.pk`` is the shared
+    ``protein_ptr_id``, a valid Protein pk under multi-table inheritance).
+    """
+    gene_syns = [
+        GeneSynonym(gene_id=g.pk, synonym=ensg, additional_information="ensembl_gene")
+        for g in genes
+        for ensg in g.ensg
+    ]
+    prot_syns: list[ProteinSynonym] = []
+    for iso in isoforms:
+        for enst in iso.enst:
+            prot_syns.append(
+                ProteinSynonym(
+                    protein_id=iso.pk,
+                    synonym=enst,
+                    additional_information="ensembl_transcript",
+                )
+            )
+        for ensp in iso.ensp:
+            prot_syns.append(
+                ProteinSynonym(
+                    protein_id=iso.pk,
+                    synonym=ensp,
+                    additional_information="ensembl_translation",
+                )
+            )
+    GeneSynonym.objects.bulk_create(gene_syns, batch_size=50_000, ignore_conflicts=True)
+    ProteinSynonym.objects.bulk_create(
+        prot_syns, batch_size=50_000, ignore_conflicts=True
+    )
+    stdout.write(
+        f"    Ensembl synonyms: {len(gene_syns)} gene, {len(prot_syns)} protein."
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -44,6 +44,8 @@ from .models import (
     NonInteraction,
     SplitJob,
     InteractionType,
+    ProteinSynonym,
+    GeneSynonym,
 )
 
 from .tasks import run_split_job
@@ -1230,13 +1232,26 @@ _BROWSE_SORT_FIELDS = {
 def _protein_search_q(q: str) -> Q:
     """
     Build the free-text search ``Q`` used by the browse pages: case-insensitive
-    match on gene symbol, UniProt accession, or UniProt entry name; exact match
-    on the Entrez gene ID when the query is all digits.
+    match on gene symbol, UniProt accession, UniProt entry name, or a
+    protein/gene synonym; exact match on the Entrez gene ID when the query is
+    all digits.
+
+    Synonyms are matched with ``Exists`` subqueries rather than reverse-FK
+    joins so browse pagination/count stay correct (a join would multiply rows),
+    mirroring the source-filter idiom in ``_filtered_protein_qs``.
     """
+    prot_syn = ProteinSynonym.objects.filter(
+        protein_id=OuterRef("pk"), synonym__icontains=q
+    )
+    gene_syn = GeneSynonym.objects.filter(
+        gene_id=OuterRef("gene_id"), synonym__icontains=q
+    )
     cond = (
         Q(gene__entrez_name__icontains=q)
         | Q(uniprot_accession__icontains=q)
         | Q(uniprot_name__icontains=q)
+        | Exists(prot_syn)
+        | Exists(gene_syn)
     )
     if q.isdigit():
         cond |= Q(gene__entrez_id=int(q))

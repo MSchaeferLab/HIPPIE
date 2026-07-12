@@ -19,8 +19,8 @@ import {
 const { apiUrl, filterMetaUrl, maxProteins } = window.HIPPIE_NQ_CONFIG;
 
 const EXAMPLES = [
+  { label: "Example — Huntington", text: "HTT, HAP40, HAP1, HIP1, TCERG1, MED15, SYT1, YKT6, SNAP47" },
   { label: "Example — tumor suppressors", text: "TP53\nBRCA1\nATM" },
-  { label: "Example — Huntington", text: "HTT\nHSP90AA1\nBDNF\nCREBBP" },
   { label: "Example — EGFR signalling", text: "EGFR\nERBB2\nGRB2\nSOS1" },
 ];
 
@@ -408,7 +408,7 @@ function App() {
               <textarea
                 className="form-control mb-2"
                 rows={5}
-                placeholder={"One identifier per line, e.g.\nHTT\nBRCA1\nTP53"}
+                placeholder={"Separate the identifiers with new lines or commas, e.g.\nHTT\nBRCA1\nTP53"}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
               />
