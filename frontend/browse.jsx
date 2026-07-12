@@ -15,6 +15,7 @@ import {
   filtersEqual,
   useFilterMeta,
 } from "./filters.jsx";
+import { parseIdentifiers, MAX_QUERY_PROTEINS } from "./shared.jsx";
 
 const {
   proteinsApiUrl,
@@ -72,6 +73,14 @@ function App() {
 
   // Commit the draft search + filters → applied, back to page 1.
   const applySearch = () => {
+    const ids = parseIdentifiers(search);
+    if (ids.length > MAX_QUERY_PROTEINS) {
+      setLoadError(
+        `Too many proteins: ${ids.length} (max ${MAX_QUERY_PROTEINS} per search). Please remove some identifiers.`,
+      );
+      return;
+    }
+    setLoadError(null);
     setAppliedSearch(search);
     setAppliedFilters(filters);
     setPage(1);
@@ -281,8 +290,8 @@ function App() {
           className="form-control mb-3"
           placeholder={
             mode === "proteins"
-              ? "Search by gene symbol, UniProt ID, or Entrez ID…"
-              : "Search interactions by a partner's gene symbol, UniProt ID, or Entrez ID…"
+              ? "Search by gene symbol, UniProt, Entrez or Ensembl ID — up to 50, comma/space/tab separated…"
+              : "Search by a partner's gene symbol, UniProt, Entrez or Ensembl ID — up to 50, comma/space/tab separated…"
           }
           value={search}
           onChange={(e) => setSearch(e.target.value)}

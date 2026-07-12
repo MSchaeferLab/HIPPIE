@@ -19,9 +19,11 @@ from ..views import (
     _protein_display,
     _resolve_interaction_pair,
     _protein_ids_from_raw,
+    _split_identifiers,
     _get_isoforms,
     _safe_int,
     _safe_float,
+    MAX_QUERY_PROTEINS,
 )
 from ..query_filters import isoform_only_q, parse_isoform_mode
 from .factories import (
@@ -91,17 +93,17 @@ class ProteinQueryApiTest(HippieTestCase):
     def test_resolve_by_gene_symbol(self):
         data = self._get("BRCA1")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["symbol"], "BRCA1")
+        self.assertEqual(data["query_proteins"][0]["symbol"], "BRCA1")
 
     def test_resolve_by_uniprot_id(self):
         data = self._get("BRCA1_HUMAN")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["name"], "BRCA1")
+        self.assertEqual(data["query_proteins"][0]["name"], "BRCA1")
 
     def test_resolve_by_accession(self):
         data = self._get("P38398")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["name"], "BRCA1")
+        self.assertEqual(data["query_proteins"][0]["name"], "BRCA1")
 
     def test_resolve_isoform_query_exposes_isoform_uid(self):
         Isoform.objects.create(
@@ -112,12 +114,12 @@ class ProteinQueryApiTest(HippieTestCase):
         )
         data = self._get("P38398-2")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["isoform_uniprot_id"], "P38398-2")
+        self.assertEqual(data["query_proteins"][0]["isoform_uniprot_id"], "P38398-2")
 
     def test_resolve_by_entrez_id(self):
         data = self._get("672")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["name"], "BRCA1")
+        self.assertEqual(data["query_proteins"][0]["name"], "BRCA1")
 
     def test_unknown_identifier_returns_error(self):
         data = self._get("DOESNOTEXIST")
@@ -156,7 +158,7 @@ class ProteinQueryApiTest(HippieTestCase):
     def test_partner_is_not_query_protein(self):
         """Partner darf nicht das gesuchte Protein selbst sein."""
         data = self._get("BRCA1")
-        query_id = data["query_protein"]["id"]
+        query_id = data["query_proteins"][0]["id"]
         for ix in data["interactions"]:
             self.assertNotEqual(ix["partner"]["id"], query_id)
 
@@ -1584,6 +1586,123 @@ class Batch3FilterMetaInteractionTypesTest(HippieTestCase):
         self.assertIn("interaction_types", data)
         names = [x["name"] for x in data["interaction_types"]]
         self.assertIn("direct interaction", names)
+
+
+# ---------------------------------------------------------------------------
+# Multi-protein search — Protein Query & Browse (comma/space/tab, up to 50)
+# ---------------------------------------------------------------------------
+
+
+class SplitIdentifiersTest(TestCase):
+    def test_splits_on_comma_space_tab_newline_semicolon(self):
+        self.assertEqual(
+            _split_identifiers("A, B\tC D;E\nF"),
+            ["A", "B", "C", "D", "E", "F"],
+        )
+
+    def test_trims_and_drops_empties(self):
+        self.assertEqual(_split_identifiers("  A , , B  "), ["A", "B"])
+
+    def test_order_preserving_dedup(self):
+        self.assertEqual(_split_identifiers("A B A C B"), ["A", "B", "C"])
+
+    def test_empty_string(self):
+        self.assertEqual(_split_identifiers("   "), [])
+
+
+class MultiProteinQueryTest(HippieTestCase):
+    def _get(self, q):
+        r = self.client.get(reverse("hippie_website:protein_query_api"), {"q": q})
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def test_two_identifiers_resolved_and_union_deduped(self):
+        # The only edge (BRCA1–TP53) touches both queried proteins → appears once.
+        data = self._get("BRCA1 TP53")
+        self.assertIsNone(data["error"])
+        self.assertEqual(
+            {p["symbol"] for p in data["query_proteins"]}, {"BRCA1", "TP53"}
+        )
+        self.assertEqual(data["unresolved"], [])
+        self.assertEqual(len(data["interactions"]), 1)
+
+    def test_union_concatenates_distinct_edges(self):
+        # EGFR–TP53 so BRCA1 and EGFR each contribute a distinct edge.
+        make_interaction(self.egfr, self.tp53, score=0.7)
+        recompute_flags()
+        data = self._get("BRCA1 EGFR")
+        self.assertIsNone(data["error"])
+        self.assertEqual(len(data["query_proteins"]), 2)
+        self.assertEqual(len(data["interactions"]), 2)
+        ids = [ix["id"] for ix in data["interactions"]]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_comma_delimiter(self):
+        self.assertEqual(len(self._get("BRCA1,TP53")["query_proteins"]), 2)
+
+    def test_tab_delimiter(self):
+        self.assertEqual(len(self._get("BRCA1\tTP53")["query_proteins"]), 2)
+
+    def test_duplicate_tokens_deduped(self):
+        self.assertEqual(len(self._get("BRCA1, BRCA1")["query_proteins"]), 1)
+
+    def test_partial_resolution_reports_unresolved(self):
+        data = self._get("BRCA1, NOTAREALID")
+        self.assertIsNone(data["error"])
+        self.assertEqual([p["symbol"] for p in data["query_proteins"]], ["BRCA1"])
+        self.assertEqual(data["unresolved"], ["NOTAREALID"])
+        self.assertGreater(len(data["interactions"]), 0)
+
+    def test_all_unresolved_returns_error(self):
+        data = self._get("NOPE, ALSONOPE")
+        self.assertIsNotNone(data["error"])
+        self.assertEqual(data["interactions"], [])
+        self.assertEqual(data["query_proteins"], [])
+
+    def test_over_limit_returns_400(self):
+        q = ",".join(f"GENE{i}" for i in range(MAX_QUERY_PROTEINS + 1))
+        r = self.client.get(reverse("hippie_website:protein_query_api"), {"q": q})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Too many", json.loads(r.content)["error"])
+
+
+class MultiProteinBrowseTest(HippieTestCase):
+    def _proteins(self, q):
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), {"q": q})
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def _interactions(self, q):
+        r = self.client.get(
+            reverse("hippie_website:browse_interactions_api"),
+            {"q": q, "show": "interactions"},
+        )
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def test_browse_proteins_single_token_unchanged(self):
+        self.assertEqual(self._proteins("BRCA1")["total"], 1)
+
+    def test_browse_proteins_union(self):
+        data = self._proteins("BRCA1 TP53")
+        self.assertEqual(data["total"], 2)
+        self.assertEqual({p["symbol"] for p in data["proteins"]}, {"BRCA1", "TP53"})
+
+    def test_browse_interactions_union(self):
+        make_interaction(self.egfr, self.tp53, score=0.7)
+        recompute_flags()
+        self.assertEqual(self._interactions("BRCA1")["total"], 1)
+        self.assertEqual(self._interactions("BRCA1 EGFR")["total"], 2)
+
+    def test_browse_proteins_over_limit_returns_400(self):
+        q = ",".join(f"GENE{i}" for i in range(MAX_QUERY_PROTEINS + 1))
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), {"q": q})
+        self.assertEqual(r.status_code, 400)
+
+    def test_browse_interactions_over_limit_returns_400(self):
+        q = ",".join(f"GENE{i}" for i in range(MAX_QUERY_PROTEINS + 1))
+        r = self.client.get(reverse("hippie_website:browse_interactions_api"), {"q": q})
+        self.assertEqual(r.status_code, 400)
 
 
 # ---------------------------------------------------------------------------

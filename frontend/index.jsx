@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { InteractionTable } from "./tables.jsx";
+import { parseIdentifiers, MAX_QUERY_PROTEINS } from "./shared.jsx";
 import {
   FilterBox,
   FilterToggleButton,
@@ -15,10 +16,20 @@ const { apiUrl, filterMetaUrl } = window.HIPPIE_CONFIG;
 const EXAMPLES = ["HTT", "P42858", "3064", "HD_HUMAN", "ENSG00000197386"];
 const INITIAL_Q = new URLSearchParams(window.location.search).get("q") || "";
 
+// Short label for the resolved query proteins: list up to three symbols, then
+// "+N" for the remainder (used in the results title and empty state).
+function queryLabel(proteins) {
+  const syms = (proteins || []).map((p) => p?.symbol).filter(Boolean);
+  if (syms.length === 0) return "";
+  if (syms.length <= 3) return syms.join(", ");
+  return `${syms.slice(0, 3).join(", ")} +${syms.length - 3}`;
+}
+
 // Map the protein-query API payload into the shared InteractionTable row shape.
-// The query protein is side A (repeated on every row); the partner is side B.
+// Each row's query_side is the queried protein for that edge (side A); the
+// partner is side B. qs is a mild fallback (first resolved protein).
 function mapRows(data) {
-  const qs = data.query_protein || {};
+  const qs = (data.query_proteins && data.query_proteins[0]) || {};
   return data.interactions.map((row, i) => ({
     key: `${row.is_noninteraction ? "ni" : "i"}-${row.id}-${i}`,
     a: {
@@ -59,6 +70,14 @@ function App() {
   const runSearch = useCallback(async (q, f) => {
     const qq = (q ?? "").trim();
     if (!qq) return;
+    const ids = parseIdentifiers(qq);
+    if (ids.length > MAX_QUERY_PROTEINS) {
+      setResult(null);
+      setError(
+        `Too many proteins: ${ids.length} (max ${MAX_QUERY_PROTEINS} per query). Please remove some identifiers.`,
+      );
+      return;
+    }
     setLoading(true);
     setError(null);
     setResult(null);
@@ -104,7 +123,8 @@ function App() {
           <em style={{ color: "var(--hippie-teal)" }}>Query</em>
         </h1>
         <p>
-          Enter a UniProt ID, UniProt accession, Entrez gene ID, or gene symbol to retrieve all known human
+          Enter one or more proteins — UniProt ID or accession, Entrez gene ID, gene symbol, or Ensembl ID,
+          separated by comma, space or tab (up to {MAX_QUERY_PROTEINS}) — to retrieve all known human
           protein–protein interactions (or non-interactions) and their HIPPIE confidence scores.
         </p>
       </div>
@@ -113,7 +133,7 @@ function App() {
         <input
           type="text"
           className="form-control mb-3"
-          placeholder="e.g. HTT, P42858, 3064, HD_HUMAN, ENSG00000197386 …"
+          placeholder="e.g. HTT, P42858, 3064, HD_HUMAN, ENSG00000197386 — up to 50, comma/space/tab separated"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
@@ -160,7 +180,7 @@ function App() {
       {loading && (
         <div className="state-box">
           <span className="spinner d-block mx-auto mb-3"></span>
-          Resolving identifier and loading interactions…
+          Resolving identifiers and loading interactions…
         </div>
       )}
       {!loading && error && (
@@ -172,10 +192,16 @@ function App() {
           </p>
         </div>
       )}
+      {!loading && result && result.unresolved?.length > 0 && (
+        <div className="hippie-card mb-3" style={{ borderColor: "var(--hippie-accent)" }}>
+          <i className="bi bi-exclamation-triangle me-2" style={{ color: "var(--hippie-accent)" }}></i>
+          Not found: <strong>{result.unresolved.join(", ")}</strong>
+        </div>
+      )}
       {!loading && result && rows.length === 0 && (
         <div className="state-box">
           <i className="bi bi-inbox state-icon"></i>
-          No results found for <strong>{result.query_protein?.symbol}</strong>.
+          No results found for <strong>{queryLabel(result.query_proteins)}</strong>.
         </div>
       )}
       {!loading && result && rows.length > 0 && (
@@ -183,10 +209,10 @@ function App() {
           rows={rows}
           title={
             <>
-              Results for <em>{result.query_protein?.symbol}</em>
+              Results for <em>{queryLabel(result.query_proteins)}</em>
             </>
           }
-          exportFilename={`hippie_${result.query_protein?.symbol || "query"}.tsv`}
+          exportFilename={`hippie_${result.query_proteins?.length === 1 ? result.query_proteins[0].symbol : "query"}.tsv`}
         />
       )}
 

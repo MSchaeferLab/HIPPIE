@@ -117,6 +117,23 @@ export function SortableTh({ sortKey, currentKey, currentDir, onSort, children, 
   return <th className={cls} onClick={() => onSort(sortKey)}>{children}</th>;
 }
 
+// Max distinct identifiers the single-protein search boxes (Protein Query,
+// Browse) accept in one request. Mirrors MAX_QUERY_PROTEINS on the backend.
+export const MAX_QUERY_PROTEINS = 50;
+
+// Split a raw search string into identifiers on comma, whitespace (space, tab,
+// newline) or semicolon; trim, drop empties, and dedupe (order-preserving).
+export function parseIdentifiers(text) {
+  return [
+    ...new Set(
+      (text || "")
+        .split(/[\s,;]+/)
+        .map((t) => t.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
 // Read a cookie value by name (used for the Django CSRF token in POST fetches).
 export function getCookie(name) {
   const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));

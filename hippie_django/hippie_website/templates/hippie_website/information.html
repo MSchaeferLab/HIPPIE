@@ -116,11 +116,13 @@
   <div class="hippie-card">
     <h4 id="query" class="section-label">Query interactions</h4>
     <p>
-      The <a href="{% url 'hippie_website:index' %}">query mode</a> allows for querying HIPPIE with a
+      The <a href="{% url 'hippie_website:index' %}">query mode</a> allows for querying HIPPIE with one or
+      more proteins (up to 50, separated by comma, space or tab), each given as a
       <a href="http://www.uniprot.org/" target="_blank" rel="noopener">UniProt</a> identifier (id or
       accession), <a href="http://www.ncbi.nlm.nih.gov/datasets/gene" target="_blank" rel="noopener">gene
-      symbol</a> or <a href="http://www.ncbi.nlm.nih.gov/datasets/gene" target="_blank" rel="noopener">Entrez</a>
-      gene id. All literature interactions in HIPPIE that match the query protein are displayed.
+      symbol</a>, <a href="http://www.ncbi.nlm.nih.gov/datasets/gene" target="_blank" rel="noopener">Entrez</a>
+      gene id or Ensembl id (ENSG/ENST). All literature interactions in HIPPIE that match any of the query
+      proteins are displayed together.
     </p>
     <p>
       On the result page, UniProt id, Entrez gene id and gene symbol of the interactors of the query
@@ -456,12 +458,16 @@
 
     <p class="mt-4 mb-1"><strong>Protein query</strong></p>
     <div class="hippie-card--muted mb-2">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/query/?<b>q=</b>TP53&amp;show=both&amp;min_score=0.63</code>
+      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/query/?<b>q=</b>TP53,MDM2,BRCA1&amp;show=both&amp;min_score=0.63</code>
     </div>
     <p>
-      Interactions of a single protein. <code>q</code> (an identifier — gene symbol, UniProt accession
-      or Entrez id) is required; the shared filters apply. Returns
-      <code>{ query_protein, isoforms_included, expanded_proteins, interactions[], error }</code>.
+      Interactions of one or more proteins. <code>q</code> accepts up to 50 identifiers
+      (separated by comma, space or tab) — each a gene symbol, UniProt accession or entry name,
+      Entrez id, isoform accession, or Ensembl id (ENSG/ENST). Each is resolved independently and
+      the interactions are returned as one combined list; the shared filters apply. Returns
+      <code>{ query_proteins, isoforms_included, expanded_proteins, unresolved, interactions[], error }</code>,
+      where <code>unresolved</code> lists any inputs that matched nothing (the request still
+      succeeds for the rest).
     </p>
 
     <p class="mt-4 mb-1"><strong>Batch pairwise lookup</strong></p>
@@ -495,7 +501,8 @@
       protein carries <code>degree</code>, <code>avg_score</code> and <code>is_reviewed</code>);
       <code>/api/browse/interactions/</code> returns a page of interactions
       <code>{ total, interactions[] }</code>. Both accept <code>offset</code>, <code>limit</code>
-      (≤&nbsp;200), a free-text <code>q</code>, <code>sort</code>/<code>dir</code>, and the shared filters.
+      (≤&nbsp;200), a free-text search field <code>q</code> (up to 50 identifiers separated by comma,
+      space or tab — matches are unioned), <code>sort</code>/<code>dir</code>, and the shared filters.
     </p>
 
     <p class="mt-4 mb-1"><strong>Bulk export (TSV)</strong></p>

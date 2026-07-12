@@ -16,6 +16,7 @@ All database access goes through the custom managers defined in managers.py:
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from django.conf import settings
 from django.core.cache import cache
@@ -99,15 +100,37 @@ def _protein_display(protein: Protein, isoform_uid: str | None = None) -> dict:
     }
 
 
+# Max distinct identifiers accepted by the single-protein search endpoints
+# (Protein Query, Browse). Mirrors BATCH_LIMIT=200 on the interaction endpoint.
+MAX_QUERY_PROTEINS = 50
+_IDENT_SPLIT = re.compile(r"[\s,;]+")
+
+
+def _split_identifiers(raw: str) -> list[str]:
+    """
+    Split a raw search string into identifiers on comma, whitespace (space,
+    tab, newline) or semicolon. Trims each token and drops empties, preserving
+    input order while removing duplicates.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for tok in _IDENT_SPLIT.split(raw.strip()):
+        tok = tok.strip()
+        if tok and tok not in seen:
+            seen.add(tok)
+            out.append(tok)
+    return out
+
+
 def _protein_ids_from_raw(raw: str) -> tuple[list[int], list[str]]:
     """
-    Resolve a whitespace-separated string of identifiers to Protein PKs.
-    Returns (resolved_pks, unresolved_identifiers).
+    Resolve a delimited string of identifiers (comma/whitespace/semicolon) to
+    Protein PKs. Returns (resolved_pks, unresolved_identifiers).
     """
     protein_ids: list[int] = []
     unresolved: list[str] = []
     seen: set[int] = set()
-    for ident in raw.split():
+    for ident in _split_identifiers(raw):
         pk = Protein.objects.resolve(ident)
         if pk is not None:
             pk = pk.values_list("pk", flat=True).first()
@@ -371,21 +394,28 @@ def _noninteraction_edge_qs(protein_pks, f: CommonFilters):
 @require_GET
 def protein_query_api(request):
     """
-    GET /api/query/?q=<identifier>[&isoform_mode=general|isoforms|both]
+    GET /api/query/?q=<identifiers>[&isoform_mode=general|isoforms|both]
 
-    Resolves the identifier via Protein.objects.resolve(), then fetches
-    all interactions via Interaction.objects.for_proteins().with_proteins()
-    so that partner identifier mappings are available in a single round-trip.
+    ``q`` may contain up to MAX_QUERY_PROTEINS identifiers separated by comma,
+    space or tab. Each is resolved independently via Protein.objects.resolve()
+    (gene symbol, UniProt accession/entry-name, Entrez id, isoform accession,
+    or Ensembl id via synonyms). Interactions for all resolved proteins are
+    fetched via Interaction.objects.for_proteins() and returned as one list;
+    an edge touching two queried proteins appears once.
 
-    When isoform_mode is "isoforms" or "both" and the resolved protein is a
-    canonical (not itself an isoform), the query is also run for every known
-    isoform of that protein, and all results are returned together.
+    Identifiers that resolve to nothing are collected in ``unresolved`` and the
+    request still succeeds with results for the ones that matched. The request
+    fails (400) only when more than MAX_QUERY_PROTEINS identifiers are supplied.
+
+    When isoform_mode is "isoforms" or "both", every canonical resolved protein
+    is also expanded to its known isoforms, and all results are returned together.
 
     Response shape:
     {
-        "query_protein":     { id, name, uniprot_id, gene_id, symbol, isoform_uniprot_id },
+        "query_proteins":    [ { id, name, uniprot_id, gene_id, symbol, isoform_uniprot_id }, ... ],
         "isoforms_included": <bool>,
         "expanded_proteins": [ ...same shape... ],   // isoforms added to the query
+        "unresolved":        [ "<identifier>", ... ],  // inputs that matched nothing
         "interactions": [
             {
                 "id":               <int>,
@@ -401,46 +431,80 @@ def protein_query_api(request):
         "error": null | "<message>"
     }
     """
-    q = request.GET.get("q", "").strip()
+    q = request.GET.get("q", "")
     f = _common_filters_from_get(request.GET)
     expand_isoforms = f.isoform_mode in ("isoforms", "both")
     show = f.show
     tissue_pks = _tissue_pk_set(f)
 
-    if not q:
+    tokens = _split_identifiers(q)
+    if not tokens:
         return JsonResponse(
             {
                 "error": "No query provided.",
                 "interactions": [],
-                "query_protein": None,
+                "query_proteins": [],
+                "unresolved": [],
             }
         )
-
-    # ── Resolve identifier → Protein ──────────────────────────────────
-    proteins = Protein.objects.resolve(q).select_related("gene")
-
-    if not proteins.exists():
+    if len(tokens) > MAX_QUERY_PROTEINS:
         return JsonResponse(
             {
-                "error": f"No protein found for '{q}'.",
+                "error": (
+                    f"Too many proteins: {len(tokens)} "
+                    f"(max {MAX_QUERY_PROTEINS} per request)."
+                ),
                 "interactions": [],
-                "query_protein": None,
+                "query_proteins": [],
+                "unresolved": [],
+            },
+            status=400,
+        )
+
+    # ── Resolve each identifier → Protein (order-preserving, deduped) ──
+    resolved: list = []
+    resolved_pks: set[int] = set()
+    unresolved: list[str] = []
+    for tok in tokens:
+        protein = Protein.objects.resolve(tok).select_related("gene").first()
+        if protein is None:
+            unresolved.append(tok)
+        elif protein.pk not in resolved_pks:
+            resolved_pks.add(protein.pk)
+            resolved.append(protein)
+
+    if not resolved:
+        return JsonResponse(
+            {
+                "error": f"No proteins found for: {', '.join(unresolved)}.",
+                "interactions": [],
+                "query_proteins": [],
+                "unresolved": unresolved,
             }
         )
 
-    protein = proteins.first()
+    # ── Build the combined PK set and isoform-accession display map ────
+    # A queried identifier may itself be an isoform (resolve() annotates
+    # ``isoform_uniprot_id``); when isoform_mode expands, each canonical seed
+    # also contributes its known isoforms. All are unioned into protein_pks.
+    protein_pks: list[int] = [p.pk for p in resolved]
+    isoform_uid_map: dict[int, str] = {}
+    for p in resolved:
+        uid = getattr(p, "isoform_uniprot_id", None)
+        if uid:
+            isoform_uid_map[p.pk] = uid
 
-    # ── Optionally expand to isoforms ─────────────────────────────────
     isoforms: list = []
-    protein_pks: list[int] = [protein.pk]
     if expand_isoforms:
-        isoforms = _get_isoforms(protein.pk)
-        protein_pks.extend(iso.pk for iso in isoforms)
+        seen_iso: set[int] = set(resolved_pks)
+        for p in resolved:
+            for iso in _get_isoforms(p.pk):
+                if iso.pk not in seen_iso:
+                    seen_iso.add(iso.pk)
+                    isoforms.append(iso)
+                    protein_pks.append(iso.pk)
+                    isoform_uid_map[iso.pk] = iso.uniprot_accession
 
-    # Map PK → isoform accession for every expanded isoform (used in display).
-    isoform_uid_map: dict[int, str] = {
-        iso.pk: iso.uniprot_accession for iso in isoforms
-    }
     protein_pks_set = set(protein_pks)
 
     # ── Fetch interactions and/or non-interactions -──────────────────
@@ -507,9 +571,12 @@ def protein_query_api(request):
 
     return JsonResponse(
         {
-            "query_protein": _protein_display(protein),
+            "query_proteins": [
+                _protein_display(p, isoform_uid_map.get(p.pk)) for p in resolved
+            ],
             "isoforms_included": expand_isoforms,
             "expanded_proteins": [_protein_display(iso) for iso in isoforms],
+            "unresolved": unresolved,
             "interactions": results,
             "error": None,
         }
@@ -1258,6 +1325,18 @@ def _protein_search_q(q: str) -> Q:
     return cond
 
 
+def _multi_protein_search_q(tokens: list[str]) -> Q:
+    """
+    OR together :func:`_protein_search_q` for each identifier so the browse
+    pages return the union of substring matches. A single token behaves
+    exactly like the original single-term search.
+    """
+    combined = Q()
+    for tok in tokens:
+        combined |= _protein_search_q(tok)
+    return combined
+
+
 def _filtered_protein_qs(request):
     """
     Build the ordered Protein queryset for the browse "Proteins" mode from the
@@ -1299,8 +1378,9 @@ def _filtered_protein_qs(request):
         p2 = through.filter(interaction__protein_2_id=OuterRef("pk"))
         base_qs = base_qs.filter(Exists(p1) | Exists(p2))
 
-    if q:
-        base_qs = base_qs.filter(_protein_search_q(q))
+    tokens = _split_identifiers(q)
+    if tokens:
+        base_qs = base_qs.filter(_multi_protein_search_q(tokens))
 
     if f.min_degree is not None and f.min_degree > 0:
         base_qs = base_qs.filter(degree__gte=f.min_degree)
@@ -1438,8 +1518,11 @@ def _browse_interaction_base(request, f: "CommonFilters", q: str):
     if f.max_score is not None:
         nonint_qs = nonint_qs.filter(score__lte=f.max_score)
 
-    if q:
-        pid_sub = Subquery(Protein.objects.filter(_protein_search_q(q)).values("pk"))
+    tokens = _split_identifiers(q)
+    if tokens:
+        pid_sub = Subquery(
+            Protein.objects.filter(_multi_protein_search_q(tokens)).values("pk")
+        )
         side_match = Q(protein_1__in=pid_sub) | Q(protein_2__in=pid_sub)
         int_qs = int_qs.filter(side_match)
         nonint_qs = nonint_qs.filter(side_match)
@@ -1509,6 +1592,26 @@ def _browse_interaction_rows(
     return rows
 
 
+def _too_many_identifiers_response(request):
+    """
+    Return a 400 ``JsonResponse`` when the ``q`` search string holds more than
+    ``MAX_QUERY_PROTEINS`` identifiers, else ``None``. Shared by the browse
+    list and export endpoints so all reject over-long input consistently.
+    """
+    count = len(_split_identifiers(request.GET.get("q", "")))
+    if count > MAX_QUERY_PROTEINS:
+        return JsonResponse(
+            {
+                "error": (
+                    f"Too many proteins: {count} "
+                    f"(max {MAX_QUERY_PROTEINS} per request)."
+                )
+            },
+            status=400,
+        )
+    return None
+
+
 @require_GET
 def browse_proteins_api(request):
     """
@@ -1521,6 +1624,10 @@ def browse_proteins_api(request):
     {"total": <int>, "proteins": [ {id, symbol, uniprot_id, entrez_id,
                                      degree, avg_score, is_reviewed}, ... ]}
     """
+    too_many = _too_many_identifiers_response(request)
+    if too_many is not None:
+        return too_many
+
     try:
         offset = max(0, int(request.GET.get("offset", 0)))
         limit = min(200, max(1, int(request.GET.get("limit", 50))))
@@ -1564,6 +1671,10 @@ def browse_interactions_api(request):
     {"total": <int>, "interactions": [ {id, protein_a, protein_b, score,
         source_count, experiment_count, is_noninteraction, detail_url}, ... ]}
     """
+    too_many = _too_many_identifiers_response(request)
+    if too_many is not None:
+        return too_many
+
     try:
         offset = max(0, int(request.GET.get("offset", 0)))
         limit = min(200, max(1, int(request.GET.get("limit", 50))))
@@ -1625,6 +1736,10 @@ def browse_export_api(request):
     matches what the browse table shows. When the result set exceeds the cap,
     the response carries an ``X-Export-Truncated: 1`` header.
     """
+    too_many = _too_many_identifiers_response(request)
+    if too_many is not None:
+        return too_many
+
     mode = request.GET.get("mode", "proteins")
 
     if mode == "interactions":
