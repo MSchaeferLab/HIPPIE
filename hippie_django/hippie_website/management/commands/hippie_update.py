@@ -12,8 +12,10 @@ Usage:
 from __future__ import annotations
 
 import contextlib
+import http.client
 import json
 import math
+import random
 import re
 import time
 import urllib.error
@@ -27,6 +29,7 @@ from django.core.management.base import BaseCommand, CommandParser
 from django.db import connection, transaction
 from django.db.models.functions import Lower
 
+from . import _biomart
 from ._mitab import open_mitab
 
 from hippie_website.models import (
@@ -1227,6 +1230,7 @@ def _current_resource_versions() -> dict[str, str]:
 
 _ENSEMBL_REST = "https://rest.ensembl.org"
 _ENSEMBL_MIN_INTERVAL = 1.0 / 15  # documented Ensembl rate limit: ~15 req/s
+_ENSEMBL_BACKOFF_CAP = 8.0  # seconds; ceiling for exponential retry backoff
 _ENSEMBL_HEADERS = {
     "Accept": "application/json",
     "User-Agent": "hippie-ensembl/1.0",
@@ -1275,6 +1279,11 @@ def _parse_idmapping_ensembl() -> tuple[
     return acc_ensg, iso_enst, iso_ensp
 
 
+def _ensembl_backoff(attempt: int) -> float:
+    """Capped exponential backoff with jitter (0.5s, 1s, 2s, 4s, 8s ± jitter)."""
+    return min(_ENSEMBL_BACKOFF_CAP, 0.5 * (2**attempt)) + random.uniform(0, 0.5)
+
+
 def _ensembl_json(
     path: str, *, payload: dict | None = None, throttle: list[float]
 ) -> object | None:
@@ -1283,6 +1292,11 @@ def _ensembl_json(
     ``throttle`` is a one-element list holding the last request's monotonic time
     so successive calls stay under ~15 req/s. Honours HTTP 429 + Retry-After.
     Returns parsed JSON, or None on a 4xx / exhausted retries.
+
+    Transient failures — dropped connections (``http.client.RemoteDisconnected``,
+    which is an ``OSError`` and NOT a ``urllib.error.URLError``, so it must be
+    caught explicitly), timeouts, malformed bodies — are retried with capped
+    exponential backoff + jitter and never propagate out of this function.
     """
     url = f"{_ENSEMBL_REST}{path}"
     data = None
@@ -1306,9 +1320,17 @@ def _ensembl_json(
                 continue
             if 400 <= e.code < 500:
                 return None  # unknown symbol/accession — no cross-reference
-            time.sleep(1.0 * (attempt + 1))
-        except (urllib.error.URLError, TimeoutError, ValueError):
-            time.sleep(1.0 * (attempt + 1))
+            time.sleep(_ensembl_backoff(attempt))
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            ConnectionError,
+            TimeoutError,
+            OSError,
+            ValueError,
+        ):
+            # Dropped/reset connection, read timeout, or truncated JSON — retry.
+            time.sleep(_ensembl_backoff(attempt))
     return None
 
 
@@ -1391,6 +1413,63 @@ def _fill_genes_from_ensembl(stdout, genes, touched_genes) -> None:
     stdout.write(f"    Ensembl API resolved {resolved} gene(s).")
 
 
+def _fill_from_biomart(
+    stdout, isoforms, genes, acc_by_gene, gene_by_pk, touched_genes
+) -> None:
+    """Tier 2: bulk-resolve gap isoforms/genes via Ensembl BioMart.
+
+    Collapses the per-isoform REST loop into a few chunked BioMart queries. Fills,
+    in place, isoforms still missing ENST/ENSP (matched on their own isoform
+    accession) and genes still missing ENSG (matched on their canonical protein
+    accessions); the caller persists ``touched_genes``. Any BioMart failure
+    propagates and is caught upstream — the REST tier then covers the gaps.
+    """
+    from hippie_website.models import Isoform
+
+    gap_isoforms = [iso for iso in isoforms if not iso.enst or not iso.ensp]
+    gap_genes = [g for g in genes if not g.ensg]
+    if not gap_isoforms and not gap_genes:
+        return
+
+    # Base UniProt accessions to query: each gap isoform's base accession plus
+    # every gap gene's canonical protein accession(s).
+    accessions: set[str] = {
+        iso.uniprot_accession.split("-", 1)[0] for iso in gap_isoforms
+    }
+    for g in gap_genes:
+        accessions.update(acc_by_gene.get(g.pk, []))
+
+    iso_map, acc_ensg = _biomart.fetch_uniprot_ensembl_map(accessions, stdout=stdout)
+
+    updated: list = []
+    for iso in gap_isoforms:
+        ids = iso_map.get(iso.uniprot_accession)
+        if not ids:
+            continue
+        new_enst = _dedupe([*iso.enst, *ids["enst"]])
+        new_ensp = _dedupe([*iso.ensp, *ids["ensp"]])
+        if new_enst != iso.enst or new_ensp != iso.ensp:
+            iso.enst, iso.ensp = new_enst, new_ensp
+            updated.append(iso)
+    if updated:
+        Isoform.objects.bulk_update(updated, ["enst", "ensp"], batch_size=5000)
+
+    genes_filled = 0
+    for g in gap_genes:
+        merged = list(g.ensg)
+        for acc in acc_by_gene.get(g.pk, []):
+            merged.extend(acc_ensg.get(acc, []))
+        merged = _dedupe(merged)
+        if merged != g.ensg:
+            g.ensg = merged
+            touched_genes.add(g.pk)
+            genes_filled += 1
+
+    stdout.write(
+        f"    BioMart resolved {len(updated)} isoform(s), {genes_filled} gene(s)."
+    )
+
+
 def _populate_ensembl_ids(stdout, *, skip_api: bool = False) -> None:
     """Fill ``Gene.ensg`` / ``Isoform.enst`` / ``Isoform.ensp`` (local then API)."""
     from hippie_website.models import Gene, Isoform, Protein
@@ -1399,11 +1478,15 @@ def _populate_ensembl_ids(stdout, *, skip_api: bool = False) -> None:
     acc_ensg, iso_enst, iso_ensp = _parse_idmapping_ensembl()
 
     # Genes: union ENSGs from each gene's canonical protein accessions.
+    # ``acc_by_gene`` is also kept for the BioMart tier, which resolves gene ENSG
+    # gaps by querying those same canonical accessions.
     gene_ensg: dict[int, list[str]] = defaultdict(list)
+    acc_by_gene: dict[int, list[str]] = defaultdict(list)
     canon = Protein.objects.filter(isoform__isnull=True).values_list(
         "uniprot_accession", "gene_id"
     )
     for acc, gene_id in canon.iterator():
+        acc_by_gene[gene_id].append(acc)
         if acc in acc_ensg:
             gene_ensg[gene_id].extend(acc_ensg[acc])
 
@@ -1425,14 +1508,27 @@ def _populate_ensembl_ids(stdout, *, skip_api: bool = False) -> None:
     )
 
     if skip_api:
-        stdout.write("  Skipping Ensembl API fallback (--skip-ensembl-api).")
+        stdout.write("  Skipping Ensembl network fallback (--skip-ensembl-api).")
         return
 
     gene_by_pk = {g.pk: g for g in genes}
     touched_genes: set[int] = set()
-    # Isoforms first — their xrefs also back-fill some gene ENSGs.
+
+    # Tier 2: one bulk BioMart pull resolves the vast majority of gaps in a few
+    # requests, replacing thousands of per-isoform REST calls.
+    try:
+        _fill_from_biomart(
+            stdout, isoforms, genes, acc_by_gene, gene_by_pk, touched_genes
+        )
+    except Exception as e:  # noqa: BLE001 — enrichment is best-effort, never fatal
+        stdout.write(f"    BioMart step failed ({e}); falling back to REST only.")
+
+    # Tier 3: per-item Ensembl REST for whatever BioMart still left empty. The
+    # fill helpers re-derive their own "still missing" sets, so this now runs over
+    # a tiny remainder rather than every isoform/gene.
     _fill_isoforms_from_ensembl(stdout, isoforms, gene_by_pk, touched_genes)
     _fill_genes_from_ensembl(stdout, genes, touched_genes)
+
     if touched_genes:
         Gene.objects.bulk_update(
             [gene_by_pk[pk] for pk in touched_genes], ["ensg"], batch_size=5000
@@ -1531,7 +1627,14 @@ class Command(BaseCommand):
         _refresh_secondary_accessions()
 
         self.stdout.write("Populating Ensembl IDs (ENSG / ENST / ENSP).")
-        _populate_ensembl_ids(self.stdout, skip_api=skip_ensembl_api)
+        # Best-effort enrichment: a network/parse failure here must never abort the
+        # update (release metadata below still has to be written).
+        try:
+            _populate_ensembl_ids(self.stdout, skip_api=skip_ensembl_api)
+        except Exception as e:  # noqa: BLE001
+            self.stderr.write(
+                f"WARNING: Ensembl ID population failed ({e}); continuing without it."
+            )
 
         self.stdout.write("Recording release metadata.")
         int_scores = list(Interaction.objects.values_list("score", flat=True))
