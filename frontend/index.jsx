@@ -12,7 +12,7 @@ import {
 } from "./filters.jsx";
 
 const { apiUrl, filterMetaUrl } = window.HIPPIE_CONFIG;
-const EXAMPLES = ["HTT", "P42858", "3064", "HD_HUMAN"];
+const EXAMPLES = ["HTT", "P42858", "3064", "HD_HUMAN", "ENSG00000197386"];
 const INITIAL_Q = new URLSearchParams(window.location.search).get("q") || "";
 
 // Map the protein-query API payload into the shared InteractionTable row shape.
@@ -113,7 +113,7 @@ function App() {
         <input
           type="text"
           className="form-control mb-3"
-          placeholder="e.g. HTT, P42858, 3064, HD_HUMAN …"
+          placeholder="e.g. HTT, P42858, 3064, HD_HUMAN, ENSG00000197386 …"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
