@@ -1261,7 +1261,7 @@ def _protein_search_q(q: str) -> Q:
 def _filtered_protein_qs(request):
     """
     Build the ordered Protein queryset for the browse "Proteins" mode from the
-    request's filter params. Shared by ``browse_api`` and ``browse_export_api``.
+    request's filter params. Shared by ``browse_proteins_api`` and ``browse_export_api``.
 
     ``degree`` / ``avg_score`` are read from denormalised columns (refreshed by
     ``recompute_protein_stats``), so degree/score filters and sorting are plain
@@ -1510,9 +1510,9 @@ def _browse_interaction_rows(
 
 
 @require_GET
-def browse_api(request):
+def browse_proteins_api(request):
     """
-    GET /api/browse/?offset=<int>&limit=<int>&q=<text>
+    GET /api/browse/proteins/?offset=<int>&limit=<int>&q=<text>
                     &sort=<key>&dir=<asc|desc>
                     &tissue=<id>&tissue=<id>&source=<id>&source=<id>
                     &min_degree=<int>&min_score=<float>&min_rpkm=<float>

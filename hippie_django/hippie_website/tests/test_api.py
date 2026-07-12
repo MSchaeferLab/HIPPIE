@@ -68,8 +68,8 @@ class UrlSmokeTest(HippieTestCase):
         r = self.client.get(reverse("hippie_website:interaction_detail", args=[99999]))
         self.assertEqual(r.status_code, 404)
 
-    def test_browse_api_get(self):
-        r = self.client.get(reverse("hippie_website:browse_api"))
+    def test_browse_proteins_api_get(self):
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"))
         self.assertEqual(r.status_code, 200)
 
     def test_browse_filter_meta_get(self):
@@ -242,11 +242,11 @@ class InteractionQueryApiTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 4. browse_api
+# 4. browse_proteins_api
 # ---------------------------------------------------------------------------
 
 
-class BrowseApiTest(HippieTestCase):
+class BrowseProteinsApiTest(HippieTestCase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
@@ -256,7 +256,7 @@ class BrowseApiTest(HippieTestCase):
         )
 
     def _get(self, **params):
-        r = self.client.get(reverse("hippie_website:browse_api"), params)
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), params)
         self.assertEqual(r.status_code, 200)
         return json.loads(r.content)
 
@@ -491,9 +491,9 @@ class SynonymSearchTest(HippieTestCase):
         qs = Protein.objects.resolve("BRCA1")
         self.assertEqual([p.pk for p in qs], [self.brca1.pk])
 
-    # -- browse_api --------------------------------------------------------
+    # -- browse_proteins_api --------------------------------------------------------
     def _browse(self, **params):
-        r = self.client.get(reverse("hippie_website:browse_api"), params)
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), params)
         self.assertEqual(r.status_code, 200)
         return json.loads(r.content)
 
@@ -924,13 +924,13 @@ class InteractionQuerySetMethodsTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 19. browse_api min_avg_score filter (unified CommonFilters param)
+# 19. browse_proteins_api min_avg_score filter (unified CommonFilters param)
 # ---------------------------------------------------------------------------
 
 
-class BrowseApiMinScoreTest(HippieTestCase):
+class BrowseProteinsApiMinScoreTest(HippieTestCase):
     def _get(self, **params):
-        r = self.client.get(reverse("hippie_website:browse_api"), params)
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), params)
         self.assertEqual(r.status_code, 200)
         return json.loads(r.content)
 

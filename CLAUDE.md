@@ -52,8 +52,8 @@ python manage.py runserver
 - Run manually: `pre-commit run --all-files`
 - No separate CI config exists — linting enforced locally via pre-commit only
 
-## Performance Gotchas (browse_api hard-won lessons)
-- `browse_api` serves ~20k proteins in 500-row chunks to the React frontend
+## Performance Gotchas (browse_proteins_api hard-won lessons)
+- `browse_proteins_api` serves ~20k proteins in 500-row chunks to the React frontend
 - **Never annotate the count queryset** — Django wraps annotated counts in a subquery, making it O(n) expensive
 - Pattern: filter lean → get ID slice → compute degree/avg_score via targeted `Interaction` aggregates on those IDs only
 - `degree` = interactions where `protein_1=id` + `protein_2=id` − self-loops (counted twice otherwise)

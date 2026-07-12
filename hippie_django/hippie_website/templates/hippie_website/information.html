@@ -488,10 +488,10 @@
 
     <p class="mt-4 mb-1"><strong>Browse (paginated)</strong></p>
     <div class="hippie-card--muted mb-2">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/browse/?offset=0&amp;limit=50&amp;sort=degree&amp;dir=desc<br><b>GET</b> /api/browse/interactions/?offset=0&amp;limit=50&amp;show=both</code>
+      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/browse/proteins/?offset=0&amp;limit=50&amp;sort=degree&amp;dir=desc<br><b>GET</b> /api/browse/interactions/?offset=0&amp;limit=50&amp;show=both</code>
     </div>
     <p>
-      <code>/api/browse/</code> returns a page of proteins <code>{ total, proteins[] }</code> (each
+      <code>/api/browse/proteins/</code> returns a page of proteins <code>{ total, proteins[] }</code> (each
       protein carries <code>degree</code>, <code>avg_score</code> and <code>is_reviewed</code>);
       <code>/api/browse/interactions/</code> returns a page of interactions
       <code>{ total, interactions[] }</code>. Both accept <code>offset</code>, <code>limit</code>

@@ -34,7 +34,7 @@ urlpatterns = [
     path("api/query/", views.protein_query_api, name="protein_query_api"),
     path("api/interaction/", views.interaction_query_api, name="interaction_query_api"),
     path("api/network/", views.network_query_api, name="network_query_api"),
-    path("api/browse/", views.browse_api, name="browse_api"),
+    path("api/browse/proteins", views.browse_proteins_api, name="browse_proteins_api"),
     path(
         "api/browse/interactions/",
         views.browse_interactions_api,
