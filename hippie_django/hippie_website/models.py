@@ -140,6 +140,18 @@ class Isoform(Protein):
     # The isoform's ENSG fallback reads the connected ``gene.ensg`` instead.
     enst = models.JSONField(default=list, blank=True)
     ensp = models.JSONField(default=list, blank=True)
+    # True when this isoform's sequence (UniParc hash) equals its parent
+    # protein's canonical sequence — i.e. this accession is the canonical
+    # isoform. Populated by hippie_update from UniProt idmapping (UniParc
+    # match against the base accession). Not db_indexed: no canonical filter
+    # exists and the isoform table is small.
+    is_canonical = models.BooleanField(
+        default=False,
+        help_text=(
+            "True when this isoform's sequence (UniParc) equals its parent "
+            "protein's canonical sequence."
+        ),
+    )
 
     class Meta:
         db_table = "isoform"

@@ -1959,6 +1959,7 @@ def _digger_ctx(p1: Protein, p2: Protein) -> dict:
         if iso is not None:
             return {
                 "is_isoform": True,
+                "is_canonical": iso.is_canonical,
                 "url": protein_digger_url(
                     is_isoform=True,
                     ensg=iso.gene.ensg,
@@ -1968,6 +1969,7 @@ def _digger_ctx(p1: Protein, p2: Protein) -> dict:
             }
         return {
             "is_isoform": False,
+            "is_canonical": False,
             "url": protein_digger_url(
                 is_isoform=False, ensg=p.gene.ensg, enst=[], ensp=[]
             ),

@@ -1279,6 +1279,70 @@ def _parse_idmapping_ensembl() -> tuple[
     return acc_ensg, iso_enst, iso_ensp
 
 
+def _parse_idmapping_uniparc() -> dict[str, set[str]]:
+    """Single pass over HUMAN_9606_idmapping.dat collecting UniParc IDs.
+
+    Returns an accession-keyed map ``acc -> {UPI..., ...}`` from the ``UniParc``
+    rows. A UniParc ID is a hash of the exact sequence, so an isoform whose
+    UniParc equals its base accession's UniParc *is* the canonical isoform.
+    Values are sets because a small number (~200) of accessions list more than
+    one UniParc row; set-intersection then still gives the right answer.
+    """
+    uniparc: dict[str, set[str]] = defaultdict(set)
+    with open(data_path("human_idmapping"), "r") as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3:
+                continue
+            acc, id_type, value = parts[0], parts[1], parts[2]
+            if id_type == "UniParc":
+                uniparc[acc].add(value)
+    return uniparc
+
+
+def _populate_canonical_isoforms(stdout) -> None:
+    """Flag each stored Isoform as canonical when its sequence (UniParc) equals
+    its parent protein's canonical sequence.
+
+    The parent (canonical) protein is the base accession — the isoform accession
+    ``ACC-N`` with the ``-N`` stripped. UniProt's idmapping carries no explicit
+    canonical marker, but the UniParc sequence hash detects it exactly: the
+    canonical isoform is the one sharing the base accession's UniParc.
+
+    Non-fatal integrity check: a base should resolve to exactly one canonical
+    isoform. If more than one matches (not observed across the full file), warn
+    with the offending accessions and UniParc IDs rather than failing.
+    """
+    uniparc = _parse_idmapping_uniparc()
+    isoforms = list(Isoform.objects.all())
+    canon_by_base: dict[str, list[Isoform]] = defaultdict(list)
+    for iso in isoforms:
+        base = iso.uniprot_accession.split("-", 1)[0]
+        iso.is_canonical = bool(
+            uniparc.get(iso.uniprot_accession, set()) & uniparc.get(base, set())
+        )
+        if iso.is_canonical:
+            canon_by_base[base].append(iso)
+    Isoform.objects.bulk_update(isoforms, ["is_canonical"], batch_size=5000)
+
+    n_canonical = sum(len(v) for v in canon_by_base.values())
+    stdout.write(
+        f"  Marked {n_canonical} canonical isoform(s) across {len(isoforms)} "
+        "stored isoform(s)."
+    )
+    for base, isos in canon_by_base.items():
+        if len(isos) > 1:
+            detail = "; ".join(
+                f"{i.uniprot_accession} "
+                f"UniParc={sorted(uniparc.get(i.uniprot_accession, set()))}"
+                for i in isos
+            )
+            stdout.write(
+                f"  WARNING: {base} has {len(isos)} isoforms marked canonical "
+                f"(base UniParc={sorted(uniparc.get(base, set()))}): {detail}"
+            )
+
+
 def _ensembl_backoff(attempt: int) -> float:
     """Capped exponential backoff with jitter (0.5s, 1s, 2s, 4s, 8s ± jitter)."""
     return min(_ENSEMBL_BACKOFF_CAP, 0.5 * (2**attempt)) + random.uniform(0, 0.5)
@@ -1670,6 +1734,16 @@ class Command(BaseCommand):
         _assign_source_urls()
         self.stdout.write("Refreshing secondary UniProt accessions.")
         _refresh_secondary_accessions()
+
+        self.stdout.write("Populating canonical isoform flags.")
+        # Best-effort enrichment: a parse failure here must never abort the update.
+        try:
+            _populate_canonical_isoforms(self.stdout)
+        except Exception as e:  # noqa: BLE001
+            self.stderr.write(
+                f"WARNING: canonical isoform population failed ({e}); "
+                "continuing without it."
+            )
 
         self.stdout.write("Populating Ensembl IDs (ENSG / ENST / ENSP).")
         # Best-effort enrichment: a network/parse failure here must never abort the
