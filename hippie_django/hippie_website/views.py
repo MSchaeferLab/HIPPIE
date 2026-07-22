@@ -1947,7 +1947,11 @@ def _digger_ctx(p1: Protein, p2: Protein) -> dict:
     ENST/ENSP); canonical proteins fall back to the already-``select_related``
     ``gene``. See ``digger_links.py`` for the URL rules.
     """
-    from hippie_website.digger_links import interaction_digger, protein_digger_url
+    from hippie_website.digger_links import (
+        _first,
+        interaction_digger,
+        protein_digger_url,
+    )
 
     isos = {
         i.pk: i
@@ -1976,12 +1980,8 @@ def _digger_ctx(p1: Protein, p2: Protein) -> dict:
         }
 
     def _transcript_with_fallback(i: Isoform) -> str:
-        """Return the ENST if present, else the ENSP, else empty string. Used for DIGGER links."""
-        if i.enst:
-            return i.enst
-        if i.ensp:
-            return i.ensp
-        return ""
+        """Return the first ENST if present, else the first ENSP, else empty string. Used for DIGGER links."""
+        return _first(i.enst) or _first(i.ensp) or ""
 
     p1_iso = p1.pk in isos
     p2_iso = p2.pk in isos
@@ -1998,6 +1998,7 @@ def _digger_ctx(p1: Protein, p2: Protein) -> dict:
             p2_enst_p=_transcript_with_fallback(isos[p2.pk]) if p2_iso else "",
             g1_ensg=g1_ensg,
             g2_ensg=g2_ensg,
+            handoff_secret=settings.HIPPIE_HANDOFF_SECRET,
         ),
     }
 

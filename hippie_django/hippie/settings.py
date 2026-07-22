@@ -26,6 +26,11 @@ SECRET_KEY = os.environ.get(
     "django-insecure-3wq+cj5bp*g)wk1ql%%#%ybb^u=cac5^zg0cv_*if4w!+ff*tn",
 )
 
+# Shared secret for the DIGGER (exbio.wzw.tum.de/digger) signed-token handoff.
+# Must match DIGGER's key exactly. Empty in dev (signing falls back to SECRET_KEY);
+# set the real shared value in prod via .env.
+HIPPIE_HANDOFF_SECRET = os.environ.get("HIPPIE_HANDOFF_SECRET", "")
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
 

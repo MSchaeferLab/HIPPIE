@@ -10,6 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
+from django.core import signing
 from django.urls import reverse
 
 from ..digger_links import interaction_digger, protein_digger_url
@@ -82,6 +83,7 @@ class DiggerLinksTest(HippieTestCase):
             p2_enst_p="ENST00000607003",
             g1_ensg=[],
             g2_ensg=[],
+            handoff_secret="test-secret",
         )
         self.assertEqual(res["kind"], "link")
         self.assertEqual(
@@ -89,7 +91,7 @@ class DiggerLinksTest(HippieTestCase):
             "https://exbio.wzw.tum.de/digger/ID/gene/human/multiple/ENST00000258149,ENST00000607003",
         )
 
-    def test_interaction_both_canonical_builds_post_form(self):
+    def test_interaction_both_canonical_builds_token_link(self):
         res = interaction_digger(
             p1_is_isoform=False,
             p2_is_isoform=False,
@@ -97,12 +99,19 @@ class DiggerLinksTest(HippieTestCase):
             p2_enst_p="",
             g1_ensg=["ENSG00000012048"],
             g2_ensg=["ENSG00000141510"],
+            handoff_secret="test-secret",
         )
-        self.assertEqual(res["kind"], "form")
+        self.assertEqual(res["kind"], "link")
+        self.assertTrue(
+            res["url"].startswith(
+                "https://exbio.wzw.tum.de/digger/receive-token/?token="
+            )
+        )
+        token = res["url"].split("token=", 1)[1]
         self.assertEqual(
-            res["action"], "https://exbio.wzw.tum.de/digger/network_analysis/"
+            signing.loads(token, key="test-secret", salt="hippie-handoff"),
+            {"organism": "human", "input": ["ENSG00000012048", "ENSG00000141510"]},
         )
-        self.assertEqual(res["post_input"], "ENSG00000012048\r\nENSG00000141510")
 
     def test_interaction_canonical_missing_ensg_is_none(self):
         res = interaction_digger(
@@ -112,6 +121,7 @@ class DiggerLinksTest(HippieTestCase):
             p2_enst_p="",
             g1_ensg=["ENSG00000012048"],
             g2_ensg=[],
+            handoff_secret="test-secret",
         )
         self.assertEqual(res["kind"], "none")
 
@@ -123,6 +133,7 @@ class DiggerLinksTest(HippieTestCase):
             p2_enst_p="",
             g1_ensg=[],
             g2_ensg=["ENSG00000141510"],
+            handoff_secret="test-secret",
         )
         self.assertEqual(res["kind"], "none")
 
@@ -210,7 +221,7 @@ class DiggerCardRenderTest(HippieTestCase):
         self.assertContains(r, "Further information")
         self.assertIn("digger", r.context)
 
-    def test_canonical_pair_renders_gene_links_and_post_form(self):
+    def test_canonical_pair_renders_gene_links_and_token_link(self):
         self._set_gene_ensg(self.brca1, ["ENSG00000012048"])
         self._set_gene_ensg(self.tp53, ["ENSG00000141510"])
         r = self.client.get(
@@ -219,11 +230,8 @@ class DiggerCardRenderTest(HippieTestCase):
         body = r.content.decode()
         self.assertIn("/digger/ID/gene/human/ENSG00000012048", body)
         self.assertIn("/digger/ID/gene/human/ENSG00000141510", body)
-        # Both-canonical interaction link is a POST form to network_analysis/.
-        self.assertIn(
-            'action="https://exbio.wzw.tum.de/digger/network_analysis/"', body
-        )
-        self.assertIn("ENSG00000012048\r\nENSG00000141510", body)
+        # Both-canonical interaction link is a signed-token GET handoff.
+        self.assertIn("/digger/receive-token/?token=", body)
 
     def test_mixed_pair_interaction_not_available(self):
         # brca1 canonical (with ENSG) × isoform of tp53.
@@ -257,7 +265,10 @@ class DiggerCardRenderTest(HippieTestCase):
         )
         ix = make_interaction(iso_a, iso_b, score=0.6)
         r = self.client.get(reverse("hippie_website:interaction_detail", args=[ix.pk]))
-        self.assertContains(r, "/digger/ID/gene/human/multiple/")
+        self.assertContains(
+            r,
+            "/digger/ID/gene/human/multiple/ENST00000258149,ENST00000000002",
+        )
         self.assertContains(r, "/digger/ID/human/ENST00000258149")
 
     def test_noninteraction_page_shows_card(self):

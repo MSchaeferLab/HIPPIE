@@ -7,8 +7,8 @@ DIGGER is keyed by Ensembl IDs:
   - canonical protein → ENSG (gene):   ``…/digger/ID/gene/human/{ensg}``
   - isoform          → ENST/ENSP:      ``…/digger/ID/human/{enst|ensp}``
   - isoform pair     → accessions:     ``…/digger/ID/gene/human/multiple/{a},{b}``
-  - canonical pair   → POST network_analysis with both ENSGs (a plain <a> can't
-    POST, so the template renders a small form; here we only build the payload).
+  - canonical pair   → signed-token GET link into ``…/digger/receive-token/``
+    (see ``_handoff_url``); DIGGER verifies it with the shared secret.
 
 ``ensg`` / ``enst`` / ``ensp`` arrive as lists of unversioned IDs (see
 ``Gene.ensg`` / ``Isoform.enst`` / ``Isoform.ensp``). We use the first entry of
@@ -17,7 +17,28 @@ each list and apply a fallback chain; an empty list means "not available".
 
 from __future__ import annotations
 
+from django.core import signing
+
 BASE = "https://exbio.wzw.tum.de/digger"
+
+# Salt for the DIGGER signed-token handoff; must match DIGGER's ``salt`` exactly.
+HANDOFF_SALT = "hippie-handoff"
+
+
+def _handoff_url(input_ids: list[str], secret: str) -> str:
+    """Signed-token GET link into DIGGER's ``receive-token`` endpoint.
+
+    The token carries ``{"organism": "human", "input": [...]}`` signed with the
+    shared ``secret`` (default JSON serializer, ``HANDOFF_SALT``). DIGGER's
+    ``Multi_proteins`` dispatches on the first id: ENSG → gene analysis,
+    ENST/ENSP → isoform analysis.
+    """
+    token = signing.dumps(
+        {"organism": "human", "input": input_ids},
+        key=secret,
+        salt=HANDOFF_SALT,
+    )
+    return f"{BASE}/receive-token/?token={token}"
 
 
 def _first(ids: list[str]) -> str | None:
@@ -66,13 +87,14 @@ def interaction_digger(
     p2_enst_p: str,
     g1_ensg: list[str],
     g2_ensg: list[str],
+    handoff_secret: str,
 ) -> dict[str, str]:
     """DIGGER link for the pair.
 
     Returns a dict describing how the template should render it:
       - both isoforms   → {"kind": "link", "url": …}  (uses UniProt accessions)
-      - both canonical  → {"kind": "form", "action": …, "post_input": "E1\\r\\nE2"}
-                          when both genes resolve, else {"kind": "none"}
+      - both canonical  → {"kind": "link", "url": …}  (signed-token handoff on
+                          both ENSGs) when both genes resolve, else {"kind": "none"}
       - mixed           → {"kind": "none"}
     """
     if p1_is_isoform and p2_is_isoform:
@@ -85,11 +107,8 @@ def interaction_digger(
         ensg2 = _first(g2_ensg)
         if ensg1 and ensg2:
             return {
-                "kind": "form",
-                "action": f"{BASE}/network_analysis/",
-                # CRLF-joined; the browser encodes it as %0D%0A in the POST body,
-                # matching DIGGER's expected ``input=E1%0D%0AE2`` payload.
-                "post_input": f"{ensg1}\r\n{ensg2}",
+                "kind": "link",
+                "url": _handoff_url([ensg1, ensg2], handoff_secret),
             }
         return {"kind": "none"}
     # one isoform, one canonical — DIGGER has no combined view.

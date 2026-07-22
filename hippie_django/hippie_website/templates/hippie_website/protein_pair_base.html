@@ -121,14 +121,6 @@
             <i class="bi bi-dot" style="color: var(--hippie-teal)"></i>
             {% if digger.interaction.kind == "link" %}
               <a href="{{ digger.interaction.url }}" target="_blank" rel="noopener">Interaction in DIGGER</a>
-            {% elif digger.interaction.kind == "form" %}
-              {# External POST to DIGGER's network-analysis; no {% csrf_token %} (cross-site). #}
-              <form method="post" action="{{ digger.interaction.action }}" target="_blank" style="display:inline;">
-                <input type="hidden" name="input" value="{{ digger.interaction.post_input }}">
-                <input type="hidden" name="organism" value="human">
-                <input type="hidden" name="option1" value="">
-                <button type="submit" class="btn btn-link btn-sm p-0 align-baseline" style="font-size:inherit; text-decoration:underline; color:var(--hippie-teal);">Interaction in DIGGER</button>
-              </form>
             {% else %}
               <span>Interaction in DIGGER</span> <span class="text-muted-sm">— not available</span>
             {% endif %}
