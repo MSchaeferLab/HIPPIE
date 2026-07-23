@@ -11,9 +11,15 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
+import http.client
 import json
 import math
+import random
 import re
+import time
+import urllib.error
+import urllib.request
 from collections import defaultdict
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -23,6 +29,8 @@ from django.core.management.base import BaseCommand, CommandParser
 from django.db import connection, transaction
 from django.db.models.functions import Lower
 
+from . import _biomart
+from ._mitab import open_mitab
 
 from hippie_website.models import (
     ExperimentType,
@@ -344,13 +352,9 @@ def _parse_intact_or_biogrid(
         id_idx_1 = 2
         id_idx_2 = 3
 
-    with open(path, encoding="utf-8", errors="replace") as fh:
+    with contextlib.closing(open_mitab(path)) as fh:
         for line in fh:
-            line = line.rstrip("\n")
-            if line.startswith("#") or not line:
-                continue
             total += 1
-            line = line.split("\t")
             both_human = line[9].startswith("taxid:9606") and line[10].startswith(
                 "taxid:9606"
             )
@@ -1216,6 +1220,431 @@ def _current_resource_versions() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Ensembl ID population (ENSG on Gene, ENST/ENSP on Isoform)
+#
+# Hybrid: parse the already-downloaded UniProt HUMAN_9606_idmapping.dat first
+# (instant, no network), then fall back to the Ensembl REST API only for the
+# genes/isoforms whose relevant list is still empty. IDs are stored unversioned
+# (DIGGER URLs need bare ENSG/ENST/ENSP). Used to build DIGGER cross-links.
+# ---------------------------------------------------------------------------
+
+_ENSEMBL_REST = "https://rest.ensembl.org"
+_ENSEMBL_MIN_INTERVAL = 1.0 / 15  # documented Ensembl rate limit: ~15 req/s
+_ENSEMBL_BACKOFF_CAP = 8.0  # seconds; ceiling for exponential retry backoff
+_ENSEMBL_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "hippie-ensembl/1.0",
+}
+
+
+def _strip_version(ensembl_id: str) -> str:
+    """Drop the ``.N`` version suffix (ENSG00000141510.14 -> ENSG00000141510)."""
+    return ensembl_id.split(".", 1)[0]
+
+
+def _dedupe(ids: list[str]) -> list[str]:
+    """Order-preserving de-dupe, dropping empties."""
+    return list(dict.fromkeys(i for i in ids if i))
+
+
+def _parse_idmapping_ensembl() -> tuple[
+    dict[str, list[str]], dict[str, list[str]], dict[str, list[str]]
+]:
+    """Single pass over HUMAN_9606_idmapping.dat collecting unversioned Ensembl IDs.
+
+    Returns three accession-keyed maps:
+        acc_ensg — canonical accession -> [ENSG, ...]   (from ``Ensembl``)
+        iso_enst — isoform accession   -> [ENST, ...]   (from ``Ensembl_TRS``)
+        iso_ensp — isoform accession   -> [ENSP, ...]   (from ``Ensembl_PRO``)
+
+    Isoform (``ACC-N``) rows never carry an ``Ensembl`` gene row, so canonical
+    ENSGs come only from no-dash accessions. TRS/PRO rows also exist for
+    canonical accessions but are irrelevant here, so we keep only the dash ones.
+    """
+    acc_ensg: dict[str, list[str]] = defaultdict(list)
+    iso_enst: dict[str, list[str]] = defaultdict(list)
+    iso_ensp: dict[str, list[str]] = defaultdict(list)
+    with open(data_path("human_idmapping"), "r") as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3:
+                continue
+            acc, id_type, value = parts[0], parts[1], parts[2]
+            if id_type == "Ensembl":
+                acc_ensg[acc].append(_strip_version(value))
+            elif id_type == "Ensembl_TRS" and "-" in acc:
+                iso_enst[acc].append(_strip_version(value))
+            elif id_type == "Ensembl_PRO" and "-" in acc:
+                iso_ensp[acc].append(_strip_version(value))
+    return acc_ensg, iso_enst, iso_ensp
+
+
+def _parse_idmapping_uniparc() -> dict[str, set[str]]:
+    """Single pass over HUMAN_9606_idmapping.dat collecting UniParc IDs.
+
+    Returns an accession-keyed map ``acc -> {UPI..., ...}`` from the ``UniParc``
+    rows. A UniParc ID is a hash of the exact sequence, so an isoform whose
+    UniParc equals its base accession's UniParc *is* the canonical isoform.
+    Values are sets because a small number (~200) of accessions list more than
+    one UniParc row; set-intersection then still gives the right answer.
+    """
+    uniparc: dict[str, set[str]] = defaultdict(set)
+    with open(data_path("human_idmapping"), "r") as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3:
+                continue
+            acc, id_type, value = parts[0], parts[1], parts[2]
+            if id_type == "UniParc":
+                uniparc[acc].add(value)
+    return uniparc
+
+
+def _populate_canonical_isoforms(stdout) -> None:
+    """Flag each stored Isoform as canonical when its sequence (UniParc) equals
+    its parent protein's canonical sequence.
+
+    The parent (canonical) protein is the base accession — the isoform accession
+    ``ACC-N`` with the ``-N`` stripped. UniProt's idmapping carries no explicit
+    canonical marker, but the UniParc sequence hash detects it exactly: the
+    canonical isoform is the one sharing the base accession's UniParc.
+
+    Non-fatal integrity check: a base should resolve to exactly one canonical
+    isoform. If more than one matches (not observed across the full file), warn
+    with the offending accessions and UniParc IDs rather than failing.
+    """
+    uniparc = _parse_idmapping_uniparc()
+    isoforms = list(Isoform.objects.all())
+    canon_by_base: dict[str, list[Isoform]] = defaultdict(list)
+    for iso in isoforms:
+        base = iso.uniprot_accession.split("-", 1)[0]
+        iso.is_canonical = bool(
+            uniparc.get(iso.uniprot_accession, set()) & uniparc.get(base, set())
+        )
+        if iso.is_canonical:
+            canon_by_base[base].append(iso)
+    Isoform.objects.bulk_update(isoforms, ["is_canonical"], batch_size=5000)
+
+    n_canonical = sum(len(v) for v in canon_by_base.values())
+    stdout.write(
+        f"  Marked {n_canonical} canonical isoform(s) across {len(isoforms)} "
+        "stored isoform(s)."
+    )
+    for base, isos in canon_by_base.items():
+        if len(isos) > 1:
+            detail = "; ".join(
+                f"{i.uniprot_accession} "
+                f"UniParc={sorted(uniparc.get(i.uniprot_accession, set()))}"
+                for i in isos
+            )
+            stdout.write(
+                f"  WARNING: {base} has {len(isos)} isoforms marked canonical "
+                f"(base UniParc={sorted(uniparc.get(base, set()))}): {detail}"
+            )
+
+
+def _ensembl_backoff(attempt: int) -> float:
+    """Capped exponential backoff with jitter (0.5s, 1s, 2s, 4s, 8s ± jitter)."""
+    return min(_ENSEMBL_BACKOFF_CAP, 0.5 * (2**attempt)) + random.uniform(0, 0.5)
+
+
+def _ensembl_json(
+    path: str, *, payload: dict | None = None, throttle: list[float]
+) -> object | None:
+    """Rate-limited Ensembl REST call (GET, or POST when ``payload`` given).
+
+    ``throttle`` is a one-element list holding the last request's monotonic time
+    so successive calls stay under ~15 req/s. Honours HTTP 429 + Retry-After.
+    Returns parsed JSON, or None on a 4xx / exhausted retries.
+
+    Transient failures — dropped connections (``http.client.RemoteDisconnected``,
+    which is an ``OSError`` and NOT a ``urllib.error.URLError``, so it must be
+    caught explicitly), timeouts, malformed bodies — are retried with capped
+    exponential backoff + jitter and never propagate out of this function.
+    """
+    url = f"{_ENSEMBL_REST}{path}"
+    data = None
+    headers = dict(_ENSEMBL_HEADERS)
+    if payload is not None:
+        data = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
+    for attempt in range(5):
+        wait = throttle[0] + _ENSEMBL_MIN_INTERVAL - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        throttle[0] = time.monotonic()
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                retry_after = e.headers.get("Retry-After")
+                time.sleep(float(retry_after) if retry_after else 1.0)
+                continue
+            if 400 <= e.code < 500:
+                return None  # unknown symbol/accession — no cross-reference
+            time.sleep(_ensembl_backoff(attempt))
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            ConnectionError,
+            TimeoutError,
+            OSError,
+            ValueError,
+        ):
+            # Dropped/reset connection, read timeout, or truncated JSON — retry.
+            time.sleep(_ensembl_backoff(attempt))
+    return None
+
+
+def _fill_isoforms_from_ensembl(stdout, isoforms, gene_by_pk, touched_genes) -> None:
+    """xrefs lookup for isoforms missing ENST or ENSP; also back-fills gene ENSG."""
+    needing = [iso for iso in isoforms if not iso.enst or not iso.ensp]
+    n = len(needing)
+    if not n:
+        return
+    stdout.write(f"  Ensembl API: resolving {n} isoform(s) (~15 req/s)...")
+    throttle = [0.0]
+    updated: list = []
+    for i, iso in enumerate(needing, 1):
+        acc = iso.uniprot_accession
+        data = _ensembl_json(
+            f"/xrefs/symbol/homo_sapiens/{acc}?content-type=application/json",
+            throttle=throttle,
+        )
+        if isinstance(data, list):
+            for xref in data:
+                xid = _strip_version(xref.get("id", ""))
+                xtype = xref.get("type")
+                if not xid:
+                    continue
+                if xtype == "transcript":
+                    iso.enst = _dedupe([*iso.enst, xid])
+                elif xtype == "translation":
+                    iso.ensp = _dedupe([*iso.ensp, xid])
+                elif xtype == "gene":
+                    gene = gene_by_pk.get(iso.gene_id)
+                    if gene is not None:
+                        merged = _dedupe([*gene.ensg, xid])
+                        if merged != gene.ensg:
+                            gene.ensg = merged
+                            touched_genes.add(gene.pk)
+            updated.append(iso)
+        if i % 25 == 0 or i == n:
+            stdout.write(f"\r    isoforms {i}/{n}", ending="")
+    stdout.write("")  # newline after the progress line
+    if updated:
+        from hippie_website.models import Isoform
+
+        Isoform.objects.bulk_update(updated, ["enst", "ensp"], batch_size=5000)
+    stdout.write(f"    Ensembl API resolved {len(updated)} isoform(s).")
+
+
+def _fill_genes_from_ensembl(stdout, genes, touched_genes) -> None:
+    """Batch symbol lookup for genes still missing an ENSG after Phase 1 + isoforms."""
+    empties = [g for g in genes if not g.ensg and g.entrez_name]
+    if not empties:
+        return
+    by_symbol: dict[str, list] = defaultdict(list)
+    for g in empties:
+        by_symbol[g.entrez_name].append(g)
+    symbols = list(by_symbol)
+    stdout.write(f"  Ensembl API: resolving ENSG for {len(symbols)} gene symbol(s)...")
+    throttle = [0.0]
+    resolved = 0
+    for start in range(0, len(symbols), 500):
+        chunk = symbols[start : start + 500]
+        data = _ensembl_json(
+            "/lookup/symbol/homo_sapiens",
+            payload={"symbols": chunk},
+            throttle=throttle,
+        )
+        if not isinstance(data, dict):
+            continue
+        for symbol, entry in data.items():
+            ensg = (
+                _strip_version(entry.get("id", "")) if isinstance(entry, dict) else ""
+            )
+            if not ensg:
+                continue
+            for g in by_symbol.get(symbol, []):
+                merged = _dedupe([*g.ensg, ensg])
+                if merged != g.ensg:
+                    g.ensg = merged
+                    touched_genes.add(g.pk)
+                    resolved += 1
+    stdout.write(f"    Ensembl API resolved {resolved} gene(s).")
+
+
+def _fill_from_biomart(
+    stdout, isoforms, genes, acc_by_gene, gene_by_pk, touched_genes
+) -> None:
+    """Tier 2: bulk-resolve gap isoforms/genes via Ensembl BioMart.
+
+    Collapses the per-isoform REST loop into a few chunked BioMart queries. Fills,
+    in place, isoforms still missing ENST/ENSP (matched on their own isoform
+    accession) and genes still missing ENSG (matched on their canonical protein
+    accessions); the caller persists ``touched_genes``. Any BioMart failure
+    propagates and is caught upstream — the REST tier then covers the gaps.
+    """
+    from hippie_website.models import Isoform
+
+    gap_isoforms = [iso for iso in isoforms if not iso.enst or not iso.ensp]
+    gap_genes = [g for g in genes if not g.ensg]
+    if not gap_isoforms and not gap_genes:
+        return
+
+    # Base UniProt accessions to query: each gap isoform's base accession plus
+    # every gap gene's canonical protein accession(s).
+    accessions: set[str] = {
+        iso.uniprot_accession.split("-", 1)[0] for iso in gap_isoforms
+    }
+    for g in gap_genes:
+        accessions.update(acc_by_gene.get(g.pk, []))
+
+    iso_map, acc_ensg = _biomart.fetch_uniprot_ensembl_map(accessions, stdout=stdout)
+
+    updated: list = []
+    for iso in gap_isoforms:
+        ids = iso_map.get(iso.uniprot_accession)
+        if not ids:
+            continue
+        new_enst = _dedupe([*iso.enst, *ids["enst"]])
+        new_ensp = _dedupe([*iso.ensp, *ids["ensp"]])
+        if new_enst != iso.enst or new_ensp != iso.ensp:
+            iso.enst, iso.ensp = new_enst, new_ensp
+            updated.append(iso)
+    if updated:
+        Isoform.objects.bulk_update(updated, ["enst", "ensp"], batch_size=5000)
+
+    genes_filled = 0
+    for g in gap_genes:
+        merged = list(g.ensg)
+        for acc in acc_by_gene.get(g.pk, []):
+            merged.extend(acc_ensg.get(acc, []))
+        merged = _dedupe(merged)
+        if merged != g.ensg:
+            g.ensg = merged
+            touched_genes.add(g.pk)
+            genes_filled += 1
+
+    stdout.write(
+        f"    BioMart resolved {len(updated)} isoform(s), {genes_filled} gene(s)."
+    )
+
+
+def _populate_ensembl_ids(stdout, *, skip_api: bool = False) -> None:
+    """Fill ``Gene.ensg`` / ``Isoform.enst`` / ``Isoform.ensp`` (local then API)."""
+    from hippie_website.models import Gene, Isoform, Protein
+
+    stdout.write("  Parsing Ensembl IDs from idmapping.dat...")
+    acc_ensg, iso_enst, iso_ensp = _parse_idmapping_ensembl()
+
+    # Genes: union ENSGs from each gene's canonical protein accessions.
+    # ``acc_by_gene`` is also kept for the BioMart tier, which resolves gene ENSG
+    # gaps by querying those same canonical accessions.
+    gene_ensg: dict[int, list[str]] = defaultdict(list)
+    acc_by_gene: dict[int, list[str]] = defaultdict(list)
+    canon = Protein.objects.filter(isoform__isnull=True).values_list(
+        "uniprot_accession", "gene_id"
+    )
+    for acc, gene_id in canon.iterator():
+        acc_by_gene[gene_id].append(acc)
+        if acc in acc_ensg:
+            gene_ensg[gene_id].extend(acc_ensg[acc])
+
+    genes = list(Gene.objects.all())
+    for g in genes:
+        g.ensg = _dedupe(gene_ensg.get(g.pk, []))
+    Gene.objects.bulk_update(genes, ["ensg"], batch_size=5000)
+
+    # Isoforms: ENST/ENSP keyed by the isoform's own accession.
+    isoforms = list(Isoform.objects.all())
+    for iso in isoforms:
+        iso.enst = _dedupe(iso_enst.get(iso.uniprot_accession, []))
+        iso.ensp = _dedupe(iso_ensp.get(iso.uniprot_accession, []))
+    Isoform.objects.bulk_update(isoforms, ["enst", "ensp"], batch_size=5000)
+
+    stdout.write(
+        f"    Local: {sum(1 for g in genes if g.ensg)}/{len(genes)} genes, "
+        f"{sum(1 for i in isoforms if i.enst or i.ensp)}/{len(isoforms)} isoforms."
+    )
+
+    if skip_api:
+        stdout.write("  Skipping Ensembl network fallback (--skip-ensembl-api).")
+    else:
+        gene_by_pk = {g.pk: g for g in genes}
+        touched_genes: set[int] = set()
+
+        # Tier 2: one bulk BioMart pull resolves the vast majority of gaps in a
+        # few requests, replacing thousands of per-isoform REST calls.
+        try:
+            _fill_from_biomart(
+                stdout, isoforms, genes, acc_by_gene, gene_by_pk, touched_genes
+            )
+        except Exception as e:  # noqa: BLE001 — enrichment is best-effort, never fatal
+            stdout.write(f"    BioMart step failed ({e}); falling back to REST only.")
+
+        # Tier 3: per-item Ensembl REST for whatever BioMart still left empty.
+        # The fill helpers re-derive their own "still missing" sets, so this
+        # runs over a tiny remainder rather than every isoform/gene.
+        _fill_isoforms_from_ensembl(stdout, isoforms, gene_by_pk, touched_genes)
+        _fill_genes_from_ensembl(stdout, genes, touched_genes)
+
+        if touched_genes:
+            Gene.objects.bulk_update(
+                [gene_by_pk[pk] for pk in touched_genes], ["ensg"], batch_size=5000
+            )
+
+    # Mirror the finalized Ensembl IDs into the synonym tables so they become
+    # searchable. Runs for both local-only and full runs, on the final in-memory
+    # values (the API tiers mutate ``genes`` / ``isoforms`` in place).
+    _sync_ensembl_synonyms(stdout, genes, isoforms)
+
+
+def _sync_ensembl_synonyms(stdout, genes, isoforms) -> None:
+    """Mirror ``Gene.ensg`` / ``Isoform.enst`` / ``Isoform.ensp`` into the
+    synonym tables so the Ensembl IDs are searchable.
+
+    ``ignore_conflicts=True`` rides the existing ``unique_gene_synonym`` /
+    ``unique_protein_synonym`` constraints, making this idempotent across
+    re-runs. ENST/ENSP attach to the isoform's own row (``iso.pk`` is the shared
+    ``protein_ptr_id``, a valid Protein pk under multi-table inheritance).
+    """
+    gene_syns = [
+        GeneSynonym(gene_id=g.pk, synonym=ensg, additional_information="ensembl_gene")
+        for g in genes
+        for ensg in g.ensg
+    ]
+    prot_syns: list[ProteinSynonym] = []
+    for iso in isoforms:
+        for enst in iso.enst:
+            prot_syns.append(
+                ProteinSynonym(
+                    protein_id=iso.pk,
+                    synonym=enst,
+                    additional_information="ensembl_transcript",
+                )
+            )
+        for ensp in iso.ensp:
+            prot_syns.append(
+                ProteinSynonym(
+                    protein_id=iso.pk,
+                    synonym=ensp,
+                    additional_information="ensembl_translation",
+                )
+            )
+    GeneSynonym.objects.bulk_create(gene_syns, batch_size=50_000, ignore_conflicts=True)
+    ProteinSynonym.objects.bulk_create(
+        prot_syns, batch_size=50_000, ignore_conflicts=True
+    )
+    stdout.write(
+        f"    Ensembl synonyms: {len(gene_syns)} gene, {len(prot_syns)} protein."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Management command
 # ---------------------------------------------------------------------------
 
@@ -1235,11 +1664,18 @@ class Command(BaseCommand):
             action="store_true",
             help="Rescore every Interaction in the DB (not just touched ones)",
         )
+        parser.add_argument(
+            "--skip-ensembl-api",
+            action="store_true",
+            help="Populate Ensembl IDs from the local idmapping file only "
+            "(skip the Ensembl REST fallback for still-empty rows)",
+        )
 
     def handle(self, *_args: object, **options: object) -> None:
         biogrid_path: str | None = options["biogrid"]  # type: ignore[assignment]
         intact_path: str | None = options["intact"]  # type: ignore[assignment]
         rescore_all: bool = options["rescore_all"]  # type: ignore[assignment]
+        skip_ensembl_api: bool = options["skip_ensembl_api"]  # type: ignore[assignment]
 
         if biogrid_path or intact_path:
             touched_ids: set[int] = set()
@@ -1298,6 +1734,26 @@ class Command(BaseCommand):
         _assign_source_urls()
         self.stdout.write("Refreshing secondary UniProt accessions.")
         _refresh_secondary_accessions()
+
+        self.stdout.write("Populating canonical isoform flags.")
+        # Best-effort enrichment: a parse failure here must never abort the update.
+        try:
+            _populate_canonical_isoforms(self.stdout)
+        except Exception as e:  # noqa: BLE001
+            self.stderr.write(
+                f"WARNING: canonical isoform population failed ({e}); "
+                "continuing without it."
+            )
+
+        self.stdout.write("Populating Ensembl IDs (ENSG / ENST / ENSP).")
+        # Best-effort enrichment: a network/parse failure here must never abort the
+        # update (release metadata below still has to be written).
+        try:
+            _populate_ensembl_ids(self.stdout, skip_api=skip_ensembl_api)
+        except Exception as e:  # noqa: BLE001
+            self.stderr.write(
+                f"WARNING: Ensembl ID population failed ({e}); continuing without it."
+            )
 
         self.stdout.write("Recording release metadata.")
         int_scores = list(Interaction.objects.values_list("score", flat=True))

@@ -18,7 +18,15 @@
 import React, { useState } from "react";
 import { scoreClass, uniprotUrl, entrezUrl, PaginationRow, PageSizeSelect } from "./shared.jsx";
 
-const DEFAULT_PAGE_SIZE = 25;
+export const DEFAULT_PAGE_SIZE = 25;
+
+// Numeric columns default to descending on first sort; everything else ascending.
+// Shared by the client-mode table below and Browse's server-mode onSort.
+export function defaultSortDir(key) {
+  return key === "score" || key === "degree" || key === "avg_score"
+    ? "desc"
+    : "asc";
+}
 
 // ── Export bars ─────────────────────────────────────────────────────────────
 function ClientExportBar({ header, lines, filename }) {
@@ -129,7 +137,7 @@ function useTableState(rows, isServer, server, defaultSortKey, defaultSortDir, s
     if (cSortKey === key) setCSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
       setCSortKey(key);
-      setCSortDir(key === "score" || key === "degree" || key === "avg_score" ? "desc" : "asc");
+      setCSortDir(defaultSortDir(key));
     }
     setCPage(1);
   };
@@ -216,9 +224,9 @@ function ProteinCells({ p, stop }) {
   return (
     <>
       <td>
-        <strong>{p.symbol || "—"}</strong>
+        <strong>{p.symbol || "—"} </strong>
         {p.is_reviewed === false && (
-          <span className="unreviewed-tag">[unreviewed]</span>
+          <span className="score-badge score-low">unreviewed</span>
         )}
       </td>
       <td>

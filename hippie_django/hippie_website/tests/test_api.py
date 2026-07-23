@@ -1,138 +1,38 @@
-"""
-Tests für HIPPIE Django.
-
-Abdeckung:
-  - Alle URL-Endpunkte (HTTP-Status)
-  - protein_query_api: Auflösung nach Symbol, UniProt-ID, Accession, Entrez-ID
-  - interaction_query_api: bekanntes Pair, unbekanntes Pair, fehlendes Protein, zu großer Batch
-  - browse_api: Grundstruktur, Tissue-Filter, Source-Filter, Min-Degree-Filter, Min-Score-Filter, Min-RPKM-Filter
-  - browse_filter_meta: Struktur der Antwort
-  - network_query_api: POST-JSON mit Seeds, Score-Filter, Min-RPKM-Filter (Partner), Non-Interactions, Seed-Flag
-  - interaction_detail_view / noninteraction_detail_view: 200 und 404
-  - ProteinQuerySet.resolve(): alle vier Identifier-Typen
-  - Canonical ordering in Interaction und NonInteraction
-  - _protein_display() Helper (inkl. isoform_uid Parameter)
-  - _resolve_noninteraction_pair(): bekanntes Pair, unbekanntes, kein NonInteraction
-  - _protein_ids_from_raw(): Auflösung, Deduplizierung, Unresolved
-  - _get_isoforms(): Isoform-Expansion
-  - protein_query_api show=noninteractions / show=both
-  - interaction_query_api show=noninteractions / show=both
-  - InteractionQuerySet: between_proteins, above_score, in_tissues
-  - BaitPreyAssociation Modell
-  - _safe_int / _safe_float Helpers
-"""
-
 import json
-import tempfile
-from io import StringIO
-from pathlib import Path
 
-from django.core.management import CommandError, call_command
-from django.test import TestCase, Client, SimpleTestCase
+from django.test import TestCase
 from django.urls import reverse
 
-from .models import (
-    BaitPreyAssociation,
-    Gene,
+from ..models import (
     Interaction,
     Isoform,
     NonInteraction,
     Protein,
-    Publication,
     Source,
     ExperimentType,
     Tissue,
     GeneTissue,
+    GeneSynonym,
+    ProteinSynonym,
 )
-from .views import (
+from ..views import (
     _protein_display,
     _resolve_interaction_pair,
-    _resolve_noninteraction_pair,
     _protein_ids_from_raw,
+    _split_identifiers,
     _get_isoforms,
     _safe_int,
     _safe_float,
+    MAX_QUERY_PROTEINS,
 )
-
-
-# ---------------------------------------------------------------------------
-# Fixtures — wiederverwendbare Testdaten
-# ---------------------------------------------------------------------------
-
-
-def make_protein(name, uniprot_name=None, gene_id=None, accession=None):
-    """Erstellt ein Protein mit optionalen Identifier-Mappings."""
-    if gene_id is not None:
-        gene, _ = Gene.objects.get_or_create(
-            entrez_id=gene_id, defaults={"entrez_name": name}
-        )
-    else:
-        gene, _ = Gene.objects.get_or_create(entrez_id=0, defaults={"entrez_name": ""})
-    return Protein.objects.create(
-        gene=gene,
-        uniprot_name=uniprot_name or (name if gene_id is None else ""),
-        uniprot_accession=accession if accession is not None else f"TEST_{name}",
-        # Fixtures model well-known Swiss-Prot proteins → reviewed. The model
-        # default is False (proteins start unreviewed until update_review_status
-        # flips them against UniProt's reviewed list); tests set True explicitly.
-        is_reviewed=True,
-    )
-
-
-def make_interaction(p1, p2, score=0.8):
-    """Erstellt eine Interaction in kanonischer Reihenfolge."""
-    a, b = (p1, p2) if p1.pk <= p2.pk else (p2, p1)
-    return Interaction.objects.create(protein_1=a, protein_2=b, score=score)
-
-
-def make_noninteraction(p1, p2, score=0.3):
-    """Erstellt eine NonInteraction in kanonischer Reihenfolge."""
-    a, b = (p1, p2) if p1.pk <= p2.pk else (p2, p1)
-    return NonInteraction.objects.create(protein_1=a, protein_2=b, score=score)
-
-
-# ---------------------------------------------------------------------------
-# Basis-Testklasse mit gemeinsamen Fixtures
-# ---------------------------------------------------------------------------
-
-
-class HippieTestCase(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.brca1 = make_protein(
-            "BRCA1", uniprot_name="BRCA1_HUMAN", gene_id=672, accession="P38398"
-        )
-        cls.tp53 = make_protein(
-            "TP53", uniprot_name="P53_HUMAN", gene_id=7157, accession="P04637"
-        )
-        cls.egfr = make_protein(
-            "EGFR", uniprot_name="EGFR_HUMAN", gene_id=1956, accession="P00533"
-        )
-        cls.ix = make_interaction(cls.brca1, cls.tp53, score=0.85)
-        cls.src = Source.objects.create(
-            name="BioGRID", url="https://thebiogrid.org/", n_connected_interactions=1
-        )
-        cls.exp = ExperimentType.objects.create(
-            name="Two-hybrid", psi_mi_code="MI:0018", quality_score=5.0
-        )
-        cls.ix.sources.add(cls.src)
-        cls.ix.experiments.add(cls.exp)
-        # Browse reads denormalised degree/avg_score columns; populate them so
-        # min_degree / min_score filter tests exercise real values.
-        call_command("recompute_protein_stats", stdout=StringIO())
-        cls.client = Client()
-
-    def setUp(self):
-        # Browse totals are memoised in the (process-global) cache; clear it
-        # between tests so a cached count from one test can't leak into another.
-        from django.core.cache import cache
-
-        cache.clear()
-
-
-# ---------------------------------------------------------------------------
-# 1. URL-Smoke-Tests — jeder Endpunkt muss erreichbar sein
-# ---------------------------------------------------------------------------
+from ..query_filters import isoform_only_q, parse_isoform_mode
+from .factories import (
+    HippieTestCase,
+    make_protein,
+    make_interaction,
+    make_noninteraction,
+    recompute_flags,
+)
 
 
 class UrlSmokeTest(HippieTestCase):
@@ -170,8 +70,8 @@ class UrlSmokeTest(HippieTestCase):
         r = self.client.get(reverse("hippie_website:interaction_detail", args=[99999]))
         self.assertEqual(r.status_code, 404)
 
-    def test_browse_api_get(self):
-        r = self.client.get(reverse("hippie_website:browse_api"))
+    def test_browse_proteins_api_get(self):
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"))
         self.assertEqual(r.status_code, 200)
 
     def test_browse_filter_meta_get(self):
@@ -193,17 +93,17 @@ class ProteinQueryApiTest(HippieTestCase):
     def test_resolve_by_gene_symbol(self):
         data = self._get("BRCA1")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["symbol"], "BRCA1")
+        self.assertEqual(data["query_proteins"][0]["symbol"], "BRCA1")
 
     def test_resolve_by_uniprot_id(self):
         data = self._get("BRCA1_HUMAN")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["name"], "BRCA1")
+        self.assertEqual(data["query_proteins"][0]["name"], "BRCA1")
 
     def test_resolve_by_accession(self):
         data = self._get("P38398")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["name"], "BRCA1")
+        self.assertEqual(data["query_proteins"][0]["name"], "BRCA1")
 
     def test_resolve_isoform_query_exposes_isoform_uid(self):
         Isoform.objects.create(
@@ -214,12 +114,12 @@ class ProteinQueryApiTest(HippieTestCase):
         )
         data = self._get("P38398-2")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["isoform_uniprot_id"], "P38398-2")
+        self.assertEqual(data["query_proteins"][0]["isoform_uniprot_id"], "P38398-2")
 
     def test_resolve_by_entrez_id(self):
         data = self._get("672")
         self.assertIsNone(data["error"])
-        self.assertEqual(data["query_protein"]["name"], "BRCA1")
+        self.assertEqual(data["query_proteins"][0]["name"], "BRCA1")
 
     def test_unknown_identifier_returns_error(self):
         data = self._get("DOESNOTEXIST")
@@ -258,7 +158,7 @@ class ProteinQueryApiTest(HippieTestCase):
     def test_partner_is_not_query_protein(self):
         """Partner darf nicht das gesuchte Protein selbst sein."""
         data = self._get("BRCA1")
-        query_id = data["query_protein"]["id"]
+        query_id = data["query_proteins"][0]["id"]
         for ix in data["interactions"]:
             self.assertNotEqual(ix["partner"]["id"], query_id)
 
@@ -344,11 +244,11 @@ class InteractionQueryApiTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 4. browse_api
+# 4. browse_proteins_api
 # ---------------------------------------------------------------------------
 
 
-class BrowseApiTest(HippieTestCase):
+class BrowseProteinsApiTest(HippieTestCase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
@@ -358,7 +258,7 @@ class BrowseApiTest(HippieTestCase):
         )
 
     def _get(self, **params):
-        r = self.client.get(reverse("hippie_website:browse_api"), params)
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), params)
         self.assertEqual(r.status_code, 200)
         return json.loads(r.content)
 
@@ -560,6 +460,118 @@ class ResolveTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
+# 7b. Synonym-aware search (resolve + browse) and Ensembl synonym persistence
+# ---------------------------------------------------------------------------
+
+
+class SynonymSearchTest(HippieTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        # Real cases from the bug report: a protein synonym (secondary
+        # accession) and a gene synonym that previously resolved to nothing.
+        ProteinSynonym.objects.create(protein=cls.brca1, synonym="X5D9C8")
+        GeneSynonym.objects.create(gene=cls.brca1.gene, synonym="NCRNA00291")
+
+    # -- resolve() ---------------------------------------------------------
+    def test_resolve_by_protein_synonym(self):
+        qs = Protein.objects.resolve("X5D9C8")
+        self.assertIn(self.brca1.pk, [p.pk for p in qs])
+
+    def test_resolve_by_gene_synonym(self):
+        qs = Protein.objects.resolve("NCRNA00291")
+        self.assertIn(self.brca1.pk, [p.pk for p in qs])
+
+    def test_resolve_synonym_case_insensitive(self):
+        qs = Protein.objects.resolve("x5d9c8")
+        self.assertIn(self.brca1.pk, [p.pk for p in qs])
+
+    def test_real_symbol_beats_synonym(self):
+        # A gene synonym on TP53 that collides with BRCA1's real symbol must not
+        # hijack resolution — the step-5 symbol match wins over step-6 synonym.
+        GeneSynonym.objects.create(gene=self.tp53.gene, synonym="BRCA1")
+        qs = Protein.objects.resolve("BRCA1")
+        self.assertEqual([p.pk for p in qs], [self.brca1.pk])
+
+    # -- browse_proteins_api --------------------------------------------------------
+    def _browse(self, **params):
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), params)
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def test_browse_finds_protein_synonym(self):
+        data = self._browse(q="X5D9C8")
+        self.assertIn(self.brca1.pk, [p["id"] for p in data["proteins"]])
+
+    def test_browse_finds_gene_synonym(self):
+        data = self._browse(q="NCRNA00291")
+        self.assertIn(self.brca1.pk, [p["id"] for p in data["proteins"]])
+
+    def test_browse_synonym_count_not_inflated(self):
+        # Two matching protein synonyms on the same protein must not duplicate
+        # the row or inflate the count (Exists subquery, not a reverse-FK join).
+        ProteinSynonym.objects.create(protein=self.brca1, synonym="ENST00000000001")
+        ProteinSynonym.objects.create(protein=self.brca1, synonym="ENST00000000002")
+        data = self._browse(q="ENST0000000000")
+        ids = [p["id"] for p in data["proteins"]]
+        self.assertEqual(ids.count(self.brca1.pk), 1)
+        self.assertEqual(data["total"], 1)
+
+    # -- _sync_ensembl_synonyms persistence --------------------------------
+    def test_sync_ensembl_synonyms_creates_tagged_rows(self):
+        from io import StringIO
+        from ..management.commands.hippie_update import _sync_ensembl_synonyms
+
+        gene = self.brca1.gene
+        gene.ensg = ["ENSG00000012048"]
+        isoform = Isoform.objects.create(
+            gene=gene,
+            uniprot_name="BRCA1_3_HUMAN",
+            uniprot_accession="P38398-3",
+            general_protein=self.brca1,
+        )
+        isoform.enst = ["ENST00000357654"]
+        isoform.ensp = ["ENSP00000350283"]
+
+        _sync_ensembl_synonyms(StringIO(), [gene], [isoform])
+
+        self.assertTrue(
+            GeneSynonym.objects.filter(
+                gene=gene,
+                synonym="ENSG00000012048",
+                additional_information="ensembl_gene",
+            ).exists()
+        )
+        self.assertTrue(
+            ProteinSynonym.objects.filter(
+                protein_id=isoform.pk,
+                synonym="ENST00000357654",
+                additional_information="ensembl_transcript",
+            ).exists()
+        )
+        self.assertTrue(
+            ProteinSynonym.objects.filter(
+                protein_id=isoform.pk,
+                synonym="ENSP00000350283",
+                additional_information="ensembl_translation",
+            ).exists()
+        )
+
+    def test_sync_ensembl_synonyms_idempotent(self):
+        from io import StringIO
+        from ..management.commands.hippie_update import _sync_ensembl_synonyms
+
+        gene = self.brca1.gene
+        gene.ensg = ["ENSG00000012048"]
+        _sync_ensembl_synonyms(StringIO(), [gene], [])
+        _sync_ensembl_synonyms(StringIO(), [gene], [])
+        self.assertEqual(
+            GeneSynonym.objects.filter(gene=gene, synonym="ENSG00000012048").count(),
+            1,
+        )
+
+
+# ---------------------------------------------------------------------------
 # 8. Canonical Ordering
 # ---------------------------------------------------------------------------
 
@@ -612,206 +624,6 @@ class ProteinDisplayTest(HippieTestCase):
 
 # ---------------------------------------------------------------------------
 # 10. Detail-Views Kontext-Check
-# ---------------------------------------------------------------------------
-
-
-class DetailViewContextTest(HippieTestCase):
-    def test_interaction_detail_context_keys(self):
-        r = self.client.get(
-            reverse("hippie_website:interaction_detail", args=[self.ix.pk])
-        )
-        ctx = r.context
-        for key in (
-            "interaction",
-            "p1",
-            "p2",
-            "sources",
-            "publications",
-            "experiments",
-            "species",
-        ):
-            self.assertIn(key, ctx)
-
-    def test_interaction_detail_p1_p2_structure(self):
-        r = self.client.get(
-            reverse("hippie_website:interaction_detail", args=[self.ix.pk])
-        )
-        ctx = r.context
-        for side in ("p1", "p2"):
-            d = ctx[side]
-            for key in ("protein", "uniprot_id", "gene_id", "symbol"):
-                self.assertIn(key, d)
-
-
-# ---------------------------------------------------------------------------
-# 11. NonInteraction model
-# ---------------------------------------------------------------------------
-
-
-class NonInteractionModelTest(HippieTestCase):
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        cls.ni = make_noninteraction(cls.brca1, cls.tp53, score=0.3)
-
-    def test_str_contains_both_proteins_and_score(self):
-        s = str(self.ni)
-        self.assertIn("BRCA1", s)
-        self.assertIn("TP53", s)
-        self.assertIn("0.3", s)
-
-    def test_canonical_order_after_make(self):
-        self.assertLessEqual(self.ni.protein_1_id, self.ni.protein_2_id)
-
-    def test_make_noninteraction_canonicalizes_reversed_input(self):
-        a = make_protein("NI_TEST_A")
-        b = make_protein("NI_TEST_B")
-        ni = make_noninteraction(b, a)
-        self.assertLessEqual(ni.protein_1_id, ni.protein_2_id)
-
-    def test_score_stored_correctly(self):
-        self.assertAlmostEqual(self.ni.score, 0.3)
-
-    def test_constraint_names_present(self):
-        names = {c.name for c in NonInteraction._meta.constraints}
-        self.assertIn("noninteraction_canonical_order", names)
-        self.assertIn("noninteraction_score_range", names)
-        self.assertIn("noninteraction_unique_pair", names)
-
-
-# ---------------------------------------------------------------------------
-# 12. noninteraction_detail_view
-# ---------------------------------------------------------------------------
-
-
-class NoninteractionDetailViewTest(HippieTestCase):
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        cls.ni = make_noninteraction(cls.brca1, cls.tp53, score=0.25)
-        pub = Publication.objects.create(pmid=99001)
-        cls.bp_assoc = BaitPreyAssociation.objects.create(
-            noninteraction=cls.ni,
-            number_of_tests=1,
-            number_of_observed=1,
-        )
-        cls.bp_assoc.publications.add(pub)
-
-    def test_200(self):
-        r = self.client.get(
-            reverse("hippie_website:noninteraction_detail", args=[self.ni.pk])
-        )
-        self.assertEqual(r.status_code, 200)
-
-    def test_404(self):
-        r = self.client.get(
-            reverse("hippie_website:noninteraction_detail", args=[99999])
-        )
-        self.assertEqual(r.status_code, 404)
-
-    def test_context_keys(self):
-        r = self.client.get(
-            reverse("hippie_website:noninteraction_detail", args=[self.ni.pk])
-        )
-        for key in (
-            "noninteraction",
-            "p1",
-            "p2",
-            "bait_prey_total_tested",
-            "bait_prey_times_observed",
-            "pair_score",
-            "pair_label",
-            "is_noninteraction",
-        ):
-            self.assertIn(key, r.context)
-
-    def test_is_noninteraction_flag(self):
-        r = self.client.get(
-            reverse("hippie_website:noninteraction_detail", args=[self.ni.pk])
-        )
-        self.assertTrue(r.context["is_noninteraction"])
-
-    def test_p1_p2_structure(self):
-        r = self.client.get(
-            reverse("hippie_website:noninteraction_detail", args=[self.ni.pk])
-        )
-        for side in ("p1", "p2"):
-            d = r.context[side]
-            for key in ("protein", "uniprot_id", "gene_id", "symbol"):
-                self.assertIn(key, d)
-
-    def test_bait_prey_counts(self):
-        r = self.client.get(
-            reverse("hippie_website:noninteraction_detail", args=[self.ni.pk])
-        )
-        ctx = r.context
-        self.assertEqual(ctx["bait_prey_total_tested"], 1)
-        self.assertEqual(ctx["bait_prey_times_observed"], 1)
-
-    def test_bait_prey_zero_when_no_tests(self):
-        ni2 = make_noninteraction(self.brca1, self.egfr, score=0.1)
-        r = self.client.get(
-            reverse("hippie_website:noninteraction_detail", args=[ni2.pk])
-        )
-        ctx = r.context
-        self.assertEqual(ctx["bait_prey_total_tested"], 0)
-        self.assertEqual(ctx["bait_prey_times_observed"], 0)
-
-
-# ---------------------------------------------------------------------------
-# 13. _resolve_noninteraction_pair
-# ---------------------------------------------------------------------------
-
-
-class ResolveNoninteractionPairTest(HippieTestCase):
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        cls.ni = make_noninteraction(cls.brca1, cls.tp53, score=0.25)
-
-    def test_known_pair_found(self):
-        r = _resolve_noninteraction_pair("BRCA1", "TP53", 0)
-        self.assertAlmostEqual(r["score"], 0.25, places=2)
-        self.assertIsNotNone(r["interaction_id"])
-
-    def test_reversed_pair_still_found(self):
-        r = _resolve_noninteraction_pair("TP53", "BRCA1", 0)
-        self.assertGreater(r["score"], 0)
-
-    def test_unknown_protein_returns_minus_one(self):
-        r = _resolve_noninteraction_pair("FAKEPROT", "TP53", 0)
-        self.assertEqual(r["score"], -1.0)
-        self.assertIsNone(r["interaction_id"])
-
-    def test_proteins_exist_but_no_noninteraction(self):
-        # BRCA1–EGFR: both exist, no NonInteraction
-        r = _resolve_noninteraction_pair("BRCA1", "EGFR", 0)
-        self.assertEqual(r["score"], -1.0)
-
-    def test_is_noninteraction_true_when_found(self):
-        r = _resolve_noninteraction_pair("BRCA1", "TP53", 0)
-        self.assertTrue(r["is_noninteraction"])
-
-    def test_is_noninteraction_true_when_not_found(self):
-        r = _resolve_noninteraction_pair("FAKEPROT", "TP53", 0)
-        self.assertTrue(r["is_noninteraction"])
-
-    def test_source_and_experiment_count_are_none(self):
-        r = _resolve_noninteraction_pair("BRCA1", "TP53", 0)
-        self.assertIsNone(r["source_count"])
-        self.assertIsNone(r["experiment_count"])
-
-    def test_detail_url_uses_noninteraction_endpoint(self):
-        r = _resolve_noninteraction_pair("BRCA1", "TP53", 0)
-        self.assertIn("noninteraction", r["detail_url"])
-
-    def test_input_order_preserved(self):
-        r = _resolve_noninteraction_pair("BRCA1", "TP53", 7)
-        self.assertEqual(r["input_order"], 7)
-
-
-# ---------------------------------------------------------------------------
-# 14. protein_query_api — show parameter
 # ---------------------------------------------------------------------------
 
 
@@ -980,6 +792,47 @@ class GetIsoformsTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
+# 17a. query_filters.isoform_only_q / parse_isoform_mode
+# ---------------------------------------------------------------------------
+
+
+class ParseIsoformModeTest(TestCase):
+    def test_valid_modes_pass_through(self):
+        for mode in ("general", "isoforms", "both"):
+            self.assertEqual(parse_isoform_mode(mode), mode)
+
+    def test_case_and_whitespace_insensitive(self):
+        self.assertEqual(parse_isoform_mode(" Isoforms \n"), "isoforms")
+        self.assertEqual(parse_isoform_mode("BOTH"), "both")
+
+    def test_none_defaults_to_general(self):
+        self.assertEqual(parse_isoform_mode(None), "general")
+
+    def test_missing_or_garbage_falls_back_to_general(self):
+        for garbage in ("", "bogus", "1", "true", "yes"):
+            self.assertEqual(parse_isoform_mode(garbage), "general")
+
+
+class IsoformOnlyQTest(HippieTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.isoform = Isoform.objects.create(
+            gene=cls.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-2",
+            general_protein=cls.brca1,
+        )
+        cls.iso_ix = make_interaction(cls.isoform, cls.egfr, score=0.9)
+
+    def test_keeps_only_edges_touching_an_isoform(self):
+        qs = Interaction.objects.filter(isoform_only_q())
+        pks = set(qs.values_list("pk", flat=True))
+        self.assertIn(self.iso_ix.pk, pks)
+        self.assertNotIn(self.ix.pk, pks)
+
+
+# ---------------------------------------------------------------------------
 # 17b. browse_interactions_api — denormalised involves_isoform flag
 # ---------------------------------------------------------------------------
 
@@ -996,7 +849,7 @@ class BrowseInteractionsIsoformTest(HippieTestCase):
         )
         # Interaction whose partner is an isoform.
         cls.iso_ix = make_interaction(cls.isoform, cls.egfr, score=0.9)
-        call_command("recompute_interaction_flags", stdout=StringIO())
+        recompute_flags()
 
     def test_flag_set_correctly(self):
         self.iso_ix.refresh_from_db()
@@ -1013,10 +866,19 @@ class BrowseInteractionsIsoformTest(HippieTestCase):
     def test_include_isoforms_includes_them(self):
         r = self.client.get(
             reverse("hippie_website:browse_interactions_api"),
-            {"include_isoforms": "1"},
+            {"isoform_mode": "both"},
         )
         ids = [row["id"] for row in r.json()["interactions"]]
         self.assertIn(self.iso_ix.pk, ids)
+
+    def test_isoforms_only_excludes_canonical(self):
+        r = self.client.get(
+            reverse("hippie_website:browse_interactions_api"),
+            {"isoform_mode": "isoforms"},
+        )
+        ids = [row["id"] for row in r.json()["interactions"]]
+        self.assertIn(self.iso_ix.pk, ids)
+        self.assertNotIn(self.ix.pk, ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1064,13 +926,13 @@ class InteractionQuerySetMethodsTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 19. browse_api min_avg_score filter (unified CommonFilters param)
+# 19. browse_proteins_api min_avg_score filter (unified CommonFilters param)
 # ---------------------------------------------------------------------------
 
 
-class BrowseApiMinScoreTest(HippieTestCase):
+class BrowseProteinsApiMinScoreTest(HippieTestCase):
     def _get(self, **params):
-        r = self.client.get(reverse("hippie_website:browse_api"), params)
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), params)
         self.assertEqual(r.status_code, 200)
         return json.loads(r.content)
 
@@ -1102,7 +964,7 @@ class BrowseInteractionsApiTest(HippieTestCase):
         cls.ni = make_noninteraction(cls.brca1, cls.egfr, score=0.0)
         # Populate denormalised n_sources / n_experiments so count assertions
         # and count-column sorting exercise real values.
-        call_command("recompute_interaction_flags", stdout=StringIO())
+        recompute_flags()
 
     def _get(self, **params):
         r = self.client.get(reverse("hippie_website:browse_interactions_api"), params)
@@ -1128,7 +990,7 @@ class BrowseInteractionsApiTest(HippieTestCase):
         self.assertFalse(row["is_noninteraction"])
 
     def test_rows_carry_review_status(self):
-        # Each interactor now carries is_reviewed for the [unreviewed] tag /
+        # Each interactor now carries is_reviewed for the unreviewed tag /
         # Review Type export columns. Set brca1 reviewed, tp53 unreviewed
         # (the model default is False, so pin both sides explicitly).
         Protein.objects.filter(pk=self.brca1.pk).update(is_reviewed=True)
@@ -1159,7 +1021,7 @@ class BrowseInteractionsApiTest(HippieTestCase):
         # the two counts differ.
         src2 = Source.objects.create(name="IntAct", url="https://www.ebi.ac.uk/intact/")
         self.ix.sources.add(src2)
-        call_command("recompute_interaction_flags", stdout=StringIO())
+        recompute_flags()
 
         row = self._get()["interactions"][0]
         self.assertEqual(row["source_count"], 2)
@@ -1172,7 +1034,7 @@ class BrowseInteractionsApiTest(HippieTestCase):
         src2 = Source.objects.create(name="IntAct", url="https://www.ebi.ac.uk/intact/")
         ix2 = make_interaction(self.tp53, self.egfr, score=0.5)
         ix2.sources.add(self.src, src2)
-        call_command("recompute_interaction_flags", stdout=StringIO())
+        recompute_flags()
 
         asc = self._get(sort="sources", dir="asc")
         self.assertEqual([r["id"] for r in asc["interactions"]], [self.ix.pk, ix2.pk])
@@ -1186,7 +1048,7 @@ class BrowseInteractionsApiTest(HippieTestCase):
         )
         ix2 = make_interaction(self.tp53, self.egfr, score=0.5)
         ix2.experiments.add(self.exp, exp2)
-        call_command("recompute_interaction_flags", stdout=StringIO())
+        recompute_flags()
 
         asc = self._get(sort="experiments", dir="asc")
         self.assertEqual([r["id"] for r in asc["interactions"]], [self.ix.pk, ix2.pk])
@@ -1314,43 +1176,6 @@ class NetworkQueryFilterTest(HippieTestCase):
 # ---------------------------------------------------------------------------
 
 
-class BaitPreyModelTest(HippieTestCase):
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        pub1 = Publication.objects.create(pmid=55555)
-        pub2 = Publication.objects.create(pmid=55556)
-        cls.ni = make_noninteraction(cls.brca1, cls.tp53, score=0.2)
-        cls.bp_assoc = BaitPreyAssociation.objects.create(
-            noninteraction=cls.ni,
-            number_of_tests=2,
-            number_of_observed=1,
-        )
-        cls.bp_assoc.publications.add(pub1, pub2)
-
-    def test_bait_prey_assoc_str(self):
-        s = str(self.bp_assoc)
-        self.assertIsInstance(s, str)
-        self.assertIn("number_of_tests", s)
-
-    def test_bait_prey_assoc_linked_to_noninteraction(self):
-        self.assertEqual(self.bp_assoc.noninteraction_id, self.ni.pk)
-        self.assertIsNone(self.bp_assoc.interaction)
-
-    def test_noninteraction_detail_counts_positive_tests_only(self):
-        r = self.client.get(
-            reverse("hippie_website:noninteraction_detail", args=[self.ni.pk])
-        )
-        ctx = r.context
-        self.assertEqual(ctx["bait_prey_total_tested"], 2)
-        self.assertEqual(ctx["bait_prey_times_observed"], 1)
-
-
-# ---------------------------------------------------------------------------
-# 22. _protein_display — isoform_uid parameter
-# ---------------------------------------------------------------------------
-
-
 class ProteinDisplayIsoformTest(HippieTestCase):
     def _fetch(self, protein):
         return Protein.objects.select_related("gene").get(pk=protein.pk)
@@ -1408,461 +1233,6 @@ class SafeConversionTest(TestCase):
 
     def test_safe_float_valid_float(self):
         self.assertAlmostEqual(_safe_float(0.5), 0.5)
-
-
-class UpdateTissueDataCommandTest(TestCase):
-    def test_missing_input_file_raises(self):
-        # Paths now default from data/sources.json (they are no longer required
-        # flags), so a path that resolves to a missing file must raise rather
-        # than run silently.
-        with self.assertRaises(CommandError):
-            call_command(
-                "update_tissue_data",
-                gct_path="/nonexistent/does_not_exist.gct",
-            )
-
-    def test_existing_gene_tissue_median_is_updated(self):
-        gene = Gene.objects.create(entrez_id=101, entrez_name="GENE1")
-        tissue = Tissue.objects.create(name="Liver")
-        gene_tissue = GeneTissue.objects.create(
-            gene=gene, tissue=tissue, median_rpkm=2.0
-        )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir)
-            gct_path = tmp_path / "test.gct"
-            gct_path.write_text(
-                "\n".join(
-                    [
-                        "#1.2",
-                        "1\t1",
-                        "Name\tDescription\tS1",
-                        "ENSG000001.1\tGENE1\t5",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            annotation_path = tmp_path / "samples.txt"
-            annotation_path.write_text(
-                "\n".join(
-                    [
-                        "sample\tcol1\tcol2\tcol3\tcol4\tcol5\ttissue",
-                        "S1\t-\t-\t-\t-\t-\tLiver",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            entrez_path = tmp_path / "Homo_sapiens.gene_info"
-            entrez_path.write_text(
-                "\n".join(
-                    [
-                        "tax_id\tGeneID\tSymbol\tLocusTag\tSynonyms\tdbXrefs",
-                        "9606\t101\tGENE1\t-\t-\tEnsembl:ENSG000001",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            call_command(
-                "update_tissue_data",
-                gct_path=str(gct_path),
-                annotation_sample_path=str(annotation_path),
-                entrez_homo_path=str(entrez_path),
-            )
-
-        gene_tissue.refresh_from_db()
-        self.assertEqual(gene_tissue.median_rpkm, 5.0)
-
-
-# ---------------------------------------------------------------------------
-# Source homepage URLs + per-pair evidence links
-# ---------------------------------------------------------------------------
-
-
-class SourceLinkTest(HippieTestCase):
-    def test_helpers_resolve_case_insensitively(self):
-        from .source_links import homepage_url, pair_search_url
-
-        self.assertEqual(homepage_url("BioGRID"), "https://thebiogrid.org/")
-        self.assertEqual(homepage_url("biogrid"), "https://thebiogrid.org/")
-        self.assertEqual(homepage_url("pdb"), "https://www.rcsb.org/")  # alias
-        self.assertEqual(homepage_url("no-such-db"), "")
-        self.assertEqual(
-            pair_search_url("IntAct", "P04637", "Q00987"),
-            "https://www.ebi.ac.uk/intact/search?query=id:P04637%20AND%20id:Q00987%20AND%20source:intact",
-        )
-        # Scoped to the source DB (matches a confirmed-working IntAct URL).
-        self.assertEqual(
-            pair_search_url("DIP", "P42858", "Q13501"),
-            "https://www.ebi.ac.uk/intact/search?query=id:P42858%20AND%20id:Q13501%20AND%20source:dip",
-        )
-        # Hyphenated source token is quoted (MIQL treats a bare '-' as NOT).
-        self.assertTrue(
-            pair_search_url("bhf-ucl", "A", "B").endswith(
-                "%20AND%20source:%22bhf-ucl%22"
-            )
-        )
-        self.assertIsNone(pair_search_url("BioGRID", "P04637", "Q00987"))
-        self.assertIsNone(pair_search_url("IntAct", None, "Q00987"))
-
-    def test_detail_view_annotates_pair_url(self):
-        intact = Source.objects.create(
-            name="IntAct", url="https://www.ebi.ac.uk/intact/"
-        )
-        self.ix.sources.add(intact)
-        r = self.client.get(
-            reverse("hippie_website:interaction_detail", args=[self.ix.pk])
-        )
-        by_name = {s.name: s for s in r.context["sources"]}
-        url = by_name["IntAct"].pair_url
-        self.assertTrue(url.startswith("https://www.ebi.ac.uk/intact/search?query="))
-        self.assertIn("id:P38398", url)
-        self.assertIn("id:P04637", url)
-        self.assertIn("source:intact", url)
-        # BioGRID has no key-free pairwise web URL → homepage-only.
-        self.assertIsNone(by_name["BioGRID"].pair_url)
-
-    def test_assign_source_urls_backfills_blank_only(self):
-        from .management.commands.hippie_update import _assign_source_urls
-
-        blank = Source.objects.create(name="dip", url="")
-        manual = Source.objects.create(name="mint", url="https://manual.example/")
-        unknown = Source.objects.create(name="no-such-db", url="")
-
-        _assign_source_urls()
-
-        blank.refresh_from_db()
-        manual.refresh_from_db()
-        unknown.refresh_from_db()
-        self.assertEqual(blank.url, "https://dip.doe-mbi.ucla.edu/")
-        self.assertEqual(manual.url, "https://manual.example/")  # preserved
-        self.assertEqual(unknown.url, "")  # unknown name stays blank
-
-
-class MitabCvNameParsingTest(TestCase):
-    """Regression test: PSI-MI CV names with embedded parens/quotes.
-
-    IntAct's raw MITAB field for MI:0095 is
-    psi-mi:"MI:0095"("proteinchip(r) on a surface-enhanced laser
-    desorption/ionization"). The old `field_val.split("(")[-1].rstrip(")")`
-    logic split on the LAST "(" (inside the name's own "(r)") instead of
-    the first, and only stripped trailing ")" chars, producing the
-    corrupted 'r) on a surface-enhanced laser desorption/ionization"'.
-    """
-
-    def test_parse_tech_handles_embedded_parens_and_quotes(self):
-        from .management.commands.hippie_update import _parse_tech
-
-        field = (
-            'psi-mi:"MI:0095"("proteinchip(r) on a surface-enhanced '
-            'laser desorption/ionization")'
-        )
-        result, skip = _parse_tech(field)
-        self.assertFalse(skip)
-        assert result is not None
-        mi_code, name = result
-        self.assertEqual(mi_code, "MI:0095")
-        self.assertEqual(
-            name, "proteinchip(r) on a surface-enhanced laser desorption/ionization"
-        )
-
-    def test_parse_tech_plain_name_unaffected(self):
-        from .management.commands.hippie_update import _parse_tech
-
-        result, skip = _parse_tech('psi-mi:"MI:0018"(two hybrid)')
-        self.assertFalse(skip)
-        assert result is not None
-        _, name = result
-        self.assertEqual(name, "Two-hybrid")  # normalized via _TECH_NORM
-
-    def test_parse_interaction_type_handles_embedded_parens(self):
-        from .management.commands.hippie_update import _parse_interaction_type
-
-        itype = _parse_interaction_type(
-            'psi-mi:"MI:0095"("proteinchip(r) on a surface-enhanced '
-            'laser desorption/ionization")'
-        )
-        self.assertEqual(
-            itype, "proteinchip(r) on a surface-enhanced laser desorption/ionization"
-        )
-
-    def test_parse_source_handles_embedded_parens(self):
-        from .management.commands.hippie_update import _parse_source
-
-        source = _parse_source(
-            'psi-mi:"MI:0095"("proteinchip(r) on a surface-enhanced '
-            'laser desorption/ionization")'
-        )
-        self.assertEqual(
-            source, "proteinchip(r) on a surface-enhanced laser desorption/ionization"
-        )
-
-
-# ---------------------------------------------------------------------------
-# ML Splits — orphan-aware stats, filter-aware medians, accession-based CSVs
-# ---------------------------------------------------------------------------
-
-
-class MLSplitStatsTest(TestCase):
-    """Fix 1: a protein whose edges are ALL removed by the interaction-level
-    filter (but which passes the protein-level filter) is an orphan — dropped
-    from ``n_proteins`` and the medians, counted in ``n_orphaned_by_filter``.
-    ``median_degree`` / ``median_avg_score`` reflect only surviving edges."""
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.a = make_protein("A", accession="ACC_A")
-        cls.b = make_protein("B", accession="ACC_B")
-        cls.c = make_protein("C", accession="ACC_C")
-        cls.d = make_protein("D", accession="ACC_D")
-        cls.e = make_protein("E", accession="ACC_E")
-        # Survive min_score=0.5:
-        make_interaction(cls.a, cls.b, score=0.85)
-        make_interaction(cls.a, cls.c, score=0.85)
-        # Filtered out at min_score=0.5:
-        make_interaction(cls.b, cls.c, score=0.15)  # B, C keep a surviving edge via A
-        make_interaction(cls.a, cls.d, score=0.15)  # raises A's *global* degree only
-        make_interaction(cls.d, cls.e, score=0.15)  # D and E become filter-orphans
-        call_command("recompute_protein_stats", stdout=StringIO())
-
-    def _stats(self, **overrides):
-        from .services.generate_splits import SplitParams, build_interaction_queryset
-        from .views import _interaction_stats, _protein_stats
-
-        params = SplitParams(**overrides)
-        iqs = build_interaction_queryset(params)
-        interaction, degree_by_node, score_sum_by_node = _interaction_stats(iqs)
-        protein = _protein_stats(params, degree_by_node, score_sum_by_node, iqs)
-        return interaction, protein
-
-    def test_orphans_excluded_and_medians_are_filter_aware(self):
-        interaction, protein = self._stats(min_score=0.5)
-
-        # Only A–B and A–C survive.
-        self.assertEqual(interaction["n_interactions"], 2)
-
-        # A, B, C survive; D and E pass the (empty) protein filter but have no
-        # surviving edge → orphaned, so excluded from n_proteins.
-        self.assertEqual(protein["n_proteins"], 3)
-        self.assertEqual(protein["n_orphaned_by_filter"], 2)
-
-        # Filtered degrees A:2, B:1, C:1 → median 1 (global 3,2,2 would give 2).
-        self.assertEqual(protein["median_degree"], 1)
-        # Filtered avg is 0.85 for every survivor; the global avg (mixing the
-        # 0.15 edges) would be lower — proving the median is filter-aware.
-        self.assertEqual(protein["median_avg_score"], 0.85)
-
-    def test_interaction_histogram_and_median_from_group_by(self):
-        # Locks the DB GROUP-BY rework of _interaction_stats against the old
-        # per-edge Python scan, on the unfiltered fixture (all 5 edges).
-        interaction, _ = self._stats()
-        self.assertEqual(interaction["n_interactions"], 5)
-        # scores: 0.85, 0.85, 0.15, 0.15, 0.15 → median lands in the [0.1, 0.2) bin.
-        self.assertTrue(0.1 <= interaction["median_score"] < 0.2)
-        hist = {b["label"]: b["count"] for b in interaction["score_histogram"]}
-        self.assertEqual(hist["0.1"], 3)
-        self.assertEqual(hist["0.8"], 2)
-
-    def test_self_loop_counts_toward_degree_twice(self):
-        # A self-loop (protein_1 == protein_2) lands in both GROUP-BY sides,
-        # reproducing the old loop that incremented both endpoints.
-        from .services.generate_splits import SplitParams, build_interaction_queryset
-        from .views import _interaction_stats
-
-        f = make_protein("F", accession="ACC_F")
-        make_interaction(f, f, score=0.9)  # self-loop, survives the filter
-        _, degree_by_node, _sum = _interaction_stats(
-            build_interaction_queryset(SplitParams(min_score=0.5))
-        )
-        self.assertEqual(degree_by_node[f.pk], 2)
-
-    def test_stats_endpoint_wires_through(self):
-        resp = self.client.post(
-            reverse("hippie_website:browse_splits_stats"),
-            data=json.dumps({"min_score": 0.5}),
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 200)
-        payload = resp.json()
-        self.assertEqual(payload["protein"]["n_proteins"], 3)
-        self.assertEqual(payload["protein"]["n_orphaned_by_filter"], 2)
-        self.assertEqual(payload["protein"]["median_avg_score"], 0.85)
-        self.assertEqual(payload["interaction"]["n_interactions"], 2)
-        # Batch 6: the degree histogram now lives on the protein box, not the
-        # interaction box.
-        self.assertIn("degree_histogram", payload["protein"])
-        self.assertNotIn("degree_histogram", payload["interaction"])
-        # Filtered degrees are A:2, B:1, C:1 → bucket "1" holds B and C, "2"
-        # holds A. Checks the histogram is built from degree_by_node (moved
-        # with the relocation), not an empty/wrong dict.
-        degree_hist = {
-            b["label"]: b["count"] for b in payload["protein"]["degree_histogram"]
-        }
-        self.assertEqual(degree_hist["1"], 2)
-        self.assertEqual(degree_hist["2"], 1)
-
-
-class MLSplitPruneUnitTest(SimpleTestCase):
-    """Fix 2 mechanism: ``drop_exclusive_nodes`` removes a split's zero-degree
-    nodes, so the post-prune per-split node-count sum diverges from the
-    pre-partition node count — exactly what ``SplitSummary.n_proteins`` now
-    sums post-prune instead of reading pre-prune."""
-
-    def test_prune_drops_orphan_and_diverges_from_pre_prune_count(self):
-        import networkx as nx
-
-        from .services.generate_splits import EdgePartition, SplitParams
-
-        p = EdgePartition.__new__(EdgePartition)  # skip __init__ (no DB access)
-        p.params = SplitParams(seed=1)
-        p.interaction_graph = nx.Graph()
-        p.interaction_graph.add_edges_from([(1, 2), (3, 4)])
-        p.interaction_graph.add_node(5)  # orphan present pre-partition
-        p.discarded_nodes = set()
-
-        pos_G = nx.Graph()
-        pos_G.add_edges_from([(1, 2), (3, 4)])
-        pos_G.add_node(5)  # zero-degree in this split's positive graph
-        neg_G = nx.Graph()
-        neg_G.add_edges_from([(1, 3), (2, 4)])
-        p.selected_sets = [(pos_G, neg_G)]
-
-        p.drop_exclusive_nodes()
-
-        self.assertEqual(p.discarded_nodes, {5})
-        pre_prune = p.interaction_graph.number_of_nodes()  # 5
-        post_prune = sum(pos.number_of_nodes() for pos, _ in p.selected_sets)  # 4
-        self.assertNotEqual(post_prune, pre_prune)
-
-
-class MLSplitNegativeSamplerTest(SimpleTestCase):
-    """Perf rewrite: the degree-weighted sampler must still return exactly
-    ``n_edges`` valid negatives — no self-loops, duplicates, or real positives."""
-
-    def test_sampler_returns_valid_balanced_negatives(self):
-        import networkx as nx
-        import numpy as np
-
-        from .services.generate_splits import EdgePartition, SplitParams
-
-        np.random.seed(0)  # the sampler draws from np.random directly
-        ep = EdgePartition.__new__(EdgePartition)
-        ep.params = SplitParams(seed=1)
-        # Sparse path graph: 6 nodes, 5 edges → 10 non-edges to sample from.
-        ep.interaction_graph = nx.Graph([(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)])
-        node_set = set(ep.interaction_graph.nodes())
-
-        pos_copy, neg = ep.get_random_balanced_negative_complement(node_set)
-
-        positives = {tuple(sorted(e)) for e in ep.interaction_graph.edges()}
-        neg_edges = {tuple(sorted(e)) for e in neg.edges()}
-        self.assertEqual(neg.number_of_edges(), ep.interaction_graph.number_of_edges())
-        self.assertTrue(neg_edges.isdisjoint(positives))  # never reuses a positive
-        self.assertFalse(any(u == v for u, v in neg_edges))  # no self-loops
-        # pos_copy is a mutable copy of the positive subgraph.
-        self.assertEqual(
-            pos_copy.number_of_edges(), ep.interaction_graph.number_of_edges()
-        )
-
-
-class MLSplitGenerateTest(TestCase):
-    """Fix 2 + Fix 3 end-to-end: run a real split job on a small sparse graph
-    and check the summary count is post-prune-consistent and the CSVs use
-    UniProt accessions (never internal PKs)."""
-
-    @classmethod
-    def setUpTestData(cls):
-        # 24 proteins wired as a cycle + a chord ring: connected but sparse
-        # (avg degree ~4), so every balanced partition keeps internal edges AND
-        # leaves non-edges for negative sampling.
-        cls.proteins = [
-            make_protein(f"P{i}", accession=f"ACC{i:03d}") for i in range(24)
-        ]
-        seen: set[tuple[int, int]] = set()
-        for i in range(24):
-            for j in ((i + 1) % 24, (i + 5) % 24):
-                a, b = sorted((i, j))
-                if a != b and (a, b) not in seen:
-                    seen.add((a, b))
-                    make_interaction(cls.proteins[a], cls.proteins[b], score=0.8)
-        cls.accessions = {p.uniprot_accession for p in cls.proteins}
-
-    def test_generate_writes_accession_csvs_and_consistent_summary(self):
-        import numpy as np
-
-        from .services.generate_splits import (
-            SplitParams,
-            generate_splits,
-            get_interaction_graph,
-        )
-
-        np.random.seed(0)  # negative sampling draws from np.random
-        params = SplitParams(seed=1)
-        with tempfile.TemporaryDirectory() as td:
-            work_dir = Path(td)
-            summary = generate_splits(params, work_dir, lambda step, frac: None)
-
-            # Fix 2: top-level count == sum of per-split (post-prune) counts.
-            self.assertEqual(
-                summary.n_proteins, sum(s["n_proteins"] for s in summary.splits)
-            )
-            # Individual split sizes: catches a swapped/zeroed split, which the
-            # sum-only check above can't (e.g. a 24-0-0 split sums the same as
-            # 12-6-6). Values are deterministic for this fixture + seed=1
-            # (verified stable across repeated runs).
-            by_name = {s["name"]: s for s in summary.splits}
-            self.assertEqual(by_name["train"]["n_proteins"], 12)
-            self.assertEqual(by_name["validation"]["n_proteins"], 6)
-            self.assertEqual(by_name["test"]["n_proteins"], 6)
-            if summary.n_discarded_nodes > 0:
-                pre_prune = get_interaction_graph(params).number_of_nodes()
-                self.assertLess(summary.n_proteins, pre_prune)
-
-            for name in ("train", "validation", "test"):
-                pos = (work_dir / f"{name}_pos.csv").read_text().splitlines()
-                neg = (work_dir / f"{name}_neg.csv").read_text().splitlines()
-                self.assertEqual(
-                    pos[0], "protein_1_accession,protein_2_accession,score"
-                )
-                self.assertEqual(neg[0], "protein_1_accession,protein_2_accession")
-                # Fix 3: every endpoint is a known accession string, never a PK.
-                for row in pos[1:]:
-                    a, b, _score = row.split(",")
-                    self.assertIn(a, self.accessions)
-                    self.assertIn(b, self.accessions)
-                for row in neg[1:]:
-                    a, b = row.split(",")
-                    self.assertIn(a, self.accessions)
-                    self.assertIn(b, self.accessions)
-
-            # Sampler balances each split: n_neg == n_pos.
-            for s in summary.splits:
-                self.assertEqual(s["n_neg"], s["n_pos"])
-
-    def test_isoform_accession_resolves_via_inherited_field(self):
-        # Fix 3 for isoforms: MTI shares the pk, so the accession lookup returns
-        # the isoform-specific "-2" accession, not the canonical parent's.
-        from .models import Protein
-
-        canonical = self.proteins[0]
-        iso = Isoform.objects.create(
-            gene=canonical.gene,
-            uniprot_accession="ACC000-2",
-            general_protein=canonical,
-        )
-        mapping = dict(
-            Protein.objects.filter(pk__in=[iso.pk]).values_list(
-                "pk", "uniprot_accession"
-            )
-        )
-        self.assertEqual(mapping[iso.pk], "ACC000-2")
-
-
-# ---------------------------------------------------------------------------
-# Batch 3 — shared full-parity filters on the two query APIs
-# ---------------------------------------------------------------------------
 
 
 class Batch3ProteinQueryFilterTest(HippieTestCase):
@@ -1936,7 +1306,7 @@ class Batch3ProteinQueryFilterTest(HippieTestCase):
         self.assertEqual(partners, {"TP53"})
 
     def test_interaction_type_filter_limits_partners(self):
-        from .models import InteractionType
+        from ..models import InteractionType
 
         itype = InteractionType.objects.create(
             name="direct interaction", psi_mi_code="MI:0407"
@@ -2007,7 +1377,22 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
         results = self._post(
             [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
             show="both",
-            include_isoforms=True,
+            isoform_mode="both",
+        )
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0]["is_noninteraction"])
+        self.assertGreaterEqual(results[0]["score"], 0)
+
+    def test_isoform_isoforms_noninteraction_yields_single_row(self):
+        # Same pair, "isoforms" mode: no isoform-involving Interaction exists
+        # (the not-found fallback), but the plain canonical NonInteraction is
+        # still found (NonInteraction isn't isoform-expanded) — still exactly
+        # one row, not two.
+        make_noninteraction(self.brca1, self.egfr, score=0.3)
+        results = self._post(
+            [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
+            show="both",
+            isoform_mode="isoforms",
         )
         self.assertEqual(len(results), 1)
         self.assertTrue(results[0]["is_noninteraction"])
@@ -2100,7 +1485,7 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
         self.assertEqual(miss[0]["score"], -1.0)
 
     def test_interaction_type_filter_match_and_miss(self):
-        from .models import InteractionType
+        from ..models import InteractionType
 
         itype = InteractionType.objects.create(
             name="direct interaction", psi_mi_code="MI:0407"
@@ -2164,17 +1549,36 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
 
         results = self._post(
             [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
-            include_isoforms=True,
+            isoform_mode="both",
             reviewed="reviewed",
         )
         isoform_tags = {r["isoform_uniprot_a"] for r in results}
         self.assertIn("P38398-2", isoform_tags)
         self.assertNotIn("P38398-3", isoform_tags)
 
+    def test_isoform_mode_isoforms_drops_canonical_combo(self):
+        iso_ok = Isoform.objects.create(
+            gene=self.brca1.gene,
+            uniprot_name="",
+            uniprot_accession="P38398-2",
+            general_protein=self.brca1,
+            is_reviewed=True,
+        )
+        make_interaction(iso_ok, self.tp53, score=0.7)
+
+        results = self._post(
+            [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
+            isoform_mode="isoforms",
+        )
+        # Only the isoform-involving combo is returned — the pure canonical
+        # BRCA1-TP53 combo (isoform_uniprot_a is None) is dropped.
+        isoform_tags = {r["isoform_uniprot_a"] for r in results}
+        self.assertEqual(isoform_tags, {"P38398-2"})
+
 
 class Batch3FilterMetaInteractionTypesTest(HippieTestCase):
     def test_interaction_types_returned(self):
-        from .models import InteractionType
+        from ..models import InteractionType
 
         InteractionType.objects.create(name="direct interaction", psi_mi_code="MI:0407")
         r = self.client.get(reverse("hippie_website:browse_filter_meta"))
@@ -2185,186 +1589,122 @@ class Batch3FilterMetaInteractionTypesTest(HippieTestCase):
 
 
 # ---------------------------------------------------------------------------
-# Batch 6 — ML Splits: tissue coverage over survivors, status queue position
+# Multi-protein search — Protein Query & Browse (comma/space/tab, up to 50)
 # ---------------------------------------------------------------------------
 
 
-class MLSplitFilteredOutTest(TestCase):
-    """Task 10: ``n_filtered_out`` counts proteins removed by the protein-level
-    filter (here a tissue filter) relative to the full protein table — distinct
-    from ``n_orphaned_by_filter`` (proteins that pass the filter but lose all
-    edges). ``tissue_coverage`` was removed from the stats payload."""
-
-    @classmethod
-    def setUpTestData(cls):
-        # Distinct genes per protein so the tissue filter is per-protein.
-        cls.a = make_protein("A", gene_id=101, accession="ACC_A")
-        cls.b = make_protein("B", gene_id=102, accession="ACC_B")
-        cls.c = make_protein("C", gene_id=103, accession="ACC_C")
-        cls.d = make_protein("D", gene_id=104, accession="ACC_D")
-
-        make_interaction(cls.a, cls.b, score=0.85)  # survives (both in Blood)
-        make_interaction(cls.c, cls.d, score=0.85)  # C, D removed by tissue filter
-        call_command("recompute_protein_stats", stdout=StringIO())
-
-        cls.blood = Tissue.objects.create(name="Blood")
-        # Only A and B are expressed in Blood → C and D are filtered out.
-        GeneTissue.objects.create(gene=cls.a.gene, tissue=cls.blood, median_rpkm=5.0)
-        GeneTissue.objects.create(gene=cls.b.gene, tissue=cls.blood, median_rpkm=5.0)
-
-    def test_filtered_out_counts_protein_level_removals(self):
-        from .services.generate_splits import SplitParams, build_interaction_queryset
-        from .views import _interaction_stats, _protein_stats
-
-        params = SplitParams(min_score=0.5, tissue_ids=(self.blood.pk,))
-        iqs = build_interaction_queryset(params)
-        _interaction, degree_by_node, score_sum = _interaction_stats(iqs)
-        protein = _protein_stats(params, degree_by_node, score_sum, iqs)
-
-        # Full table = 4 proteins; only A, B pass the Blood tissue filter.
-        self.assertEqual(protein["n_filtered_out"], 2)  # C, D removed by filter
-        self.assertEqual(protein["n_proteins"], 2)  # A, B survive with an edge
-        self.assertEqual(protein["n_orphaned_by_filter"], 0)  # no filter-orphans
-        # tissue_coverage was removed from the payload.
-        self.assertNotIn("tissue_coverage", protein)
-
-
-class MLSplitQueuePositionTest(TestCase):
-    """Batch 6: the status endpoint reports queue_position = number of PENDING
-    jobs created before this one (FIFO). RUNNING/DONE jobs never count, and a
-    picked-up (non-PENDING) job reports 0."""
-
-    def test_queue_position_counts_earlier_pending_only(self):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
-        from .models import SplitJob
-
-        base = timezone.now()
-        j_old = SplitJob.objects.create(params={}, status="PENDING")
-        j_run = SplitJob.objects.create(params={}, status="RUNNING")
-        j_new = SplitJob.objects.create(params={}, status="PENDING")
-        # created_at is auto_now_add → force deterministic ordering via update().
-        SplitJob.objects.filter(pk=j_old.pk).update(created_at=base)
-        SplitJob.objects.filter(pk=j_run.pk).update(
-            created_at=base + timedelta(seconds=1)
-        )
-        SplitJob.objects.filter(pk=j_new.pk).update(
-            created_at=base + timedelta(seconds=2)
+class SplitIdentifiersTest(TestCase):
+    def test_splits_on_comma_space_tab_newline_semicolon(self):
+        self.assertEqual(
+            _split_identifiers("A, B\tC D;E\nF"),
+            ["A", "B", "C", "D", "E", "F"],
         )
 
-        def qpos(job):
-            resp = self.client.get(
-                reverse("hippie_website:browse_splits_status", args=[job.pk])
-            )
-            self.assertEqual(resp.status_code, 200)
-            return resp.json()["queue_position"]
+    def test_trims_and_drops_empties(self):
+        self.assertEqual(_split_identifiers("  A , , B  "), ["A", "B"])
 
-        # j_new: one earlier PENDING (j_old); the earlier RUNNING job is excluded.
-        self.assertEqual(qpos(j_new), 1)
-        # j_old: nothing precedes it.
-        self.assertEqual(qpos(j_old), 0)
-        # A RUNNING job always reports 0 regardless of predecessors.
-        self.assertEqual(qpos(j_run), 0)
+    def test_order_preserving_dedup(self):
+        self.assertEqual(_split_identifiers("A B A C B"), ["A", "B", "C"])
 
-    def test_queue_position_counts_all_earlier_pending_not_just_presence(self):
-        # Regression guard: a boolean "anything pending ahead" check would
-        # also report 1 here, indistinguishable from the real FIFO count.
-        from datetime import timedelta
+    def test_empty_string(self):
+        self.assertEqual(_split_identifiers("   "), [])
 
-        from django.utils import timezone
 
-        from .models import SplitJob
+class MultiProteinQueryTest(HippieTestCase):
+    def _get(self, q):
+        r = self.client.get(reverse("hippie_website:protein_query_api"), {"q": q})
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
 
-        base = timezone.now()
-        jobs = [SplitJob.objects.create(params={}, status="PENDING") for _ in range(4)]
-        for i, job in enumerate(jobs):
-            SplitJob.objects.filter(pk=job.pk).update(
-                created_at=base + timedelta(seconds=i)
-            )
-
-        resp = self.client.get(
-            reverse("hippie_website:browse_splits_status", args=[jobs[-1].pk])
+    def test_two_identifiers_resolved_and_union_deduped(self):
+        # The only edge (BRCA1–TP53) touches both queried proteins → appears once.
+        data = self._get("BRCA1 TP53")
+        self.assertIsNone(data["error"])
+        self.assertEqual(
+            {p["symbol"] for p in data["query_proteins"]}, {"BRCA1", "TP53"}
         )
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["queue_position"], 3)
+        self.assertEqual(data["unresolved"], [])
+        self.assertEqual(len(data["interactions"]), 1)
 
-    def test_queue_position_tiebreaks_identical_created_at(self):
-        # Two PENDING jobs sharing the same created_at (e.g. same-millisecond
-        # creation) must still be given a strict, deterministic order rather
-        # than both counting (or neither counting) the other.
-        from django.utils import timezone
+    def test_union_concatenates_distinct_edges(self):
+        # EGFR–TP53 so BRCA1 and EGFR each contribute a distinct edge.
+        make_interaction(self.egfr, self.tp53, score=0.7)
+        recompute_flags()
+        data = self._get("BRCA1 EGFR")
+        self.assertIsNone(data["error"])
+        self.assertEqual(len(data["query_proteins"]), 2)
+        self.assertEqual(len(data["interactions"]), 2)
+        ids = [ix["id"] for ix in data["interactions"]]
+        self.assertEqual(len(ids), len(set(ids)))
 
-        from .models import SplitJob
+    def test_comma_delimiter(self):
+        self.assertEqual(len(self._get("BRCA1,TP53")["query_proteins"]), 2)
 
-        now = timezone.now()
-        j1 = SplitJob.objects.create(params={}, status="PENDING")
-        j2 = SplitJob.objects.create(params={}, status="PENDING")
-        SplitJob.objects.filter(pk__in=[j1.pk, j2.pk]).update(created_at=now)
+    def test_tab_delimiter(self):
+        self.assertEqual(len(self._get("BRCA1\tTP53")["query_proteins"]), 2)
 
-        earlier, later = sorted([j1, j2], key=lambda j: j.pk)
+    def test_duplicate_tokens_deduped(self):
+        self.assertEqual(len(self._get("BRCA1, BRCA1")["query_proteins"]), 1)
 
-        resp = self.client.get(
-            reverse("hippie_website:browse_splits_status", args=[later.pk])
+    def test_partial_resolution_reports_unresolved(self):
+        data = self._get("BRCA1, NOTAREALID")
+        self.assertIsNone(data["error"])
+        self.assertEqual([p["symbol"] for p in data["query_proteins"]], ["BRCA1"])
+        self.assertEqual(data["unresolved"], ["NOTAREALID"])
+        self.assertGreater(len(data["interactions"]), 0)
+
+    def test_all_unresolved_returns_error(self):
+        data = self._get("NOPE, ALSONOPE")
+        self.assertIsNotNone(data["error"])
+        self.assertEqual(data["interactions"], [])
+        self.assertEqual(data["query_proteins"], [])
+
+    def test_over_limit_returns_400(self):
+        q = ",".join(f"GENE{i}" for i in range(MAX_QUERY_PROTEINS + 1))
+        r = self.client.get(reverse("hippie_website:protein_query_api"), {"q": q})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Too many", json.loads(r.content)["error"])
+
+
+class MultiProteinBrowseTest(HippieTestCase):
+    def _proteins(self, q):
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), {"q": q})
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def _interactions(self, q):
+        r = self.client.get(
+            reverse("hippie_website:browse_interactions_api"),
+            {"q": q, "show": "interactions"},
         )
-        self.assertEqual(resp.json()["queue_position"], 1)
-        resp = self.client.get(
-            reverse("hippie_website:browse_splits_status", args=[earlier.pk])
-        )
-        self.assertEqual(resp.json()["queue_position"], 0)
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.content)
+
+    def test_browse_proteins_single_token_unchanged(self):
+        self.assertEqual(self._proteins("BRCA1")["total"], 1)
+
+    def test_browse_proteins_union(self):
+        data = self._proteins("BRCA1 TP53")
+        self.assertEqual(data["total"], 2)
+        self.assertEqual({p["symbol"] for p in data["proteins"]}, {"BRCA1", "TP53"})
+
+    def test_browse_interactions_union(self):
+        make_interaction(self.egfr, self.tp53, score=0.7)
+        recompute_flags()
+        self.assertEqual(self._interactions("BRCA1")["total"], 1)
+        self.assertEqual(self._interactions("BRCA1 EGFR")["total"], 2)
+
+    def test_browse_proteins_over_limit_returns_400(self):
+        q = ",".join(f"GENE{i}" for i in range(MAX_QUERY_PROTEINS + 1))
+        r = self.client.get(reverse("hippie_website:browse_proteins_api"), {"q": q})
+        self.assertEqual(r.status_code, 400)
+
+    def test_browse_interactions_over_limit_returns_400(self):
+        q = ",".join(f"GENE{i}" for i in range(MAX_QUERY_PROTEINS + 1))
+        r = self.client.get(reverse("hippie_website:browse_interactions_api"), {"q": q})
+        self.assertEqual(r.status_code, 400)
 
 
-class MLSplitEndpointNotFoundTest(TestCase):
-    """browse_splits_status/download/create for a nonexistent or not-yet-done
-    job id must 404, not 500 or silently succeed."""
-
-    def test_status_404_for_unknown_job_id(self):
-        import uuid
-
-        resp = self.client.get(
-            reverse("hippie_website:browse_splits_status", args=[uuid.uuid4()])
-        )
-        self.assertEqual(resp.status_code, 404)
-
-    def test_download_404_for_unknown_job_id(self):
-        import uuid
-
-        resp = self.client.get(
-            reverse("hippie_website:browse_splits_download", args=[uuid.uuid4()])
-        )
-        self.assertEqual(resp.status_code, 404)
-
-    def test_download_404_for_job_not_yet_done(self):
-        from .models import SplitJob
-
-        job = SplitJob.objects.create(params={}, status="PENDING")
-        resp = self.client.get(
-            reverse("hippie_website:browse_splits_download", args=[job.pk])
-        )
-        self.assertEqual(resp.status_code, 404)
-
-    def test_create_enqueues_job_and_returns_202(self):
-        from unittest.mock import patch
-
-        from .models import SplitJob
-
-        with patch("hippie_website.views.run_split_job.delay") as mock_delay:
-            resp = self.client.post(
-                reverse("hippie_website:browse_splits_create"),
-                data=json.dumps({}),
-                content_type="application/json",
-            )
-        self.assertEqual(resp.status_code, 202)
-        payload = resp.json()
-        self.assertEqual(payload["status"], "PENDING")
-        job = SplitJob.objects.get(pk=payload["job_id"])
-        mock_delay.assert_called_once_with(str(job.id))
-
-    def test_create_400_for_invalid_params(self):
-        resp = self.client.post(
-            reverse("hippie_website:browse_splits_create"),
-            data=json.dumps({"min_score": 2.0}),
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 400)
+# ---------------------------------------------------------------------------
+# Batch 6 — ML Splits: tissue coverage over survivors, status queue position
+# ---------------------------------------------------------------------------

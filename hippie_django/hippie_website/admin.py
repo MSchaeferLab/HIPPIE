@@ -158,7 +158,6 @@ class InteractionAdmin(admin.ModelAdmin):
     filter_horizontal = (
         "sources",
         "experiments",
-        "conserved_species",
         "interaction_types",
         "publications",
     )

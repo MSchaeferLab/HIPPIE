@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { confThresholds, CONF_CHIP_STYLE } from "./filters.jsx";
+import { getCookie, InfoPopover, DL } from "./shared.jsx";
+import { confThresholds, CONF_CHIP_STYLE, EMPTY_META } from "./filters.jsx";
 
 const cfg = window.SPLITS_CONFIG;
-const meta = cfg.meta || { tissues: [], sources: [], experiments: [], interaction_types: [] };
+const meta = cfg.meta || EMPTY_META;
 const initial = cfg.initial || {};
 
 const STEP_LABELS = {
@@ -20,11 +21,6 @@ const TEAL  = "var(--hippie-teal)";
 const RED   = "var(--hippie-accent, #e8590c)";
 const GREY  = "var(--hippie-ink-muted)";
 
-function getCookie(name) {
-  const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
-  return m ? decodeURIComponent(m[1]) : "";
-}
-
 function toNum(v, fallback) {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : fallback;
@@ -36,7 +32,7 @@ const PROTEIN_INIT = {
   minRpkm:         toNum(initial.min_rpkm, 0),
   minDegree:       parseInt(initial.min_degree) || 0,
   minAvgScore:     toNum(initial.min_avg_score, 0),
-  includeIsoforms: !!initial.include_isoforms,
+  isoformMode:     initial.isoform_mode || "general",
 };
 const INTERACTION_INIT = {
   minScore:   toNum(initial.min_score, 0),
@@ -72,12 +68,38 @@ function toggleIn(arr, id) {
     : [...arr, id];
 }
 
+// ── Filter help text (definition lists shown in section-header pop-ups) ──────
+const PROTEIN_FILTERS_HELP = DL([
+  ["Expressed in any selected tissue", "Keep only proteins expressed in any of the selected tissues."],
+  ["Min. median RPKM ≥", "Minimum median expression (RPKM) required in the selected tissue(s). Appears once a tissue is selected."],
+  ["Min. degree ≥", "Minimum number of interaction partners (node degree) a protein must have."],
+  ["Min. avg score ≥", "Minimum mean confidence score across a protein's interactions."],
+  ["Isoforms", "General = canonical entries (plus any isoform you queried); Isoforms = only isoform entries; Both = no isoform filter."],
+]);
+
+const INTERACTION_FILTERS_HELP = DL([
+  ["Min. score ≥", "Keep interactions with confidence ≥ this value (0–1)."],
+  ["Max. score ≤", "Keep interactions with confidence ≤ this value. Sliders clamp so min ≤ max."],
+  ["Medium / High conf.", "One-click presets snapping Min. score to the release's median (medium) or Q3 (high) confidence threshold."],
+  ["Source database", "Keep interactions reported by any selected source database."],
+  ["Experiment type", "Keep interactions detected by any selected experimental method."],
+  ["Interaction type", "Keep interactions classified as any selected interaction type."],
+]);
+
+const SAMPLING_HELP = DL([
+  ["Negative ratio", "Number of sampled negative (non-interacting) edges generated per positive edge."],
+  ["Random seed", "RNG seed for reproducible negative sampling and train/val/test partitioning."],
+]);
+
 // ── Filter panels ───────────────────────────────────────────────────────────
 function ProteinFilterPanel({ filters, onChange }) {
   const set = (patch) => onChange({ ...filters, ...patch });
   return (
     <div className="hippie-card mb-0" style={{height:"100%"}}>
-      <div className="filter-section-label">Protein Filters</div>
+      <div className="filter-section-label">
+        Protein Filters
+        <InfoPopover title="Protein Filters" html={PROTEIN_FILTERS_HELP} />
+      </div>
       <label className="form-label">Expressed in any selected tissue</label>
       <CheckboxList items={meta.tissues} selected={filters.tissue}
         onToggle={id => set({ tissue: toggleIn(filters.tissue, id) })} />
@@ -101,12 +123,19 @@ function ProteinFilterPanel({ filters, onChange }) {
       <input type="range" className="form-range mb-3" min="0" max="1" step="0.01"
              value={filters.minAvgScore || 0}
              onChange={e => set({ minAvgScore: parseFloat(e.target.value) })} />
-      <label style={{display:"inline-flex",alignItems:"center",gap:".5rem",cursor:"pointer",userSelect:"none"}}>
-        <input type="checkbox" checked={filters.includeIsoforms}
-               onChange={e => set({ includeIsoforms: e.target.checked })}
-               style={{cursor:"pointer"}} />
-        <span className="text-muted-sm">Include isoforms</span>
-      </label>
+      <div className="filter-section-label mt-3">Isoforms</div>
+      <div className="mode-toggle">
+        {[
+          ["general", "General"],
+          ["isoforms", "Isoforms"],
+          ["both", "Both"],
+        ].map(([k, label]) => (
+          <button key={k} className={filters.isoformMode === k ? "active" : ""}
+                  onClick={() => set({ isoformMode: k })}>
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -116,7 +145,10 @@ function InteractionFilterPanel({ filters, onChange }) {
   const { med, high } = confThresholds("interactions");
   return (
     <div className="hippie-card mb-0" style={{height:"100%"}}>
-      <div className="filter-section-label">Interaction Filters</div>
+      <div className="filter-section-label">
+        Interaction Filters
+        <InfoPopover title="Interaction Filters" html={INTERACTION_FILTERS_HELP} />
+      </div>
       <label className="form-label">
         Min. score ≥ <span className="mono">{(filters.minScore || 0).toFixed(2)}</span>
       </label>
@@ -173,40 +205,11 @@ function InteractionFilterPanel({ filters, onChange }) {
 }
 
 // ── Statistics display primitives ───────────────────────────────────────────
-// Hover/focus (i) icon; content is an HTML string of definition list items.
-function InfoPopover({ title, html }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const el = ref.current;
-    const bs = window.bootstrap;
-    if (!el || !bs) return;
-    const popover = new bs.Popover(el, {
-      trigger: "hover focus",
-      placement: "bottom",
-      html: true,
-      sanitize: false,
-      title,
-      content: html,
-    });
-    return () => popover.dispose();
-  }, [title, html]);
-  return (
-    <button type="button" ref={ref} className="btn btn-link p-0 ms-1 align-baseline"
-            style={{color: GREY, fontSize: ".68rem", lineHeight: 1, border: "none"}}
-            aria-label={`About ${title}`}>
-      <i className="bi bi-info-circle"></i>
-    </button>
-  );
-}
-
-const DL = (rows) =>
-  `<dl class="mb-0" style="font-size:.78rem">${rows
-    .map(([term, def]) => `<dt>${term}</dt><dd class="mb-2">${def}</dd>`)
-    .join("")}</dl>`;
+// InfoPopover + DL are imported from shared.jsx (used across query pages).
 
 const PROTEIN_STATS_HELP = DL([
   ["Proteins", "Filtered proteins that still have at least one surviving interaction under the current interaction filter."],
-  ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when “include isoforms” is on."],
+  ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when the isoform mode is “Isoforms” or “Both”."],
   ["Median degree", "Median number of surviving interactions per protein, counted only over edges that pass the current filter."],
   ["Median avg score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
   ["Proteins filtered out", "Proteins removed by the protein-level filter (tissue, RPKM, min-degree, min-avg-score, isoform exclusion) relative to the full protein table. Separate from “Orphaned by filter”, which counts proteins that pass the protein filter but lose all edges."],
@@ -351,7 +354,10 @@ function InteractionStatsBox({ stats, loading, error }) {
 function SamplingCard({ negRatio, setNegRatio, seed, setSeed }) {
   return (
     <div className="hippie-card mb-3">
-      <div className="filter-section-label">Negative Sampling</div>
+      <div className="filter-section-label">
+        Negative Sampling
+        <InfoPopover title="Negative Sampling" html={SAMPLING_HELP} />
+      </div>
       <div className="row g-3">
         <div className="col-md-6">
           <label className="form-label" htmlFor="neg-ratio">
@@ -408,7 +414,8 @@ function paramSummary(p) {
   if (p.min_rpkm > 0)           parts.push(`min rpkm≥${p.min_rpkm}`);
   if (p.min_degree > 0)         parts.push(`min deg≥${p.min_degree}`);
   if (p.min_avg_score > 0)      parts.push(`min avg≥${toNum(p.min_avg_score, 0).toFixed(2)}`);
-  if (p.include_isoforms)       parts.push("including isoforms");
+  if (p.isoform_mode === "isoforms") parts.push("isoforms only");
+  else if (p.isoform_mode === "both") parts.push("including isoforms");
   parts.push(`neg ratio ${p.neg_ratio}`);
   parts.push(`seed ${p.seed}`);
   return parts.join(" · ");
@@ -604,28 +611,30 @@ function App() {
   const [runIds,      setRunIds]      = useState([]);
   const [submitting,  setSubmitting]  = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  // Mirrors localStorage exactly — deep-linked (?jobs=) ids are shown via
+  // runIds but never enter storedIds, so visiting a shared link never
+  // persists someone else's run ids into this browser's history.
+  const storedIdsRef = useRef([]);
 
   useEffect(() => {
     const jobsParam = new URLSearchParams(window.location.search).get("jobs");
     const stored = loadStoredRuns();
+    storedIdsRef.current = stored;
     if (jobsParam) {
       // Deep-linked ids first (de-duplicated), then any locally-saved runs
-      // not already listed.
+      // not already listed. Display-only — not written back to storage.
       const linked = [...new Set(jobsParam.split(",").map(s => s.trim()).filter(Boolean))];
-      const merged = [...linked, ...stored.filter(x => !linked.includes(x))].slice(0, MAX_RUNS);
-      saveStoredRuns(merged);
-      setRunIds(merged);
+      setRunIds([...linked, ...stored.filter(x => !linked.includes(x))].slice(0, MAX_RUNS));
     } else {
       setRunIds(stored);
     }
   }, []);
 
   function addRun(id) {
-    setRunIds(prev => {
-      const next = [id, ...prev.filter(x => x !== id)].slice(0, MAX_RUNS);
-      saveStoredRuns(next);
-      return next;
-    });
+    const next = [id, ...storedIdsRef.current.filter(x => x !== id)].slice(0, MAX_RUNS);
+    storedIdsRef.current = next;
+    saveStoredRuns(next);
+    setRunIds(prev => [id, ...prev.filter(x => x !== id)].slice(0, MAX_RUNS));
   }
 
   // Any filter change invalidates the computed statistics → re-grey and disable
@@ -653,7 +662,7 @@ function App() {
       min_rpkm:   proteinFilters.minRpkm,
       min_degree: proteinFilters.minDegree,
       min_avg_score: proteinFilters.minAvgScore,
-      include_isoforms: proteinFilters.includeIsoforms,
+      isoform_mode: proteinFilters.isoformMode,
       // sampling
       neg_ratio:  toNum(negRatio, 1.0),
       seed:       parseInt(seed) || 0,

@@ -37,7 +37,7 @@
     <div class="col-md-6">
       <div class="protein-card">
         <p class="section-label mb-1">Interactor A</p>
-        <div class="protein-name">{{ p1.symbol }}{% if not p1.protein.is_reviewed %} <span class="unreviewed-tag">[unreviewed]</span>{% endif %}</div>
+        <div class="protein-name">{{ p1.symbol }} {% if not p1.protein.is_reviewed %} <span class="score-badge score-low">unreviewed</span>{% endif %}{% if digger.p1.is_canonical %} <span class="score-badge score-high">canonical</span>{% endif %}</div>
         <div class="id-row">
           <dl>
             <dt>UniProt</dt>
@@ -65,7 +65,7 @@
     <div class="col-md-6">
       <div class="protein-card">
         <p class="section-label mb-1">Interactor B</p>
-        <div class="protein-name">{{ p2.symbol }}{% if not p2.protein.is_reviewed %} <span class="unreviewed-tag">[unreviewed]</span>{% endif %}</div>
+        <div class="protein-name">{{ p2.symbol }} {% if not p2.protein.is_reviewed %} <span class="score-badge score-low">unreviewed</span>{% endif %}{% if digger.p2.is_canonical %} <span class="score-badge score-high">canonical</span>{% endif %}</div>
         <div class="id-row">
           <dl>
             <dt>UniProt</dt>
@@ -94,6 +94,41 @@
 
   {# ── Page-specific evidence cards ── #}
   {% block detail_content %}{% endblock %}
+
+  {# ── Further information (DIGGER cross-links) ── #}
+  <div class="row g-3 mb-4">
+    <div class="col-md-6 col-lg-4">
+      <div class="evidence-card">
+        <h4><i class="bi bi-box-arrow-up-right me-2 text-muted"></i>Further information</h4>
+        <ul class="evidence-list">
+          <li>
+            <i class="bi bi-dot" style="color: var(--hippie-teal)"></i>
+            {% if digger.p1.url %}
+              <a href="{{ digger.p1.url }}" target="_blank" rel="noopener">{{ p1.symbol }} in DIGGER</a>
+            {% else %}
+              <span>{{ p1.symbol }} in DIGGER</span> <span class="text-muted-sm">— not available</span>
+            {% endif %}
+          </li>
+          <li>
+            <i class="bi bi-dot" style="color: var(--hippie-teal)"></i>
+            {% if digger.p2.url %}
+              <a href="{{ digger.p2.url }}" target="_blank" rel="noopener">{{ p2.symbol }} in DIGGER</a>
+            {% else %}
+              <span>{{ p2.symbol }} in DIGGER</span> <span class="text-muted-sm">— not available</span>
+            {% endif %}
+          </li>
+          <li>
+            <i class="bi bi-dot" style="color: var(--hippie-teal)"></i>
+            {% if digger.interaction.kind == "link" %}
+              <a href="{{ digger.interaction.url }}" target="_blank" rel="noopener">Interaction in DIGGER</a>
+            {% else %}
+              <span>Interaction in DIGGER</span> <span class="text-muted-sm">— not available</span>
+            {% endif %}
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
 
 </div>
 {% endblock %}

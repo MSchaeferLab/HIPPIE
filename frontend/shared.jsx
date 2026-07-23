@@ -1,5 +1,7 @@
 // Shared utilities and components used by all React pages.
 
+import { useRef, useEffect } from "react";
+
 // Confidence thresholds come from the active release (window.HIPPIE_RELEASE,
 // injected by base.html); fall back to the documented v3.0 values.
 const _REL = (typeof window !== "undefined" && window.HIPPIE_RELEASE) || {};
@@ -25,6 +27,40 @@ export function ExtLink({ href, children }) {
     ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
     : <span>{children}</span>;
 }
+
+// ── Info pop-up primitives ──────────────────────────────────────────────────
+// Hover/focus (i) icon; content is an HTML string of definition-list items.
+// Bootstrap (incl. Popper) + bootstrap-icons are loaded globally by base.html.
+export function InfoPopover({ title, html }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    const bs = window.bootstrap;
+    if (!el || !bs) return;
+    const popover = new bs.Popover(el, {
+      trigger: "hover focus",
+      placement: "bottom",
+      html: true,
+      sanitize: false,
+      title,
+      content: html,
+    });
+    return () => popover.dispose();
+  }, [title, html]);
+  return (
+    <button type="button" ref={ref} className="btn btn-link p-0 ms-1 align-baseline"
+            style={{color: "var(--hippie-ink-muted)", fontSize: ".68rem", lineHeight: 1, border: "none"}}
+            aria-label={`About ${title}`}>
+      <i className="bi bi-info-circle"></i>
+    </button>
+  );
+}
+
+// Build a definition-list HTML string from [term, definition] pairs.
+export const DL = (rows) =>
+  `<dl class="mb-0" style="font-size:.78rem">${rows
+    .map(([term, def]) => `<dt>${term}</dt><dd class="mb-2">${def}</dd>`)
+    .join("")}</dl>`;
 
 function _range(start, end) {
   const out = [];
@@ -115,6 +151,23 @@ export function PageSizeSelect({ pageSize, onChange }) {
 export function SortableTh({ sortKey, currentKey, currentDir, onSort, children, className="" }) {
   const cls = [className, currentKey === sortKey ? `sorted-${currentDir}` : ""].join(" ").trim();
   return <th className={cls} onClick={() => onSort(sortKey)}>{children}</th>;
+}
+
+// Max distinct identifiers the single-protein search boxes (Protein Query,
+// Browse) accept in one request. Mirrors MAX_QUERY_PROTEINS on the backend.
+export const MAX_QUERY_PROTEINS = 50;
+
+// Split a raw search string into identifiers on comma, whitespace (space, tab,
+// newline) or semicolon; trim, drop empties, and dedupe (order-preserving).
+export function parseIdentifiers(text) {
+  return [
+    ...new Set(
+      (text || "")
+        .split(/[\s,;]+/)
+        .map((t) => t.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 // Read a cookie value by name (used for the Django CSRF token in POST fetches).

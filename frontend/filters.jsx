@@ -5,12 +5,13 @@
 // draft). FilterBox only renders controls and calls `onChange` with the next
 // value. One component → one place to change filters everywhere.
 
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { InfoPopover, DL } from "./shared.jsx";
 
 // ── Unified filter state ────────────────────────────────────────────────────
 export const FILTER_DEFAULTS = {
   showMode: "interactions", // interactions | noninteractions | both
-  includeIsoforms: false,
+  isoformMode: "general", // general | isoforms | both
   minScore: 0,
   maxScore: 1,
   source: [], // ids
@@ -36,6 +37,56 @@ export const ALL_CONTROLS = [
   "reviewed",
   "isoforms",
 ];
+
+// Empty filter-metadata shape + loader hook. Every query page fetches the same
+// tissue/source/experiment/interaction-type option lists from its filterMetaUrl;
+// this centralises the empty default and the fetch effect.
+export const EMPTY_META = {
+  tissues: [],
+  sources: [],
+  experiments: [],
+  interaction_types: [],
+};
+
+export function useFilterMeta(url) {
+  const [meta, setMeta] = useState(EMPTY_META);
+  useEffect(() => {
+    if (url)
+      fetch(url)
+        .then((r) => r.json())
+        .then(setMeta)
+        .catch(() => {});
+  }, [url]);
+  return meta;
+}
+
+// The funnel "Filters" toggle button with its active-count badge, shared by the
+// Protein / Interaction / Browse query pages (byte-identical markup).
+export function FilterToggleButton({ activeCount, filtersOpen, onClick }) {
+  return (
+    <button
+      className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
+      onClick={onClick}
+    >
+      <i className={`bi bi-funnel${activeCount > 0 ? "-fill" : ""}`}></i>
+      Filters
+      {activeCount > 0 && (
+        <span
+          style={{
+            background: "var(--hippie-teal)",
+            color: "#fff",
+            borderRadius: "100px",
+            fontSize: ".65rem",
+            padding: ".05rem .4rem",
+            marginLeft: ".1rem",
+          }}
+        >
+          {activeCount}
+        </span>
+      )}
+    </button>
+  );
+}
 
 const _REL = (typeof window !== "undefined" && window.HIPPIE_RELEASE) || {};
 
@@ -112,7 +163,7 @@ export function countActiveFilters(f, controls = ALL_CONTROLS) {
   const on = new Set(controls);
   let n = 0;
   if (on.has("showMode") && f.showMode !== "interactions") n++;
-  if (on.has("isoforms") && f.includeIsoforms) n++;
+  if (on.has("isoforms") && f.isoformMode !== "general") n++;
   if (on.has("score") && (f.minScore > 0 || f.maxScore < 1)) n++;
   if (on.has("source")) n += f.source.length;
   if (on.has("experiment")) n += f.experiment.length;
@@ -133,7 +184,7 @@ export function filtersEqual(a, b) {
 function _serialize(f) {
   const scalars = { show: f.showMode };
   const lists = {};
-  if (f.includeIsoforms) scalars.include_isoforms = "1";
+  if (f.isoformMode !== "general") scalars.isoform_mode = f.isoformMode;
   if (f.minScore > 0) scalars.min_score = f.minScore;
   if (f.maxScore < 1) scalars.max_score = f.maxScore;
   if (f.source.length) lists.source = f.source;
@@ -165,6 +216,45 @@ export function filtersToBody(f) {
 }
 
 // ── The FilterBox ───────────────────────────────────────────────────────────
+// ── Filter help text (definition lists shown in section-header pop-ups) ──────
+const RESULT_TYPE_HELP = DL([
+  ["Interactions", "Positive, experimentally supported protein pairs."],
+  ["Non-interactions", "Sampled negative pairs (no known interaction), rows are shown with a grey background."],
+  ["Both", "Show positives and sampled negatives together."],
+]);
+const CONFIDENCE_HELP = DL([
+  ["Min. score ≥", "Keep interactions with confidence ≥ this value (0–1)."],
+  ["Max. score ≤", "Keep interactions with confidence ≤ this value. Sliders clamp so min ≤ max."],
+  ["Medium / High conf.", "One-click presets snapping Min. score to the release's median (medium) or Q3 (high) confidence threshold."],
+]);
+const SOURCE_HELP = DL([
+  ["Source database", "Keep interactions reported by any selected source database (multiple selections = OR)."],
+]);
+const EXPERIMENT_HELP = DL([
+  ["Experiment type", "Keep interactions detected by any selected experimental method."],
+]);
+const INTERACTION_TYPE_HELP = DL([
+  ["Interaction type", "Keep interactions classified as any selected type."],
+]);
+const TISSUE_HELP = DL([
+  ["Tissue expression", "Keep proteins expressed in any selected tissue."],
+  ["Min. median RPKM ≥", "Minimum median expression (RPKM) required in the selected tissue(s). Appears once a tissue is selected."],
+]);
+const PROTEIN_FILTERS_HELP = DL([
+  ["Min. degree ≥", "Minimum number of interaction partners (node degree) a protein must have."],
+  ["Min. avg. score ≥", "Minimum mean confidence score across a protein's interactions."],
+]);
+const REVIEWED_HELP = DL([
+  ["Reviewed", "UniProt-reviewed (Swiss-Prot) proteins."],
+  ["Unreviewed", "Unreviewed (TrEMBL) proteins."],
+  ["Both", "No curation-status filter."],
+]);
+const ISOFORMS_HELP = DL([
+  ["General", "Proteins without any isoform-level information."],
+  ["Isoforms", "Only pairs where an endpoint is an isoform."],
+  ["Both", "Showing everything connected to your keyword, whether it contains isoforms or not."],
+]);
+
 export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS, layout = "collapsible" }) {
   const f = value;
   const on = new Set(controls);
@@ -177,7 +267,10 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
       <div className="row g-3">
         {on.has("showMode") && (
           <div className={colCls}>
-            <div className="filter-section-label">Result type</div>
+            <div className="filter-section-label">
+              Result type
+              <InfoPopover title="Result type" html={RESULT_TYPE_HELP} />
+            </div>
             <div className="mode-toggle">
               {[
                 ["interactions", "Interactions"],
@@ -195,7 +288,10 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 
         {on.has("score") && (
           <div className={colCls}>
-            <div className="filter-section-label">Confidence score</div>
+            <div className="filter-section-label">
+              Confidence score
+              <InfoPopover title="Confidence score" html={CONFIDENCE_HELP} />
+            </div>
             <label className="form-label">
               Min. score ≥ <span className="mono">{f.minScore.toFixed(2)}</span>
             </label>
@@ -247,7 +343,10 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 
         {on.has("source") && (
           <div className={colCls}>
-            <div className="filter-section-label">Source database</div>
+            <div className="filter-section-label">
+              Source database
+              <InfoPopover title="Source database" html={SOURCE_HELP} />
+            </div>
             <label className="form-label">In any selected source</label>
             <CheckboxList
               items={meta.sources || []}
@@ -259,7 +358,10 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 
         {on.has("experiment") && (
           <div className={colCls}>
-            <div className="filter-section-label">Experiment type</div>
+            <div className="filter-section-label">
+              Experiment type
+              <InfoPopover title="Experiment type" html={EXPERIMENT_HELP} />
+            </div>
             <label className="form-label">Detected by any selected method</label>
             <CheckboxList
               items={meta.experiments || []}
@@ -271,7 +373,10 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 
         {on.has("interactionType") && (
           <div className={colCls}>
-            <div className="filter-section-label">Interaction type</div>
+            <div className="filter-section-label">
+              Interaction type
+              <InfoPopover title="Interaction type" html={INTERACTION_TYPE_HELP} />
+            </div>
             <label className="form-label">Classified as any selected type</label>
             <CheckboxList
               items={meta.interaction_types || []}
@@ -283,7 +388,10 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 
         {on.has("tissue") && (
           <div className={colCls}>
-            <div className="filter-section-label">Tissue expression</div>
+            <div className="filter-section-label">
+              Tissue expression
+              <InfoPopover title="Tissue expression" html={TISSUE_HELP} />
+            </div>
             <label className="form-label">Expressed in any selected tissue</label>
             <CheckboxList
               items={meta.tissues || []}
@@ -309,7 +417,10 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 
         {on.has("protein") && (
           <div className={colCls}>
-            <div className="filter-section-label">Protein filters</div>
+            <div className="filter-section-label">
+              Protein filters
+              <InfoPopover title="Protein filters" html={PROTEIN_FILTERS_HELP} />
+            </div>
             <label className="form-label">
               Min. degree ≥ <span className="mono">{f.minDegree || 0}</span>
             </label>
@@ -339,7 +450,10 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 
         {on.has("reviewed") && (
           <div className={colCls}>
-            <div className="filter-section-label">Protein review status</div>
+            <div className="filter-section-label">
+              Protein review status
+              <InfoPopover title="Protein review status" html={REVIEWED_HELP} />
+            </div>
             <div className="mode-toggle">
               {[
                 ["both", "Both"],
@@ -356,16 +470,21 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 
         {on.has("isoforms") && (
           <div className={colCls}>
-            <div className="filter-section-label">Isoforms</div>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: ".5rem", cursor: "pointer", userSelect: "none" }}>
-              <input
-                type="checkbox"
-                checked={f.includeIsoforms}
-                onChange={(e) => set({ includeIsoforms: e.target.checked })}
-                style={{ cursor: "pointer" }}
-              />
-              <span className="text-muted-sm">Include isoforms</span>
-            </label>
+            <div className="filter-section-label">
+              Isoforms
+              <InfoPopover title="Isoforms" html={ISOFORMS_HELP} />
+            </div>
+            <div className="mode-toggle">
+              {[
+                ["general", "General"],
+                ["isoforms", "Isoforms"],
+                ["both", "Both"],
+              ].map(([k, label]) => (
+                <button key={k} className={f.isoformMode === k ? "active" : ""} onClick={() => set({ isoformMode: k })}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

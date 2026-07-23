@@ -12,8 +12,7 @@ Usage in models.py:
 """
 
 from django.db import models
-from django.db.models import CharField, Count, Q, Value
-from django.db.models.expressions import RawSQL
+from django.db.models import CharField, Q, Value
 
 
 # ============================================================================
@@ -86,29 +85,18 @@ class ProteinQuerySet(models.QuerySet):
         if qs.exists():
             return qs
 
+        # 6) Protein / gene synonym (last resort, after all exact ID/symbol
+        #    matches so real accessions and symbols always take priority).
+        #    ``synonyms__synonym`` = ProteinSynonym reverse FK;
+        #    ``gene__synonyms__synonym`` = GeneSynonym via the gene FK.
+        qs = self.filter(
+            Q(synonyms__synonym__iexact=identifier)
+            | Q(gene__synonyms__synonym__iexact=identifier)
+        ).distinct()
+        if qs.exists():
+            return qs
+
         return self.none()
-
-    # ------------------------------------------------------------------
-    # Annotations used by the "browse" page
-    # ------------------------------------------------------------------
-
-    def with_browse_annotations(self) -> "ProteinQuerySet":
-        """
-        Annotate each protein with its degree (interaction count) and
-        average interaction score — the two numbers shown on browse.php.
-
-        Also select_related the Gene so the template can render entrez
-        name and ID without extra queries.
-        """
-        return self.select_related("gene").annotate(
-            degree=Count("interactions_as_1", distinct=True)
-            + Count("interactions_as_2", distinct=True),
-            avg_score=RawSQL(
-                """(SELECT AVG(score) FROM interaction
-                       WHERE protein_1_id = protein.id OR protein_2_id = protein.id)""",
-                [],
-            ),
-        )
 
     # ------------------------------------------------------------------
     # Tissue filtering
@@ -132,9 +120,6 @@ class ProteinManager(models.Manager):
 
     def resolve(self, identifier: str):
         return self.get_queryset().resolve(identifier)
-
-    def with_browse_annotations(self):
-        return self.get_queryset().with_browse_annotations()
 
     def expressed_in(self, tissue_ids, min_rpkm=None):
         return self.get_queryset().expressed_in(tissue_ids, min_rpkm)
@@ -239,55 +224,6 @@ class InteractionQuerySet(models.QuerySet):
             protein_2_id__in=expressed,
         )
 
-    # ------------------------------------------------------------------
-    # Interaction type filtering
-    # ------------------------------------------------------------------
-
-    def of_types(self, type_ids: list[int]) -> "InteractionQuerySet":
-        """Filter by PSI-MI interaction type (association, physical, etc.)."""
-        return self.filter(interaction_types__id__in=type_ids).distinct()
-
-    # ------------------------------------------------------------------
-    # Convenience: fully-loaded results page query
-    # ------------------------------------------------------------------
-
-    def network_query(
-        self,
-        protein_ids: list[int],
-        *,
-        layer: int = 1,
-        score_threshold: float = 0.0,
-        tissue_ids: list[int] | None = None,
-        min_rpkm: float | None = None,
-        type_ids: list[int] | None = None,
-    ) -> "InteractionQuerySet":
-        """
-        One-call equivalent of the PHP fast_query_tissue.php logic.
-
-        Parameters
-        ----------
-        protein_ids : list of internal Protein PKs
-        layer : 0 = within set only, 1 = set vs. HIPPIE
-        score_threshold : minimum confidence score
-        tissue_ids : if given, both partners must be expressed
-        type_ids : PSI-MI interaction type filter
-        """
-        if layer == 0:
-            qs = self.between_proteins(protein_ids)
-        else:
-            qs = self.for_proteins(protein_ids)
-
-        if score_threshold > 0:
-            qs = qs.above_score(score_threshold)
-
-        if tissue_ids:
-            qs = qs.in_tissues(tissue_ids, min_rpkm=min_rpkm)
-
-        if type_ids:
-            qs = qs.of_types(type_ids)
-
-        return qs.with_proteins().order_by("-score")
-
 
 class InteractionManager(models.Manager):
     def get_queryset(self):
@@ -304,6 +240,3 @@ class InteractionManager(models.Manager):
 
     def for_proteins(self, protein_ids):
         return self.get_queryset().for_proteins(protein_ids)
-
-    def network_query(self, protein_ids, **kwargs):
-        return self.get_queryset().network_query(protein_ids, **kwargs)

@@ -1,13 +1,21 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { InteractionTable, ProteinTable } from "./tables.jsx";
+import {
+  InteractionTable,
+  ProteinTable,
+  DEFAULT_PAGE_SIZE,
+  defaultSortDir,
+} from "./tables.jsx";
 import {
   FilterBox,
+  FilterToggleButton,
   FILTER_DEFAULTS,
   filtersToQuery,
   countActiveFilters,
   filtersEqual,
+  useFilterMeta,
 } from "./filters.jsx";
+import { parseIdentifiers, MAX_QUERY_PROTEINS } from "./shared.jsx";
 
 const {
   proteinsApiUrl,
@@ -26,7 +34,6 @@ const PROTEIN_CONTROLS = ["source", "tissue", "protein", "reviewed", "isoforms"]
 const INTERACTION_CONTROLS = ["showMode", "score", "source", "experiment", "interactionType", "isoforms"];
 
 const EXAMPLES = ["BRCA1", "TP53", "EGFR"];
-const DEFAULT_PAGE_SIZE = 25;
 
 // Default sort per tab (proteins: gene symbol asc; interactions: score desc).
 const DEFAULT_SORT = {
@@ -36,7 +43,7 @@ const DEFAULT_SORT = {
 
 function App() {
   const [mode, setMode] = useState("proteins");
-  const [meta, setMeta] = useState({ tissues: [], sources: [], experiments: [], interaction_types: [] });
+  const meta = useFilterMeta(filterMetaUrl);
 
   // ── Draft vs applied ────────────────────────────────────────────────────
   // The search box + FilterBox edit draft state; nothing is fetched until the
@@ -60,16 +67,20 @@ function App() {
   const [loadError, setLoadError] = useState(null);
   const abortRef = useRef(null);
 
-  useEffect(() => {
-    fetch(filterMetaUrl).then((r) => r.json()).then(setMeta).catch(() => {});
-  }, []);
-
   const controls = mode === "proteins" ? PROTEIN_CONTROLS : INTERACTION_CONTROLS;
   const activeCount = countActiveFilters(filters, controls);
   const dirty = search !== appliedSearch || !filtersEqual(filters, appliedFilters);
 
   // Commit the draft search + filters → applied, back to page 1.
   const applySearch = () => {
+    const ids = parseIdentifiers(search);
+    if (ids.length > MAX_QUERY_PROTEINS) {
+      setLoadError(
+        `Too many proteins: ${ids.length} (max ${MAX_QUERY_PROTEINS} per search). Please remove some identifiers.`,
+      );
+      return;
+    }
+    setLoadError(null);
     setAppliedSearch(search);
     setAppliedFilters(filters);
     setPage(1);
@@ -102,7 +113,7 @@ function App() {
     setSort((s) =>
       s.key === key
         ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: key === "score" || key === "degree" || key === "avg_score" ? "desc" : "asc" },
+        : { key, dir: defaultSortDir(key) },
     );
     setPage(1);
   };
@@ -180,13 +191,13 @@ function App() {
       if (f.minDegree > 0) p.set("min_degree", f.minDegree);
       if (f.minAvgScore > 0) p.set("min_avg_score", f.minAvgScore);
       if (f.tissue.length > 0 && f.minRpkm > 0) p.set("min_rpkm", f.minRpkm);
-      if (f.includeIsoforms) p.set("include_isoforms", "1");
+      if (f.isoformMode !== "general") p.set("isoform_mode", f.isoformMode);
     } else {
       if (f.minScore > 0) p.set("min_score", f.minScore);
       if (f.maxScore < 1) p.set("max_score", f.maxScore);
       f.source.forEach((s) => p.append("source", s));
       f.experiment.forEach((e) => p.append("experiment", e));
-      if (f.includeIsoforms) p.set("include_isoforms", "1");
+      if (f.isoformMode !== "general") p.set("isoform_mode", f.isoformMode);
     }
     const qs = p.toString();
     window.location.href = mlSplitsUrl + (qs ? "?" + qs : "");
@@ -279,8 +290,8 @@ function App() {
           className="form-control mb-3"
           placeholder={
             mode === "proteins"
-              ? "Search by gene symbol, UniProt ID, or Entrez ID…"
-              : "Search interactions by a partner's gene symbol, UniProt ID, or Entrez ID…"
+              ? "Search by gene symbol, UniProt, Entrez or Ensembl ID — up to 50, comma/space/tab separated…"
+              : "Search by a partner's gene symbol, UniProt, Entrez or Ensembl ID — up to 50, comma/space/tab separated…"
           }
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -298,27 +309,11 @@ function App() {
             ))}
           </div>
           <div className="d-flex align-items-center gap-2">
-            <button
-              className={`btn-filter-toggle${filtersOpen ? " active" : ""}`}
+            <FilterToggleButton
+              activeCount={activeCount}
+              filtersOpen={filtersOpen}
               onClick={() => setFiltersOpen((o) => !o)}
-            >
-              <i className={`bi bi-funnel${activeCount > 0 ? "-fill" : ""}`}></i>
-              Filters
-              {activeCount > 0 && (
-                <span
-                  style={{
-                    background: "var(--hippie-teal)",
-                    color: "#fff",
-                    borderRadius: "100px",
-                    fontSize: ".65rem",
-                    padding: ".05rem .4rem",
-                    marginLeft: ".1rem",
-                  }}
-                >
-                  {activeCount}
-                </span>
-              )}
-            </button>
+            />
             <button
               className="btn-hippie"
               onClick={applySearch}

@@ -32,6 +32,7 @@ from hippie_website.models import (
     Isoform,
     NonInteraction,
     Protein,
+    OrthologInteraction,
 )
 from hippie_website.stats_utils import compute_quartiles
 
@@ -144,13 +145,24 @@ def _mitab_row(inter: Interaction) -> list[str]:
         "|".join(_field(x.source.name, x.link) for x in inter.cross_references.all())
         or NULL
     )
-    species = (
-        "|".join(
-            _field("taxid", str(sp.NCBI_tax_id), sp.name)
-            for sp in inter.conserved_species.all()
-        )
-        or NULL
+
+    g1, g2 = inter.protein_1.gene, inter.protein_2.gene
+    lo_gene, hi_gene = (g1, g2) if g1.pk <= g2.pk else (g2, g1)
+    ortholog = (
+        OrthologInteraction.objects.filter(gene_1=lo_gene, gene_2=hi_gene)
+        .prefetch_related("ortholog_species")
+        .first()
     )
+    if ortholog:
+        species = (
+            "|".join(
+                _field("taxid", str(sp.NCBI_tax_id), sp.name)
+                for sp in ortholog.ortholog_species.all()
+            )
+            or NULL
+        )
+    else:
+        species = NULL
 
     return [
         _field("entrez gene", str(a.gene.entrez_id)),

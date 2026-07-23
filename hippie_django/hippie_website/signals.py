@@ -7,34 +7,18 @@ command, so the denormalised counts drift unless these signals recompute
 them too.
 """
 
-from django.db.models import Count, OuterRef, Subquery
-from django.db.models.functions import Coalesce
 from django.db.models.signals import m2m_changed, post_delete, pre_delete
 from django.dispatch import receiver
 
 from .models import ExperimentType, Interaction, Source
-
-
-def _edge_count(through):
-    return Coalesce(
-        Subquery(
-            through.objects.filter(interaction_id=OuterRef("pk"))
-            .values("interaction_id")
-            .annotate(c=Count("pk"))
-            .values("c")
-        ),
-        0,
-    )
+from .query_filters import recompute_evidence_counts
 
 
 def _recompute(interaction_ids):
     ids = [pk for pk in interaction_ids if pk is not None]
     if not ids:
         return
-    Interaction.objects.filter(pk__in=ids).update(
-        n_sources=_edge_count(Interaction.sources.through),
-        n_experiments=_edge_count(Interaction.experiments.through),
-    )
+    recompute_evidence_counts(Interaction.objects.filter(pk__in=ids))
 
 
 @receiver(m2m_changed, sender=Interaction.sources.through)

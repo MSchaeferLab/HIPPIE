@@ -4,8 +4,12 @@ from pathlib import Path
 
 import networkx as nx
 import numpy as np
-from django.db.models import Exists, OuterRef, Q  # noqa: F401 (Q kept for back-compat)
 from networkx.algorithms.community import kernighan_lin_bisection
+
+from hippie_website.query_filters import (
+    apply_interaction_level_filters,
+    apply_protein_level_filters,
+)
 
 
 @dataclass(frozen=True)
@@ -23,7 +27,7 @@ class SplitParams:
     min_rpkm: float = 0.0
     min_degree: int = 0
     min_avg_score: float = 0.0
-    include_isoforms: bool = False
+    isoform_mode: str = "general"  # general | isoforms | both
 
     # ── Negative sampling ─────────────────────────────────────────────────
     neg_ratio: float = 1.0
@@ -60,16 +64,13 @@ def allowed_protein_id_qs(params: SplitParams):
     if not active:
         return None
 
-    qs = Protein.objects.all()
-    if params.tissue_ids:
-        qs = qs.expressed_in(
-            list(params.tissue_ids),
-            min_rpkm=params.min_rpkm if params.min_rpkm > 0 else None,
-        )
-    if params.min_degree > 0:
-        qs = qs.filter(degree__gte=params.min_degree)
-    if params.min_avg_score > 0:
-        qs = qs.filter(avg_score__gte=params.min_avg_score)
+    qs = apply_protein_level_filters(
+        Protein.objects.all(),
+        tissue_ids=params.tissue_ids,
+        min_rpkm=params.min_rpkm,
+        min_degree=params.min_degree,
+        min_avg_score=params.min_avg_score,
+    )
     return qs.values("pk")
 
 
@@ -85,45 +86,23 @@ def build_interaction_queryset(params: SplitParams):
     """
     from hippie_website.models import Interaction
 
-    qs = Interaction.objects.all()
-
-    # ── Interaction-level filters ────────────────────────────────────────
-    if params.min_score > 0:
-        qs = qs.above_score(params.min_score)
-    if params.max_score < 1.0:
-        qs = qs.filter(score__lte=params.max_score)
-
-    if params.source_ids:
-        qs = qs.filter(
-            Exists(
-                Interaction.sources.through.objects.filter(
-                    interaction_id=OuterRef("pk"),
-                    source_id__in=list(params.source_ids),
-                )
-            )
-        )
-    if params.experiment_ids:
-        qs = qs.filter(
-            Exists(
-                Interaction.experiments.through.objects.filter(
-                    interaction_id=OuterRef("pk"),
-                    experimenttype_id__in=list(params.experiment_ids),
-                )
-            )
-        )
-    if params.type_ids:
-        qs = qs.filter(
-            Exists(
-                Interaction.interaction_types.through.objects.filter(
-                    interaction_id=OuterRef("pk"),
-                    interactiontype_id__in=list(params.type_ids),
-                )
-            )
-        )
+    # ── Interaction-level filters (shared with the query pages) ──────────
+    # Pass score bounds only when they actually constrain, preserving the
+    # previous ``above_score`` / ``score__lte`` behaviour (no no-op WHERE).
+    qs = apply_interaction_level_filters(
+        Interaction.objects.all(),
+        min_score=params.min_score if params.min_score > 0 else None,
+        max_score=params.max_score if params.max_score < 1.0 else None,
+        source_ids=list(params.source_ids),
+        experiment_ids=list(params.experiment_ids),
+        type_ids=list(params.type_ids),
+    )
 
     # ── Isoform handling (denormalised flag — one indexed column) ────────
-    if not params.include_isoforms:
+    if params.isoform_mode == "general":
         qs = qs.filter(involves_isoform=False)
+    elif params.isoform_mode == "isoforms":
+        qs = qs.filter(involves_isoform=True)
 
     # ── Protein-level node gating ────────────────────────────────────────
     pid_qs = allowed_protein_id_qs(params)
@@ -150,29 +129,10 @@ def get_interaction_graph(params: SplitParams) -> nx.Graph:
     return G
 
 
-def test_partition_respects_disjoint_node_sets():
-    params = SplitParams(seed=1)
-    p = EdgePartition.__new__(EdgePartition)  # skip __init__
-    p.params = params
-    p.interaction_graph = nx.barbell_graph(10, 0)  # two cliques joined by an edge
-    p.non_interaction_graph = nx.Graph()
-    p.node_sets = []
-    p.selected_sets = []
-    p.discarded_edges = []
-    p.discarded_nodes = set()
-
-    p.generate_splits()
-    a, b, c = p.node_sets
-    assert a.isdisjoint(b) and b.isdisjoint(c) and a.isdisjoint(c), "Overlapping nodes!"
-
-
 class EdgePartition:
     def __init__(self, params: SplitParams):
         self.params = params
         self.interaction_graph = get_interaction_graph(params)
-        self.non_interaction_graph = (
-            None  # get_non_interaction_graph() NOTE: method will be implemented
-        )
         self.node_sets = []
         self.discarded_edges = []
         self.discarded_nodes = []

@@ -13,13 +13,14 @@ import {
   filtersToBody,
   filtersEqual,
   confThresholds,
+  useFilterMeta,
 } from "./filters.jsx";
 
 const { apiUrl, filterMetaUrl, maxProteins } = window.HIPPIE_NQ_CONFIG;
 
 const EXAMPLES = [
+  { label: "Example — Huntington", text: "HTT, HAP40, HAP1, HIP1, TCERG1, MED15, SYT1, YKT6, SNAP47" },
   { label: "Example — tumor suppressors", text: "TP53\nBRCA1\nATM" },
-  { label: "Example — Huntington", text: "HTT\nHSP90AA1\nBDNF\nCREBBP" },
   { label: "Example — EGFR signalling", text: "EGFR\nERBB2\nGRB2\nSOS1" },
 ];
 
@@ -273,7 +274,7 @@ function App() {
   const [filters, setFilters] = useState(FILTER_DEFAULTS);
   const [appliedFilters, setAppliedFilters] = useState(FILTER_DEFAULTS);
   const [appliedSeedKey, setAppliedSeedKey] = useState("");
-  const [meta, setMeta] = useState({ tissues: [], sources: [], experiments: [], interaction_types: [] });
+  const meta = useFilterMeta(filterMetaUrl);
 
   // Results ------------------------------------------------------------------
   const [rows, setRows] = useState([]);
@@ -284,10 +285,6 @@ function App() {
   const [showGraph, setShowGraph] = useState(true);
   const [searched, setSearched] = useState(false);
   const abortRef = useRef(null);
-
-  useEffect(() => {
-    if (filterMetaUrl) fetch(filterMetaUrl).then((r) => r.json()).then(setMeta).catch(() => {});
-  }, []);
 
   const runQuery = useCallback(async (seeds, f) => {
     if (abortRef.current) abortRef.current.abort();
@@ -411,7 +408,7 @@ function App() {
               <textarea
                 className="form-control mb-2"
                 rows={5}
-                placeholder={"One identifier per line, e.g.\nHTT\nBRCA1\nTP53"}
+                placeholder={"Separate the identifiers with new lines or commas, e.g.\nHTT\nBRCA1\nTP53"}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
               />

@@ -10,6 +10,8 @@ urlpatterns = [
     path("browse/", views.browse_view, name="browse"),
     # ── Utility pages ──────────────────────────────────────────
     path("download/", views.download_view, name="download"),
+    # /downloads/<filename> is the backup in case serving the downloads with apache does not work.
+    # In production this should not work, but the corresponding directory is mounted with docker
     path(
         "downloads/<str:filename>",
         views.download_dataset,
@@ -32,7 +34,7 @@ urlpatterns = [
     path("api/query/", views.protein_query_api, name="protein_query_api"),
     path("api/interaction/", views.interaction_query_api, name="interaction_query_api"),
     path("api/network/", views.network_query_api, name="network_query_api"),
-    path("api/browse/", views.browse_api, name="browse_api"),
+    path("api/browse/proteins", views.browse_proteins_api, name="browse_proteins_api"),
     path(
         "api/browse/interactions/",
         views.browse_interactions_api,

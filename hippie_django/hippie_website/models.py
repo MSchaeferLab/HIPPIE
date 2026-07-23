@@ -16,6 +16,10 @@ class Gene(models.Model):
 
     entrez_id = models.PositiveIntegerField(db_index=True, unique=True)
     entrez_name = models.CharField(max_length=40, blank=True, default="", db_index=True)
+    # Ensembl gene IDs (unversioned, e.g. "ENSG00000141510") linked to this gene.
+    # Populated by hippie_update from UniProt idmapping + Ensembl REST fallback.
+    # Empty list = unresolved. Used to build DIGGER cross-links on detail pages.
+    ensg = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "gene"
@@ -129,6 +133,24 @@ class Isoform(Protein):
         on_delete=models.CASCADE,
         related_name="isoforms",
         help_text="Canonical parent protein for this isoform",
+    )
+    # Ensembl transcript / translation IDs (unversioned, e.g. "ENST00000258149"
+    # / "ENSP00000258149") for this isoform accession. Populated by hippie_update
+    # from UniProt idmapping + Ensembl REST fallback. Empty list = unresolved.
+    # The isoform's ENSG fallback reads the connected ``gene.ensg`` instead.
+    enst = models.JSONField(default=list, blank=True)
+    ensp = models.JSONField(default=list, blank=True)
+    # True when this isoform's sequence (UniParc hash) equals its parent
+    # protein's canonical sequence — i.e. this accession is the canonical
+    # isoform. Populated by hippie_update from UniProt idmapping (UniParc
+    # match against the base accession). Not db_indexed: no canonical filter
+    # exists and the isoform table is small.
+    is_canonical = models.BooleanField(
+        default=False,
+        help_text=(
+            "True when this isoform's sequence (UniParc) equals its parent "
+            "protein's canonical sequence."
+        ),
     )
 
     class Meta:
@@ -344,9 +366,6 @@ class Interaction(models.Model):
     )
     experiments = models.ManyToManyField(
         ExperimentType, related_name="interactions", db_table="interaction2experiment"
-    )
-    conserved_species = models.ManyToManyField(
-        Species, related_name="conserved_interactions", db_table="interaction2species"
     )
     interaction_types = models.ManyToManyField(
         InteractionType, related_name="interactions", db_table="interaction2type"

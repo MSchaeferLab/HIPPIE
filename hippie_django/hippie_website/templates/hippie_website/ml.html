@@ -8,7 +8,7 @@
   .ml-step-num {
     display: inline-flex; align-items: center; justify-content: center;
     width: 1.9rem; height: 1.9rem; border-radius: 50%;
-    background: var(--hippie-green, #2e7d5b); color: #fff;
+    background: #2e7d5b; color: #fff;
     font-family: var(--font-mono); font-weight: 600; font-size: .9rem;
     margin-right: .6rem; flex: 0 0 auto;
   }
@@ -32,11 +32,10 @@
 </style>
 
 <div class="hippie-hero">
-  <span class="page-eyebrow">HIPPIE</span>
-  <h1>Machine<br /><em>Learning</em></h1>
+  <h1>Machine<br /><em style="color: var(--hippie-teal)">Learning</em></h1>
   <p class="page-subtitle">
-    Resources, key papers, and a worked example for building a protein–protein interaction
-    prediction model from HIPPIE data — without fooling yourself through data leakage.
+    Resources, key papers, and a working example for building a protein–protein interaction
+    prediction model from HIPPIE data — taking bias and data leakage into account.
   </p>
 </div>
 
@@ -50,7 +49,6 @@
     </p>
 
     <div class="hippie-card--muted mb-2 paper-card">
-      <span class="tag-chip">Open Access</span>
       <strong>Cracking the black box of deep sequence-based protein–protein interaction prediction</strong>
       <span class="text-muted-sm">Bernett J, Blumenthal DB, List M. <em>Briefings in Bioinformatics</em>, 2024; 25(2): bbae076.</span>
       <span class="text-muted-sm">
@@ -72,9 +70,8 @@
     </div>
 
     <div class="hippie-card--muted paper-card">
-      <span class="tag-chip">Tool</span>
       <strong>Data splitting to avoid information leakage with DataSAIL</strong>
-      <span class="text-muted-sm">Joeres R, et al. <em>Nature Communications</em>, 2025.</span>
+      <span class="text-muted-sm">Joeres R, Blumenthal DB, Kalinina OV. <em>Nature Communications</em>, 2025.</span>
       <span class="text-muted-sm">
         Practical tool for generating similarity-aware train/test splits — useful for the negative
         and positive sets you export from HIPPIE.
@@ -89,10 +86,9 @@
   <div class="hippie-card">
     <span class="section-label">A PPI-Prediction Workflow</span>
     <p class="text-muted-sm mb-0">
-      A typical end-to-end example: choose data, pull it out of HIPPIE, train two contrasting models
-      (a classic feature-based baseline and a sequence-based model), and evaluate honestly. The
-      running theme — taken from the papers above — is that <strong>how you split your data matters
-      more than which model you pick.</strong>
+      Here we show a typical end-to-end example: choose data, train two contrasting models
+      (a classic feature-based baseline and a sequence-based model), and evaluate honestly. Take this both as a
+      tutorial if you want to start with PPI prediction and as a resource showing the pitfalls of data leakage.
     </p>
   </div>
 </div>
@@ -103,20 +99,18 @@
     <div class="ml-step-head"><span class="ml-step-num">1</span><h3>How do I choose my data?</h3></div>
     <p>
       A PPI classifier needs <strong>positive</strong> examples (interacting pairs) and
-      <strong>negative</strong> examples (non-interacting pairs). HIPPIE gives you scored positives
-      directly; negatives are the hard part.
+      <strong>negative</strong> examples (non-interacting pairs). HIPPIE gives you scored positives and scored
+      negatives, but the difficult part is splitting it in a way that reduces biases and data leakage.
     </p>
     <ul style="font-size:.9rem; line-height:1.8;">
-      <li><strong>Positives</strong> — interactions above a confidence threshold. Higher thresholds
+      <li><strong>Positives</strong> — Set of interacting proteins. Higher confidence thresholds
         (≥ {{ current_release.int_q3|default:0.00|floatformat:2 }}, high confidence) trade quantity for reliability.</li>
       <li><strong>Negatives</strong> — there is no gold-standard "these never interact" set. Common
-        choices: random non-edges, or curated non-interactions. Random negatives are biased by node
+        choices: random non-edges, or curated non-interactions as provided by HIPPIE. Random negatives are biased by node
         degree, which a model can exploit instead of learning biology.</li>
-      <li><strong>Scope</strong> — restrict to a tissue or a confidence band so the question is
-        well-defined (e.g. "high-confidence PPIs among colon-expressed proteins").</li>
     </ul>
     <div class="leak-warn">
-      <strong>Leakage trap (paper 1).</strong> If the same protein appears in both train and test —
+      <strong>Leakage trap:</strong> If the same protein appears in both train and test —
       or two near-identical sequences are split across train/test — the model can memorise per-protein
       or per-family signal and report inflated accuracy. Decide your split strategy <em>before</em>
       sampling negatives.
@@ -129,47 +123,15 @@
   <div class="hippie-card">
     <div class="ml-step-head"><span class="ml-step-num">2</span><h3>How do I pick that in HIPPIE?</h3></div>
     <p>
-      Use the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool. It applies the same
+      The <a href="{% url 'hippie_website:download' %}">Download page</a> provides one pre-computed split for the high-
+      confidence interactions, one for the high-and-medium-confidence ones, and one for the whole database. If you
+      need your dataset filtered in a different way, e.g. just choosing proteins that have a min. expression in a
+      specific tissue, you can use the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool. It applies the same
       filters as <a href="{% url 'hippie_website:browse' %}">Browse</a> (confidence score, source,
-      experiment type, interaction type, tissue / RPKM, node degree) and then builds a labelled
-      train/test dataset with negative sampling for you:
+      experiment type, interaction type, tissue / RPKM, node degree) and then builds a labeled
+      train/validation/test dataset with two negative sampling options for you. <br>
+      For this tutorial we will download the split of the whole database. LEFT OFF HERE
     </p>
-    <ul style="font-size:.9rem; line-height:1.8;">
-      <li>Set <code class="mono">min_score</code> (e.g. {{ current_release.int_q3|default:0.00|floatformat:2 }}) to keep high-confidence positives.</li>
-      <li>Add a <strong>tissue</strong> filter and <code class="mono">min_rpkm</code> to scope the proteome.</li>
-      <li>Choose a <code class="mono">neg_ratio</code> (negatives per positive) and a fixed
-        <code class="mono">seed</code> so the export is reproducible.</li>
-      <li>Decide whether to <code class="mono">include_isoforms</code>.</li>
-    </ul>
-    <p class="text-muted-sm">
-      The tool returns a downloadable TSV with labelled pairs. You can also drive it from the JSON API
-      directly:
-    </p>
-<pre class="code-block"><span class="c"># Create a split job, then poll for the result, via the HIPPIE API</span>
-import requests, time
-
-BASE = "https://your-hippie-host"          <span class="c"># this server</span>
-params = {
-    "min_score": {{ current_release.int_q3|default:0.00|floatformat:2 }},                       <span class="c"># high-confidence positives only</span>
-    "tissue_ids": [5],                       <span class="c"># e.g. colon</span>
-    "min_rpkm": 1.0,
-    "neg_ratio": 1.0,                        <span class="c"># balanced negatives</span>
-    "include_isoforms": False,
-    "seed": 78539105873,                     <span class="c"># reproducibility</span>
-}
-job = requests.post(f"{BASE}/api/browse/splits/", json=params).json()
-job_id = job["job_id"]
-
-<span class="c"># poll until the background job finishes</span>
-while True:
-    status = requests.get(f"{BASE}/api/browse/splits/{job_id}/").json()
-    if status["state"] in ("done", "failed"):
-        break
-    time.sleep(2)
-
-<span class="c"># download the labelled train/test TSV</span>
-tsv = requests.get(f"{BASE}/api/browse/splits/{job_id}/download/").content
-open("hippie_ppi.tsv", "wb").write(tsv)</pre>
   </div>
 </div>
 
