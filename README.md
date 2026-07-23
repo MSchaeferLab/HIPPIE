@@ -150,8 +150,6 @@ Useful one-shots:
 
 ```bash
 docker compose exec web python manage.py createsuperuser
-docker compose exec web python manage.py seed_test_data
-docker compose exec web python manage.py test_import_bait_prey
 docker compose logs -f web worker apache
 docker compose down              # stop; volumes preserved
 docker compose down -v           # stop + wipe static / media volumes (host DB untouched)

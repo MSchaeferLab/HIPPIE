@@ -1717,6 +1717,17 @@ class Command(BaseCommand):
                     f"  Upserted: {new_c} new proteins, {upd_c} new interactions"
                 )
 
+            # Querying the API takes super long, so this should only be done if new data is added, not every time we want to rescore
+            self.stdout.write("Populating Ensembl IDs (ENSG / ENST / ENSP).")
+            # Best-effort enrichment: a network/parse failure here must never abort the
+            # update (release metadata below still has to be written).
+            try:
+                _populate_ensembl_ids(self.stdout, skip_api=skip_ensembl_api)
+            except Exception as e:  # noqa: BLE001
+                self.stderr.write(
+                    f"WARNING: Ensembl ID population failed ({e}); continuing without it."
+                )
+
         # Rescore (wired up once human_species_ids is available)
         if rescore_all:
             self.stdout.write("Rescoring interactions.")
@@ -1743,16 +1754,6 @@ class Command(BaseCommand):
             self.stderr.write(
                 f"WARNING: canonical isoform population failed ({e}); "
                 "continuing without it."
-            )
-
-        self.stdout.write("Populating Ensembl IDs (ENSG / ENST / ENSP).")
-        # Best-effort enrichment: a network/parse failure here must never abort the
-        # update (release metadata below still has to be written).
-        try:
-            _populate_ensembl_ids(self.stdout, skip_api=skip_ensembl_api)
-        except Exception as e:  # noqa: BLE001
-            self.stderr.write(
-                f"WARNING: Ensembl ID population failed ({e}); continuing without it."
             )
 
         self.stdout.write("Recording release metadata.")
