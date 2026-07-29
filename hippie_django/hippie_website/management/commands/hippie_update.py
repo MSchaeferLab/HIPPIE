@@ -1010,22 +1010,32 @@ def _refresh_secondary_accessions() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Source interaction count
+# Evidence-vocabulary interaction counts
 # ---------------------------------------------------------------------------
 
 
-def _recompute_source_interaction_counts() -> None:
-    """Set Source.n_connected_interactions to the count of linked Interactions."""
+def _recompute_vocab_interaction_counts(model, related_name: str) -> None:
+    """Set ``model.n_connected_interactions`` to the count of linked Interactions.
+
+    Shared by Source, ExperimentType and InteractionType — all three expose the
+    same denormalised counter, read by ``views._filter_option_lists`` to show a
+    per-option evidence volume and to hide options no interaction uses.
+    """
     from django.db.models import Count
 
     counts: dict[int, int] = {
         row["pk"]: row["cnt"]
-        for row in Source.objects.annotate(cnt=Count("interactions")).values(
-            "pk", "cnt"
-        )
+        for row in model.objects.annotate(cnt=Count(related_name)).values("pk", "cnt")
     }
-    objs = [Source(pk=pk, n_connected_interactions=cnt) for pk, cnt in counts.items()]
-    Source.objects.bulk_update(objs, ["n_connected_interactions"], batch_size=1_000)
+    objs = [model(pk=pk, n_connected_interactions=cnt) for pk, cnt in counts.items()]
+    model.objects.bulk_update(objs, ["n_connected_interactions"], batch_size=1_000)
+
+
+def _recompute_source_interaction_counts() -> None:
+    """Refresh the counters on all three evidence vocabularies."""
+    _recompute_vocab_interaction_counts(Source, "interactions")
+    _recompute_vocab_interaction_counts(ExperimentType, "interactions")
+    _recompute_vocab_interaction_counts(InteractionType, "interactions")
 
 
 # ---------------------------------------------------------------------------
@@ -1739,7 +1749,9 @@ class Command(BaseCommand):
         call_command("recompute_protein_stats")
         self.stdout.write("Refreshing interaction isoform flags.")
         call_command("recompute_interaction_flags")  # also bumps the browse cache epoch
-        self.stdout.write("Recomputing source interaction counts.")
+        self.stdout.write(
+            "Recomputing source / experiment / interaction-type interaction counts."
+        )
         _recompute_source_interaction_counts()
         self.stdout.write("Assigning source homepage URLs.")
         _assign_source_urls()

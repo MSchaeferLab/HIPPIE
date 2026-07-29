@@ -34,7 +34,12 @@ urlpatterns = [
     path("api/query/", views.protein_query_api, name="protein_query_api"),
     path("api/interaction/", views.interaction_query_api, name="interaction_query_api"),
     path("api/network/", views.network_query_api, name="network_query_api"),
-    path("api/browse/proteins", views.browse_proteins_api, name="browse_proteins_api"),
+    path("api/browse/proteins/", views.browse_proteins_api, name="browse_proteins_api"),
+    # Legacy no-slash form. This route shipped without the trailing slash every
+    # sibling endpoint has, and APPEND_SLASH can only add a slash, never strip
+    # one — so the slashed form the docs show used to 404. Both work now; the
+    # slashed one is canonical and is what `{% url %}` resolves to.
+    path("api/browse/proteins", views.browse_proteins_api),
     path(
         "api/browse/interactions/",
         views.browse_interactions_api,

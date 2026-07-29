@@ -9,6 +9,7 @@ import {
   filtersToQuery,
   countActiveFilters,
   filtersEqual,
+  useAllSelectedDefaults,
   useFilterMeta,
 } from "./filters.jsx";
 
@@ -61,6 +62,9 @@ function App() {
   const [appliedFilters, setAppliedFilters] = useState(FILTER_DEFAULTS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const meta = useFilterMeta(filterMetaUrl);
+  // Tick every option once the lists arrive. Seeds draft and applied together so
+  // the page does not come up dirty.
+  useAllSelectedDefaults(meta, [setFilters, setAppliedFilters]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -84,7 +88,7 @@ function App() {
     setAppliedQuery(qq);
     setAppliedFilters(f);
     try {
-      const params = filtersToQuery(f);
+      const params = filtersToQuery(f, meta);
       params.set("q", qq);
       const data = await fetch(`${apiUrl}?${params.toString()}`).then((r) => r.json());
       if (data.error) setError(data.error);
@@ -94,7 +98,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [meta]);
 
   // Deep-link ?q= autoruns once on mount with default filters.
   useEffect(() => {
@@ -110,7 +114,7 @@ function App() {
     runSearch(ex, filters);
   };
 
-  const activeCount = countActiveFilters(filters);
+  const activeCount = countActiveFilters(filters, undefined, meta);
   const dirty = !filtersEqual(filters, appliedFilters);
   const rows = result ? mapRows(result) : [];
 

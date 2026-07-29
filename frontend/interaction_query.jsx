@@ -9,6 +9,7 @@ import {
   filtersToBody,
   countActiveFilters,
   filtersEqual,
+  useAllSelectedDefaults,
   useFilterMeta,
 } from "./filters.jsx";
 
@@ -96,6 +97,9 @@ function App() {
   const [appliedFilters, setAppliedFilters] = useState(FILTER_DEFAULTS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const meta = useFilterMeta(filterMetaUrl);
+  // Tick every option once the lists arrive. Seeds draft and applied together so
+  // the page does not come up dirty.
+  useAllSelectedDefaults(meta, [setFilters, setAppliedFilters]);
 
   // Results ------------------------------------------------------------------
   const [rows, setRows] = useState([]);
@@ -116,7 +120,7 @@ function App() {
 
     const totalBatches = Math.ceil(pairs.length / batchSize);
     const allRows = [];
-    const bodyFilters = filtersToBody(f);
+    const bodyFilters = filtersToBody(f, meta);
 
     try {
       for (let b = 0; b < totalBatches; b++) {
@@ -141,7 +145,7 @@ function App() {
     } finally {
       setStreaming(false);
     }
-  }, []);
+  }, [meta]);
 
   const switchMode = (m) => {
     setMode(m);
@@ -187,7 +191,7 @@ function App() {
   };
 
   const canSubmit = !streaming && (mode === "text" ? text.trim().length > 0 : file !== null);
-  const activeCount = countActiveFilters(filters);
+  const activeCount = countActiveFilters(filters, undefined, meta);
   const dirty = !filtersEqual(filters, appliedFilters);
 
   return (

@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { getCookie, InfoPopover, DL } from "./shared.jsx";
-import { confThresholds, CONF_CHIP_STYLE, EMPTY_META } from "./filters.jsx";
+import {
+  EMPTY_META,
+  MLInteractionFilterPanel,
+  MLProteinFilterPanel,
+  allOptionIds,
+  listNarrows,
+} from "./filters.jsx";
 
 const cfg = window.SPLITS_CONFIG;
 const meta = cfg.meta || EMPTY_META;
@@ -26,183 +32,37 @@ function toNum(v, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-// Seed editable filter state from query-param hand-off (either Browse tab).
+// Seed editable filter state from the query-param hand-off (either Browse tab).
+// An absent list means "no filter", which the page now shows as every box
+// ticked — meta is injected by the template, so unlike the query pages we can
+// seed synchronously instead of waiting for a fetch.
+const seedList = (handoff, options) =>
+  Array.isArray(handoff) && handoff.length ? handoff : allOptionIds(options);
+
 const PROTEIN_INIT = {
-  tissue:          Array.isArray(initial.tissue_ids) ? initial.tissue_ids : [],
+  tissue:          seedList(initial.tissue_ids, meta.tissues),
   minRpkm:         toNum(initial.min_rpkm, 0),
-  minDegree:       parseInt(initial.min_degree) || 0,
+  // Renamed from min_degree — it gates the global Protein.degree, not the degree
+  // inside the filtered subgraph. The old key still arrives from older links.
+  minDegree:       parseInt(initial.min_degree_global ?? initial.min_degree) || 0,
   minAvgScore:     toNum(initial.min_avg_score, 0),
   isoformMode:     initial.isoform_mode || "general",
 };
 const INTERACTION_INIT = {
   minScore:   toNum(initial.min_score, 0),
   maxScore:   initial.max_score === "" || initial.max_score == null ? 1 : toNum(initial.max_score, 1),
-  source:     Array.isArray(initial.source_ids) ? initial.source_ids : [],
-  experiment: Array.isArray(initial.experiment_ids) ? initial.experiment_ids : [],
-  type:       Array.isArray(initial.type_ids) ? initial.type_ids : [],
+  source:     seedList(initial.source_ids, meta.sources),
+  experiment: seedList(initial.experiment_ids, meta.experiments),
+  type:       seedList(initial.type_ids, meta.interaction_types),
 };
 
-// ── Reusable multi-select checkbox list (mirrors browse.jsx) ────────────────
-function CheckboxList({ items, selected, onToggle }) {
-  const selSet = new Set(selected.map(String));
-  return (
-    <div style={{
-      maxHeight:"160px", overflowY:"auto", border:"1px solid var(--hippie-border)",
-      borderRadius:"var(--radius-md)", padding:".4rem .6rem",
-    }}>
-      {items.length === 0 && <span className="text-muted-sm">None available</span>}
-      {items.map(it => (
-        <label key={it.id} style={{display:"flex",alignItems:"center",gap:".4rem",cursor:"pointer",padding:".15rem 0"}}>
-          <input type="checkbox" checked={selSet.has(String(it.id))}
-                 onChange={() => onToggle(it.id)} style={{cursor:"pointer"}} />
-          <span className="text-muted-sm" style={{color:"var(--hippie-ink)"}}>{it.name}</span>
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function toggleIn(arr, id) {
-  return arr.map(String).includes(String(id))
-    ? arr.filter(x => String(x) !== String(id))
-    : [...arr, id];
-}
-
 // ── Filter help text (definition lists shown in section-header pop-ups) ──────
-const PROTEIN_FILTERS_HELP = DL([
-  ["Expressed in any selected tissue", "Keep only proteins expressed in any of the selected tissues."],
-  ["Min. median RPKM ≥", "Minimum median expression (RPKM) required in the selected tissue(s). Appears once a tissue is selected."],
-  ["Min. degree ≥", "Minimum number of interaction partners (node degree) a protein must have."],
-  ["Min. avg score ≥", "Minimum mean confidence score across a protein's interactions."],
-  ["Isoforms", "General = canonical entries (plus any isoform you queried); Isoforms = only isoform entries; Both = no isoform filter."],
-]);
-
-const INTERACTION_FILTERS_HELP = DL([
-  ["Min. score ≥", "Keep interactions with confidence ≥ this value (0–1)."],
-  ["Max. score ≤", "Keep interactions with confidence ≤ this value. Sliders clamp so min ≤ max."],
-  ["Medium / High conf.", "One-click presets snapping Min. score to the release's median (medium) or Q3 (high) confidence threshold."],
-  ["Source database", "Keep interactions reported by any selected source database."],
-  ["Experiment type", "Keep interactions detected by any selected experimental method."],
-  ["Interaction type", "Keep interactions classified as any selected interaction type."],
-]);
-
+// The two filter panels live in filters.jsx (shared with the query pages); only
+// the sampling card is unique to this page.
 const SAMPLING_HELP = DL([
   ["Negative ratio", "Number of sampled negative (non-interacting) edges generated per positive edge."],
   ["Random seed", "RNG seed for reproducible negative sampling and train/val/test partitioning."],
 ]);
-
-// ── Filter panels ───────────────────────────────────────────────────────────
-function ProteinFilterPanel({ filters, onChange }) {
-  const set = (patch) => onChange({ ...filters, ...patch });
-  return (
-    <div className="hippie-card mb-0" style={{height:"100%"}}>
-      <div className="filter-section-label">
-        Protein Filters
-        <InfoPopover title="Protein Filters" html={PROTEIN_FILTERS_HELP} />
-      </div>
-      <label className="form-label">Expressed in any selected tissue</label>
-      <CheckboxList items={meta.tissues} selected={filters.tissue}
-        onToggle={id => set({ tissue: toggleIn(filters.tissue, id) })} />
-      {filters.tissue.length > 0 && (
-        <>
-          <label className="form-label mt-2">Min. median RPKM ≥</label>
-          <input type="number" className="form-control" min="0" step="1" placeholder="0"
-                 value={filters.minRpkm || ""}
-                 onChange={e => set({ minRpkm: parseFloat(e.target.value) || 0 })} />
-        </>
-      )}
-      <label className="form-label mt-3">
-        Min. degree ≥ <span className="mono">{filters.minDegree || 0}</span>
-      </label>
-      <input type="range" className="form-range mb-2" min="0" max="500" step="5"
-             value={filters.minDegree || 0}
-             onChange={e => set({ minDegree: parseInt(e.target.value) })} />
-      <label className="form-label">
-        Min. avg score ≥ <span className="mono">{(filters.minAvgScore || 0).toFixed(2)}</span>
-      </label>
-      <input type="range" className="form-range mb-3" min="0" max="1" step="0.01"
-             value={filters.minAvgScore || 0}
-             onChange={e => set({ minAvgScore: parseFloat(e.target.value) })} />
-      <div className="filter-section-label mt-3">Isoforms</div>
-      <div className="mode-toggle">
-        {[
-          ["general", "General"],
-          ["isoforms", "Isoforms"],
-          ["both", "Both"],
-        ].map(([k, label]) => (
-          <button key={k} className={filters.isoformMode === k ? "active" : ""}
-                  onClick={() => set({ isoformMode: k })}>
-            {label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function InteractionFilterPanel({ filters, onChange }) {
-  const set = (patch) => onChange({ ...filters, ...patch });
-  const { med, high } = confThresholds("interactions");
-  return (
-    <div className="hippie-card mb-0" style={{height:"100%"}}>
-      <div className="filter-section-label">
-        Interaction Filters
-        <InfoPopover title="Interaction Filters" html={INTERACTION_FILTERS_HELP} />
-      </div>
-      <label className="form-label">
-        Min. score ≥ <span className="mono">{(filters.minScore || 0).toFixed(2)}</span>
-      </label>
-      <input type="range" className="form-range mb-2" min="0" max="1" step="0.01"
-             value={filters.minScore || 0}
-             onChange={e => set({ minScore: Math.min(parseFloat(e.target.value), filters.maxScore ?? 1) })} />
-      <label className="form-label">
-        Max. score ≤ <span className="mono">{(filters.maxScore ?? 1).toFixed(2)}</span>
-      </label>
-      <input type="range" className="form-range mb-2" min="0" max="1" step="0.01"
-             value={filters.maxScore ?? 1}
-             onChange={e => set({ maxScore: Math.max(parseFloat(e.target.value), filters.minScore ?? 0) })} />
-      <div className="d-flex gap-2 flex-wrap mb-3">
-        <button
-          className="tag-chip example-chip"
-          style={CONF_CHIP_STYLE.med}
-          onClick={() => {
-            const v = parseFloat(med.toFixed(2));
-            set({ minScore: v, maxScore: (filters.maxScore ?? 1) < v ? 1 : filters.maxScore });
-          }}
-        >
-          Medium conf. ≥ {med.toFixed(2)}
-        </button>
-        <button
-          className="tag-chip example-chip"
-          style={CONF_CHIP_STYLE.high}
-          onClick={() => {
-            const v = parseFloat(high.toFixed(2));
-            set({ minScore: v, maxScore: (filters.maxScore ?? 1) < v ? 1 : filters.maxScore });
-          }}
-        >
-          High conf. ≥ {high.toFixed(2)}
-        </button>
-      </div>
-      <div className="row g-3">
-        <div className="col-md-4">
-          <label className="form-label">Source database</label>
-          <CheckboxList items={meta.sources} selected={filters.source}
-            onToggle={id => set({ source: toggleIn(filters.source, id) })} />
-        </div>
-        <div className="col-md-4">
-          <label className="form-label">Experiment type</label>
-          <CheckboxList items={meta.experiments} selected={filters.experiment}
-            onToggle={id => set({ experiment: toggleIn(filters.experiment, id) })} />
-        </div>
-        <div className="col-md-4">
-          <label className="form-label">Interaction type</label>
-          <CheckboxList items={meta.interaction_types} selected={filters.type}
-            onToggle={id => set({ type: toggleIn(filters.type, id) })} />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Statistics display primitives ───────────────────────────────────────────
 // InfoPopover + DL are imported from shared.jsx (used across query pages).
@@ -210,7 +70,7 @@ function InteractionFilterPanel({ filters, onChange }) {
 const PROTEIN_STATS_HELP = DL([
   ["Proteins", "Filtered proteins that still have at least one surviving interaction under the current interaction filter."],
   ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when the isoform mode is “Isoforms” or “Both”."],
-  ["Median degree", "Median number of surviving interactions per protein, counted only over edges that pass the current filter."],
+  ["Median degree (filtered set)", "Median number of surviving interactions per protein, counted only over edges that pass the current filter. This is a different quantity from the “Min. degree in all of HIPPIE” filter on the left, which is measured across the whole database — under a narrow source or score filter this number is usually far lower than that threshold."],
   ["Median avg score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
   ["Proteins filtered out", "Proteins removed by the protein-level filter (tissue, RPKM, min-degree, min-avg-score, isoform exclusion) relative to the full protein table. Separate from “Orphaned by filter”, which counts proteins that pass the protein filter but lose all edges."],
   ["Orphaned by filter", "Proteins that pass the protein-level filter (tissue, RPKM, …) but lost every interaction to the score/type/source filter, leaving degree 0. Excluded from the medians above."],
@@ -310,7 +170,7 @@ function ProteinStatsBox({ stats, loading, error }) {
             <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:".6rem"}}>
               <Metric label="Proteins" value={stats.n_proteins.toLocaleString()} />
               <Metric label="Isoforms" value={stats.n_isoforms.toLocaleString()} />
-              <Metric label="Median degree" value={stats.median_degree} />
+              <Metric label="Median degree (filtered set)" value={stats.median_degree} />
               <Metric label="Median avg score"
                       value={stats.median_avg_score == null ? "—" : stats.median_avg_score} />
               <Metric label="Proteins filtered out" value={stats.n_filtered_out.toLocaleString()} />
@@ -412,7 +272,8 @@ function paramSummary(p) {
   if (p.type_ids?.length)       parts.push(`${p.type_ids.length} type`);
   if (p.tissue_ids?.length)     parts.push(`${p.tissue_ids?.length} tissue`);
   if (p.min_rpkm > 0)           parts.push(`min rpkm≥${p.min_rpkm}`);
-  if (p.min_degree > 0)         parts.push(`min deg≥${p.min_degree}`);
+  const minDeg = p.min_degree_global ?? p.min_degree;   // pre-rename jobs
+  if (minDeg > 0)               parts.push(`min global deg≥${minDeg}`);
   if (p.min_avg_score > 0)      parts.push(`min avg≥${toNum(p.min_avg_score, 0).toFixed(2)}`);
   if (p.isoform_mode === "isoforms") parts.push("isoforms only");
   else if (p.isoform_mode === "both") parts.push("including isoforms");
@@ -654,13 +515,15 @@ function App() {
       // interaction-level
       min_score:  interactionFilters.minScore,
       max_score:  interactionFilters.maxScore,
-      source_ids: interactionFilters.source,
-      experiment_ids: interactionFilters.experiment,
-      type_ids:   interactionFilters.type,
+      // A full selection means the same thing as an empty one (the backend skips
+      // the predicate), so send [] rather than 190 ids on every Calculate.
+      source_ids: listNarrows(interactionFilters.source, meta.sources) ? interactionFilters.source : [],
+      experiment_ids: listNarrows(interactionFilters.experiment, meta.experiments) ? interactionFilters.experiment : [],
+      type_ids:   listNarrows(interactionFilters.type, meta.interaction_types) ? interactionFilters.type : [],
       // protein-level
-      tissue_ids: proteinFilters.tissue,
+      tissue_ids: listNarrows(proteinFilters.tissue, meta.tissues) ? proteinFilters.tissue : [],
       min_rpkm:   proteinFilters.minRpkm,
-      min_degree: proteinFilters.minDegree,
+      min_degree_global: proteinFilters.minDegree,
       min_avg_score: proteinFilters.minAvgScore,
       isoform_mode: proteinFilters.isoformMode,
       // sampling
@@ -739,15 +602,29 @@ function App() {
            train / validation / test splits (Kernighan–Lin bisection with balanced negative sampling).</p>
       </div>
 
+      {/* Nothing else on this page links to the ML guide, and a split built
+          without reading it is easy to get wrong (leakage, degree bias). */}
+      {cfg.mlGuideUrl && (
+        <div className="hippie-note hippie-note--info mb-3">
+          <strong>New to ML on PPI data?</strong> The{" "}
+          <a href={cfg.mlGuideUrl}>Machine Learning guide</a> explains how to choose
+          positives and negatives, where data leakage creeps into a PPI split, and how
+          to train and evaluate a baseline on what you generate here. It also links the
+          pre-computed splits on the{" "}
+          {cfg.downloadUrl ? <a href={cfg.downloadUrl}>Download page</a> : "Download page"}{" "}
+          if you would rather not configure your own.
+        </div>
+      )}
+
       {/* Protein filters + stats */}
       <div className="row g-3 mb-3">
-        <div className="col-lg-6"><ProteinFilterPanel filters={proteinFilters} onChange={setProteinFilters} /></div>
+        <div className="col-lg-6"><MLProteinFilterPanel meta={meta} filters={proteinFilters} onChange={setProteinFilters} /></div>
         <div className="col-lg-6"><ProteinStatsBox stats={proteinStats} loading={statsLoading} error={statsError} /></div>
       </div>
 
       {/* Interaction filters + stats */}
       <div className="row g-3 mb-3">
-        <div className="col-lg-6"><InteractionFilterPanel filters={interactionFilters} onChange={setInteractionFilters} /></div>
+        <div className="col-lg-6"><MLInteractionFilterPanel meta={meta} filters={interactionFilters} onChange={setInteractionFilters} /></div>
         <div className="col-lg-6"><InteractionStatsBox stats={interStats} loading={statsLoading} error={statsError} /></div>
       </div>
 

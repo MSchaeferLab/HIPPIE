@@ -21,6 +21,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+
 def _resolve_config() -> Path:
     """
     Locate ``sources.json``. Priority:

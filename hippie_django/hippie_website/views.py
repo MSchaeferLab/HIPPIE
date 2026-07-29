@@ -1884,26 +1884,113 @@ def _safe_float(value):
         return None
 
 
+def _vocab_options(
+    model,
+    categorise,
+    *,
+    count_field: str = "n_connected_interactions",
+    subcategorise=None,
+    extra_fields: tuple[str, ...] = (),
+) -> list[dict]:
+    """Option dicts for one filter vocabulary, ready for the filter controls.
+
+    Each option carries ``id``, ``name``, ``category`` (from
+    ``filter_categories``), an optional ``subcategory`` (a second grouping level
+    inside the category), and — when known — ``count`` from ``count_field``.
+    Rows nothing references are dropped: they are dead choices that only make
+    the list longer to scan.
+
+    The count columns are caches refreshed by ``hippie_update`` /
+    ``update_tissue_data``, so they read 0 everywhere on a database that has
+    never run them (a fresh deployment, a test fixture). Hiding on a zero count
+    would then empty the filter entirely, which is far worse than showing a few
+    unused options — so when *no* row has a count, the counter is treated as
+    unpopulated: nothing is hidden and no (misleading) zero counts are sent.
+
+    ``subcategorise`` receives the full row list as well as the row, because a
+    sub-group is only worth creating when several options share it (see the
+    tissue grouping in ``_filter_option_lists``).
+    """
+    fields = ("id", "name", count_field, *extra_fields)
+    rows = list(model.objects.order_by("name").values(*fields))
+    have_counts = any(row[count_field] for row in rows)
+    kept = [row for row in rows if row[count_field] > 0 or not have_counts]
+    options = []
+    for row in kept:
+        opt = {
+            "id": row["id"],
+            "name": row["name"],
+            "category": categorise(row),
+        }
+        if have_counts:
+            opt["count"] = row[count_field]
+        if subcategorise is not None:
+            sub = subcategorise(row, kept)
+            if sub:
+                opt["subcategory"] = sub
+        options.append(opt)
+    return options
+
+
 def _filter_option_lists() -> dict:
     """Tissue / source / experiment / interaction-type option lists for the
     filter controls. Shared by ``browse_filter_meta`` (the query pages) and
-    ``_ml_filter_meta`` (the ML-splits page). Sources are limited to those with
-    at least one connected interaction."""
+    ``_ml_filter_meta`` (the ML-splits page).
+
+    Every list is limited to options something actually references, and carries a
+    ``count`` plus a ``category`` the frontend renders as collapsible groups.
+    Tissues additionally carry a ``subcategory`` — their GTEx organ prefix — so
+    the 13 brain regions collapse behind one sub-heading instead of filling the
+    Nervous system group.
+    """
     from .models import Source, ExperimentType
+    from .filter_categories import (
+        EXPERIMENT_CATEGORY_ORDER,
+        INTERACTION_TYPE_CATEGORY_ORDER,
+        SOURCE_CATEGORY_ORDER,
+        TISSUE_CATEGORY_ORDER,
+        experiment_category,
+        interaction_type_category,
+        source_category,
+        tissue_category,
+        tissue_prefix,
+    )
+
+    def _tissue_subcategory(row, rows) -> str:
+        """Organ prefix, but only where the organ has more than one tissue.
+
+        A lone organ ("Lung", "Pituitary") would otherwise get a sub-heading
+        wrapping a single checkbox; those sit directly under their body system.
+        """
+        prefix = tissue_prefix(row["name"])
+        if sum(1 for r in rows if tissue_prefix(r["name"]) == prefix) < 2:
+            return ""
+        return prefix
 
     return {
-        "tissues": list(Tissue.objects.order_by("name").values("id", "name")),
-        "sources": list(
-            Source.objects.filter(n_connected_interactions__gt=0)
-            .order_by("name")
-            .values("id", "name")
+        "tissues": _vocab_options(
+            Tissue,
+            lambda row: tissue_category(row["name"]),
+            count_field="n_expressed_genes",
+            subcategorise=_tissue_subcategory,
         ),
-        "experiments": list(
-            ExperimentType.objects.order_by("name").values("id", "name")
+        "sources": _vocab_options(Source, lambda row: source_category(row["name"])),
+        "experiments": _vocab_options(
+            ExperimentType,
+            lambda row: experiment_category(row["psi_mi_code"], row["name"]),
+            extra_fields=("psi_mi_code",),
         ),
-        "interaction_types": list(
-            InteractionType.objects.order_by("name").values("id", "name")
+        "interaction_types": _vocab_options(
+            InteractionType, lambda row: interaction_type_category(row["name"])
         ),
+        # Display order for the group headers, so the frontend does not have to
+        # hardcode a copy of the category vocabulary.
+        "category_order": {
+            "tissues": list(TISSUE_CATEGORY_ORDER),
+            "sources": list(SOURCE_CATEGORY_ORDER),
+            "experiments": list(EXPERIMENT_CATEGORY_ORDER),
+            "interaction_types": list(INTERACTION_TYPE_CATEGORY_ORDER),
+        },
     }
 
 
@@ -1915,10 +2002,18 @@ def browse_filter_meta(request):
     Returns the data needed to populate the filter controls:
     {
         "tissues":     [{ "id": <int>, "name": "<str>" }, ...],
-        "sources":     [{ "id": <int>, "name": "<str>" }, ...],
-        "experiments": [{ "id": <int>, "name": "<str>" }, ...],
-        "interaction_types": [{ "id": <int>, "name": "<str>" }, ...]
+        "sources":     [{ "id": <int>, "name": "<str>",
+                          "count": <int>, "category": "<str>" }, ...],
+        "experiments": [ ...same shape as sources... ],
+        "interaction_types": [ ...same shape as sources... ],
+        "category_order": { "sources": ["<str>", ...],
+                            "experiments": [...],
+                            "interaction_types": [...] }
     }
+
+    ``count`` is the number of interactions carrying that evidence;
+    ``category`` groups the option in the UI (see ``filter_categories``).
+    Options with a zero count are omitted.
     """
     return JsonResponse(_filter_option_lists())
 
@@ -2171,8 +2266,15 @@ def _validate_split_params(body: dict) -> dict:
 
     Keys mirror ``SplitParams`` field names exactly so the dict can be splatted
     into ``SplitParams(**params)`` (see tasks.run_split_job).
+
+    ``min_degree_global`` was called ``min_degree`` before it was renamed to say
+    which degree it gates on (the global ``Protein.degree`` column, not the
+    degree within the filtered subgraph). The old key is still accepted so
+    Browse → ML Splits deep links and bookmarked URLs keep working.
     """
     from django.core.exceptions import BadRequest
+
+    min_degree = body.get("min_degree_global", body.get("min_degree", 0))
 
     try:
         params = {
@@ -2185,7 +2287,7 @@ def _validate_split_params(body: dict) -> dict:
             # protein-level
             "tissue_ids": [int(x) for x in body.get("tissue_ids") or []],
             "min_rpkm": float(body.get("min_rpkm", 0.0)),
-            "min_degree": int(body.get("min_degree", 0)),
+            "min_degree_global": int(min_degree or 0),
             "min_avg_score": float(body.get("min_avg_score", 0.0)),
             "isoform_mode": parse_isoform_mode(body.get("isoform_mode")),
             # negative sampling
@@ -2202,8 +2304,8 @@ def _validate_split_params(body: dict) -> dict:
         raise BadRequest("max_score must be >= min_score")
     if not 0.0 <= params["min_avg_score"] <= 1.0:
         raise BadRequest("min_avg_score must be between 0.0 and 1.0")
-    if params["min_degree"] < 0:
-        raise BadRequest("min_degree must be >= 0")
+    if params["min_degree_global"] < 0:
+        raise BadRequest("min_degree_global must be >= 0")
     if params["min_rpkm"] < 0:
         raise BadRequest("min_rpkm must be >= 0")
     if not 0.1 <= params["neg_ratio"] <= 10.0:
@@ -2236,7 +2338,10 @@ def ml_splits_view(request):
         # protein-level
         "tissue_ids": [int(t) for t in request.GET.getlist("tissue") if t.isdigit()],
         "min_rpkm": _float("min_rpkm"),
-        "min_degree": request.GET.get("min_degree", ""),
+        # Accept the pre-rename key too — Browse links and bookmarks may carry it.
+        "min_degree_global": request.GET.get(
+            "min_degree_global", request.GET.get("min_degree", "")
+        ),
         "min_avg_score": _float("min_avg_score"),
         "isoform_mode": parse_isoform_mode(request.GET.get("isoform_mode")),
     }
@@ -2272,7 +2377,7 @@ def _protein_filtered_qs(params):
         pqs,
         tissue_ids=params.tissue_ids,
         min_rpkm=params.min_rpkm,
-        min_degree=params.min_degree,
+        min_degree=params.min_degree_global,
         min_avg_score=params.min_avg_score,
     )
 
@@ -2451,7 +2556,7 @@ def browse_splits_stats(request):
     body, err = _parse_json_body(request)
     if err:
         return err
-    params = SplitParams(**_validate_split_params(body))
+    params = SplitParams.from_payload(_validate_split_params(body))
     iqs = build_interaction_queryset(params)
     interaction_stats, degree_by_node, score_sum_by_node = _interaction_stats(iqs)
     return JsonResponse(

@@ -9,6 +9,26 @@ from ._sources import data_path
 MIN_MEDIAN_RPKM = 1.0
 
 
+def recompute_tissue_gene_counts() -> None:
+    """Set ``Tissue.n_expressed_genes`` to the number of linked GeneTissue rows.
+
+    Mirrors ``hippie_update._recompute_vocab_interaction_counts`` for the tissue
+    vocabulary: the filter option list reads this scalar instead of grouping over
+    ``gene2tissue`` per request. Importable so tests and a reimport can refresh
+    it without re-parsing the GTEx matrix.
+    """
+    from django.db.models import Count
+
+    counts = {
+        row["pk"]: row["cnt"]
+        for row in Tissue.objects.annotate(cnt=Count("expressed_genes")).values(
+            "pk", "cnt"
+        )
+    }
+    objs = [Tissue(pk=pk, n_expressed_genes=cnt) for pk, cnt in counts.items()]
+    Tissue.objects.bulk_update(objs, ["n_expressed_genes"], batch_size=1_000)
+
+
 def _parse_header(header_line: str, sample_to_verbose: dict[str, str]) -> dict:
     samples = header_line.strip().split("\t")[2:]
     tissue_dict: dict = dict()
@@ -205,6 +225,8 @@ class Command(BaseCommand):
             )
 
         self.stdout.write("")
+        self.stdout.write("Refreshing denormalised per-tissue gene counts...")
+        recompute_tissue_gene_counts()
         self.stdout.write(
             self.style.SUCCESS(
                 f"Done — {created:,} GeneTissue rows created, {updated:,} updated."

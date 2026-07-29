@@ -36,12 +36,14 @@
     nonintMedian: {{ current_release.nonint_median|default:0.00 }},
     nonintQ3: {{ current_release.nonint_q3|default:0.00 }},
     bothMedian: {{ current_release.both_median|default:0.00 }},
-    bothQ3: {{ current_release.both_q3|default:0.00 }}
+    bothQ3: {{ current_release.both_q3|default:0.00 }},
+    {# Names the expression data source in the tissue filter help text. #}
+    gtexVersion: "{{ current_release.gtex_version|escapejs }}"
   };
 </script>
 {% else %}
 <script>
-  window.HIPPIE_RELEASE = { intMedian: 0.00, intQ3: 0.00, nonintMedian: 0.00, nonintQ3: 0.00, bothMedian: 0.00, bothQ3: 0.00 };
+  window.HIPPIE_RELEASE = { intMedian: 0.00, intQ3: 0.00, nonintMedian: 0.00, nonintQ3: 0.00, bothMedian: 0.00, bothQ3: 0.00, gtexVersion: "" };
 </script>
 {% endif %}
 

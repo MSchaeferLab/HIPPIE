@@ -284,6 +284,48 @@
   </div>
 </div>
 
+{# ── Pre-computed ML splits ── #}
+<div class="hippie-card mb-4" id="ml-splits">
+  <span class="section-label">Pre-computed ML splits</span>
+  <p class="text-muted-sm mb-3">
+    Ready-made train / validation / test partitions of the current release, for training
+    protein–protein interaction predictors without configuring anything. Each archive is a
+    <code>.tar.gz</code> holding the three labelled sets (positives plus sampled negatives).
+    Read the <a href="{% url 'hippie_website:machine_learning' %}">Machine Learning guide</a>
+    first — it covers the data-leakage pitfalls these splits are designed around. For a split
+    filtered your own way (by tissue, experiment type, source database, node degree, …), build
+    one on the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page.
+  </p>
+  <div style="overflow-x:auto;">
+    <table class="format-table">
+      <thead>
+        <tr>
+          <th>Dataset</th>
+          <th>Included interactions</th>
+          <th>Download</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>High confidence</td>
+          <td>score ≥ {{ current_release.int_q3|default:0.00|floatformat:2 }} (release Q3)</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.splits.high.tar.gz' %}">HIPPIE-current.splits.high.tar.gz</a></td>
+        </tr>
+        <tr>
+          <td>High + medium confidence</td>
+          <td>score ≥ {{ current_release.int_median|default:0.00|floatformat:2 }} (release median)</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.splits.medium-high.tar.gz' %}">HIPPIE-current.splits.medium-high.tar.gz</a></td>
+        </tr>
+        <tr>
+          <td>Whole database</td>
+          <td>every interaction, no score threshold</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.splits.all.tar.gz' %}">HIPPIE-current.splits.all.tar.gz</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {# ── Full version history (ported from original download page) ── #}
 <div class="hippie-card mb-4">
   <span class="section-label">Full HIPPIE datasets</span>
@@ -390,6 +432,22 @@
       </tbody>
     </table>
   </div>
+</div>
+
+{# ── Programmatic access ── #}
+<div class="hippie-card mb-4" id="programmatic-access">
+  <span class="section-label">Programmatic access</span>
+  <p class="text-muted-sm mb-0 mt-2">
+    If you need HIPPIE inside a pipeline rather than on disk, the same data is reachable as
+    JSON over a small REST API. It covers the queries this site runs — interactions of a set
+    of proteins, pairwise lookups, network expansion, the paginated proteome browser and a
+    bulk TSV export — and takes the same filters as the web interface (confidence score,
+    source database, experiment type, interaction type, tissue expression, isoforms). The
+    ML split jobs above can be built and fetched the same way. No key or registration is
+    needed. See the
+    <a href="{% url 'hippie_website:information' %}#api">REST API reference</a>
+    for the endpoint list and parameters.
+  </p>
 </div>
 
 {# ── Experimental scores ── #}

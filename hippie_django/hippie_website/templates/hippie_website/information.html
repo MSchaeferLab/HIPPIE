@@ -266,9 +266,13 @@
     <ul>
       <li><code>show</code> = <code>interactions</code>, <code>noninteractions</code> or <code>both</code>.</li>
       <li><code>min_score</code> / <code>max_score</code> = confidence-score bounds (0–1).</li>
-      <li><code>source</code>, <code>experiment</code>, <code>interaction_type</code>, <code>tissue</code> = numeric ids <em>(repeatable)</em>.</li>
+      <li><code>source</code>, <code>experiment</code>, <code>interaction_type</code>, <code>tissue</code> = numeric ids <em>(repeatable)</em>.
+        Values within one parameter are OR-ed; different parameters are AND-ed.
+        <strong>Omit a parameter to disable that filter</strong> — there is no way to
+        request "none of them", because a result matching no source database does not exist.</li>
       <li><code>min_rpkm</code> = minimum tissue expression (used together with <code>tissue</code>).</li>
-      <li><code>min_degree</code>, <code>min_avg_score</code> = protein-level thresholds.</li>
+      <li><code>min_degree</code>, <code>min_avg_score</code> = protein-level thresholds, both measured
+        across all of HIPPIE rather than within the filtered result set.</li>
       <li><code>reviewed</code> = <code>reviewed</code>, <code>unreviewed</code>, or <code>both</code>.</li>
       <li><code>isoform_mode</code> = <code>general</code>, <code>isoforms</code>, or <code>both</code>.</li>
     </ul>
@@ -333,6 +337,51 @@
       when the cap is reached.
     </p>
 
+    <p class="mt-4 mb-1"><strong>Machine-learning splits</strong></p>
+    <p>
+      Building a split is a background job, so it runs in three steps: POST the parameters to
+      start it, poll the job until it reports <code>DONE</code>, then download the archive.
+      Unlike the endpoints above, these take a JSON request body (<code>Content-Type:
+      application/json</code>) rather than query parameters, and the vocabulary filters are
+      arrays named <code>source_ids</code>, <code>experiment_ids</code>, <code>type_ids</code>
+      and <code>tissue_ids</code> instead of the repeatable singular <code>source</code>,
+      <code>experiment</code>, <code>interaction_type</code> and <code>tissue</code>.
+    </p>
+    <div class="hippie-card--muted mb-2">
+      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>POST</b> /api/browse/splits/<br><b>POST</b> /api/browse/splits/stats/<br><b>GET</b> &nbsp;/api/browse/splits/&lt;job_id&gt;/<br><b>GET</b> &nbsp;/api/browse/splits/&lt;job_id&gt;/download/</code>
+    </div>
+    <p>
+      <code>POST /api/browse/splits/</code> queues a job and answers <code>202</code> with
+      <code>{ job_id, status }</code>.
+      <code>POST /api/browse/splits/stats/</code> takes the same body but runs no job — it
+      returns <code>{ protein, interaction }</code> summary statistics for the filter set, which
+      is what the preview boxes on the
+      <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page show.
+      <code>GET /api/browse/splits/&lt;job_id&gt;/</code> reports
+      <code>{ status, step, progress, params, created_at, queue_position, summary, error,
+      download_url }</code>; <code>status</code> is <code>PENDING</code>,
+      <code>RUNNING</code>, <code>DONE</code> or <code>FAILED</code>, and
+      <code>download_url</code> is filled in only once the job is <code>DONE</code>.
+      <code>GET /api/browse/splits/&lt;job_id&gt;/download/</code> then streams the ZIP archive
+      of the labelled train / validation / test sets; it answers <code>404</code> until the job
+      finishes.
+    </p>
+    <p class="mb-1">Accepted body keys (all optional — every one has a default):</p>
+    <ul>
+      <li><code>min_score</code> / <code>max_score</code> = confidence-score bounds (0–1, default 0 and 1).</li>
+      <li><code>source_ids</code>, <code>experiment_ids</code>, <code>type_ids</code>, <code>tissue_ids</code> = arrays of numeric ids. An empty or omitted array applies no filter.</li>
+      <li><code>min_rpkm</code> = minimum tissue expression, used together with <code>tissue_ids</code>.</li>
+      <li><code>min_degree_global</code>, <code>min_avg_score</code> = protein-level thresholds, both evaluated over the whole database rather than the filtered subgraph. The older name <code>min_degree</code> is still accepted.</li>
+      <li><code>isoform_mode</code> = <code>general</code>, <code>isoforms</code> or <code>both</code>.</li>
+      <li><code>neg_ratio</code> = sampled negatives per positive (0.1–10.0, default 1.0).</li>
+      <li><code>seed</code> = integer RNG seed, so a split can be reproduced exactly.</li>
+    </ul>
+    <p>
+      Out-of-range values answer <code>400</code> with the failing constraint in the message.
+      Ready-made splits of the current release, if you do not need your own filters, are on the
+      <a href="{% url 'hippie_website:download' %}#ml-splits">download page</a>.
+    </p>
+
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>
@@ -362,10 +411,16 @@
       <li><strong>Interaction type</strong> — keep interactions classified as any of the selected
         interaction types.</li>
       <li><strong>Tissue expression</strong> — keep interactions whose proteins are expressed in any of
-        the selected tissues; an optional minimum median RPKM raises the required expression level.</li>
+        the selected tissues; an optional minimum median RPKM raises the required expression level.
+        Expression is median gene-level RNA-seq from
+        GTEx{% if current_release.gtex_version %} {{ current_release.gtex_version }}{% endif %}.
+        Only genes reaching a median of 1.0&nbsp;RPKM in at least one tissue were imported, so a
+        threshold below 1.0 has no additional effect.</li>
       <li><strong>Protein filters</strong> — restrict to proteins by <em>degree</em> (the number of
         interactions touching a protein) and by <em>average score</em> (the mean confidence across those
-        interactions).</li>
+        interactions). Both are measured across the whole of HIPPIE, independently of the source,
+        score and type filters above — so a protein can pass a high degree threshold and still
+        contribute only a handful of interactions to a narrowly filtered result set.</li>
       <li><strong>Review status</strong> — <em>reviewed</em> (manually curated UniProtKB/Swiss-Prot
         entries), <em>unreviewed</em> (automatically annotated UniProtKB/TrEMBL entries), or
         <em>both</em>.</li>
@@ -373,6 +428,14 @@
         you query it explicitly), <em>isoforms</em> (interactions with at least one non-canonical
         isoform partner), or <em>both</em>. See the <a href="#isoforms">Isoforms</a> section below.</li>
     </ul>
+    <p class="text-muted-sm">
+      The source, experiment type, interaction type and tissue lists start with every option
+      ticked and are grouped by kind, with the number of interactions carrying each piece of
+      evidence shown beside it. Options no interaction uses are not listed at all. Ticks within
+      one list are combined with OR; different lists are combined with AND. Clearing a list
+      <em>removes</em> that filter rather than excluding everything — an unticked list and a fully
+      ticked one return the same results.
+    </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>

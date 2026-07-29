@@ -10,7 +10,10 @@ import {
   FilterBox,
   FilterToggleButton,
   FILTER_DEFAULTS,
+  defaultFilters,
   filtersToQuery,
+  listNarrows,
+  useAllSelectedDefaults,
   countActiveFilters,
   filtersEqual,
   useFilterMeta,
@@ -55,6 +58,9 @@ function App() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [appliedSearch, setAppliedSearch] = useState("");
   const [appliedFilters, setAppliedFilters] = useState(FILTER_DEFAULTS);
+  // Tick every option once the lists arrive. Seeds draft and applied together so
+  // the page does not come up dirty.
+  useAllSelectedDefaults(meta, [setFilters, setAppliedFilters]);
 
   // ── Server pagination + sort (owned here, driven into the shared tables) ──
   const [page, setPage] = useState(1);
@@ -68,7 +74,7 @@ function App() {
   const abortRef = useRef(null);
 
   const controls = mode === "proteins" ? PROTEIN_CONTROLS : INTERACTION_CONTROLS;
-  const activeCount = countActiveFilters(filters, controls);
+  const activeCount = countActiveFilters(filters, controls, meta);
   const dirty = search !== appliedSearch || !filtersEqual(filters, appliedFilters);
 
   // Commit the draft search + filters → applied, back to page 1.
@@ -103,8 +109,10 @@ function App() {
     setFiltersOpen(false);
     setSearch("");
     setAppliedSearch("");
-    setFilters(FILTER_DEFAULTS);
-    setAppliedFilters(FILTER_DEFAULTS);
+    // defaultFilters, not FILTER_DEFAULTS — a reset after the option lists have
+    // loaded should land on "everything ticked", not on empty boxes.
+    setFilters(defaultFilters(meta));
+    setAppliedFilters(defaultFilters(meta));
     setSort(DEFAULT_SORT[m]);
   };
 
@@ -120,7 +128,7 @@ function App() {
 
   // Single source of truth for query params (list + export share the filters).
   const paramsFor = (list) => {
-    const p = filtersToQuery(appliedFilters);
+    const p = filtersToQuery(appliedFilters, meta);
     if (appliedSearch.trim()) p.set("q", appliedSearch.trim());
     p.set("sort", sort.key);
     p.set("dir", sort.dir);
@@ -185,18 +193,24 @@ function App() {
   const handleGenerateSplits = () => {
     const p = new URLSearchParams();
     const f = appliedFilters;
+    // Only hand over lists that actually narrow: an all-ticked list means "no
+    // filter", and passing every id would make the ML Splits page look filtered.
+    const passList = (param, selected, options) => {
+      if (listNarrows(selected, options)) selected.forEach((v) => p.append(param, v));
+    };
+    const tissueNarrows = listNarrows(f.tissue, meta.tissues);
     if (mode === "proteins") {
-      f.tissue.forEach((t) => p.append("tissue", t));
-      f.source.forEach((s) => p.append("source", s));
-      if (f.minDegree > 0) p.set("min_degree", f.minDegree);
+      passList("tissue", f.tissue, meta.tissues);
+      passList("source", f.source, meta.sources);
+      if (f.minDegree > 0) p.set("min_degree_global", f.minDegree);
       if (f.minAvgScore > 0) p.set("min_avg_score", f.minAvgScore);
-      if (f.tissue.length > 0 && f.minRpkm > 0) p.set("min_rpkm", f.minRpkm);
+      if (tissueNarrows && f.minRpkm > 0) p.set("min_rpkm", f.minRpkm);
       if (f.isoformMode !== "general") p.set("isoform_mode", f.isoformMode);
     } else {
       if (f.minScore > 0) p.set("min_score", f.minScore);
       if (f.maxScore < 1) p.set("max_score", f.maxScore);
-      f.source.forEach((s) => p.append("source", s));
-      f.experiment.forEach((e) => p.append("experiment", e));
+      passList("source", f.source, meta.sources);
+      passList("experiment", f.experiment, meta.experiments);
       if (f.isoformMode !== "general") p.set("isoform_mode", f.isoformMode);
     }
     const qs = p.toString();
