@@ -64,6 +64,45 @@ services:
       web:
         condition: service_started
 
+  mcp:
+    # Same image as web — it needs the same Django app and settings — but served
+    # by uvicorn instead of gunicorn, because the MCP streamable-HTTP transport
+    # is ASGI and gunicorn here is running WSGI.
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Neither applies to this service: the web container owns migrations and
+      # static files.
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+    command:
+      - uvicorn
+      - hippie_mcp.asgi:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+    networks:
+      - hippie_net
+    # Reach the MariaDB running on the Docker host (DB_HOST=host.docker.internal).
+    extra_hosts:
+      - "host.docker.internal:172.18.0.1"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # /health deliberately does not touch the database — it answers "is this
+      # process up", which is what the proxy needs to know.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   apache:
     build:
       context: ./docker/apache
@@ -81,6 +120,7 @@ services:
       - hippie_net
     depends_on:
       - web
+      - mcp
 
 networks:
   hippie_net:

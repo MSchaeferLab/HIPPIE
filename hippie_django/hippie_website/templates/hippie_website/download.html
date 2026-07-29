@@ -450,6 +450,29 @@
   </p>
 </div>
 
+{# ── MCP server ── #}
+<div class="hippie-card mb-4" id="mcp-server">
+  <span class="section-label">AI assistants (MCP)</span>
+  <p class="text-muted-sm mb-0 mt-2">
+    HIPPIE also speaks the <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">Model
+    Context Protocol</a>, so an AI assistant can query it directly instead of you pasting results
+    into one. Add the endpoint below to any MCP-capable client — there is nothing to install and no
+    key to request.
+  </p>
+  <pre class="mt-2 mb-2" style="font-size:.8rem; background:var(--hippie-surface-muted, #f6f6f4); padding:.75rem; border-radius:.35rem; overflow-x:auto;"><code>{{ request.scheme }}://{{ request.get_host }}{% url 'hippie_website:index' %}mcp</code></pre>
+  <p class="text-muted-sm mb-0">
+    Five tools are available: <code>resolve_protein</code> (which HIPPIE protein an identifier
+    refers to), <code>get_interactions</code> (a protein's partners), <code>check_pairs</code>
+    (whether specific pairs interact), <code>get_interaction_detail</code> (the PMIDs, source
+    databases and experimental methods behind one interaction), and
+    <code>list_filter_options</code> (the filter vocabulary). Filters take the same values as the
+    web interface, and also accept a category label such as
+    <em>Two-hybrid&nbsp;&amp;&nbsp;complementation</em> in place of listing every individual
+    method. Results are capped per call and always report the full match count, so a truncated
+    answer is visibly truncated.
+  </p>
+</div>
+
 {# ── Experimental scores ── #}
 <div class="hippie-card mb-4">
   <span class="section-label section-label--inline">Experimental scores</span>

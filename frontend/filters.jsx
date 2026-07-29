@@ -327,7 +327,7 @@ function Heading({ label, open, nSel, total, volume, onToggle, onAll, onNone, de
           textAlign: "left",
           color: "var(--hippie-ink)",
           fontSize: depth ? ".74rem" : ".78rem",
-          fontWeight: depth ? 500 : 600,
+          fontWeight: 400,
         }}
       >
         <i

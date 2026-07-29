@@ -16,8 +16,6 @@ All database access goes through the custom managers defined in managers.py:
 import hashlib
 import json
 import os
-import re
-from dataclasses import dataclass, field
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models import (
@@ -39,24 +37,64 @@ from django.views.decorators.http import require_GET, require_POST
 from .models import (
     Interaction,
     Isoform,
-    OrthologInteraction,
     Protein,
-    Tissue,
     NonInteraction,
     SplitJob,
-    InteractionType,
     ProteinSynonym,
     GeneSynonym,
 )
 
 from .tasks import run_split_job
 from .query_filters import (
-    apply_interaction_level_filters,
     apply_protein_level_filters,
-    canonical_or_queried_q,
     group_by_side,
     isoform_only_q,
     parse_isoform_mode,
+)
+
+# The query semantics live in services.queries so the MCP server runs the same
+# code the website does. Imported under the original private names so every call
+# site below — and the existing tests, which import these from this module —
+# keeps working unchanged.
+from .services.queries import (  # noqa: F401
+    MAX_QUERY_PROTEINS,
+    CommonFilters,
+    apply_common_interaction_filters as _apply_interaction_level_filters,
+    get_isoforms as _get_isoforms,
+    int_id_list as _int_id_list,
+    interaction_edge_qs as _interaction_edge_qs,
+    interaction_matches as _interaction_matches,
+    interaction_rows as _interaction_rows,
+    noninteraction_edge_qs as _noninteraction_edge_qs,
+    protein_display as _protein_display,
+    protein_ids_from_raw as _protein_ids_from_raw,
+    protein_passes as _protein_passes,
+    resolve_proteins as _resolve_proteins,
+    safe_float as _safe_float,
+    safe_int as _safe_int,
+    split_identifiers as _split_identifiers,
+    tissue_pk_set as _tissue_pk_set,
+)
+from .services.pairs import (  # noqa: F401
+    BATCH_LIMIT,
+    MAX_PAIRS,
+    check_pairs as _check_pairs,
+    pair_not_found as _pair_not_found,
+    pair_row as _pair_row,
+    resolve_interaction_pair as _resolve_interaction_pair,
+    resolve_interaction_pair_with_isoforms as _resolve_interaction_pair_with_isoforms,
+    resolve_noninteraction_pair as _resolve_noninteraction_pair,
+    resolve_pair as _resolve_pair,
+)
+from .services.vocab import (  # noqa: F401
+    filter_option_lists as _filter_option_lists,
+    vocab_options as _vocab_options,
+)
+from .services.detail import (  # noqa: F401
+    digger_ctx as _digger_ctx,
+    interaction_detail_context as _interaction_detail_context,
+    noninteraction_detail_context as _noninteraction_detail_context,
+    protein_detail_ctx as _protein_detail_ctx,
 )
 
 
@@ -73,106 +111,6 @@ def _parse_json_body(request):
         return json.loads(request.body), None
     except json.JSONDecodeError:
         return None, JsonResponse({"error": "Invalid JSON body."}, status=400)
-
-
-def _protein_display(protein: Protein, isoform_uid: str | None = None) -> dict:
-    """
-    Return a compact serialisable dict for a Protein instance.
-
-    Assumes `gene` has already been select_related (either by the manager's
-    with_proteins() or an explicit select_related("gene")).
-
-    isoform_uid: pass the isoform-specific accession (e.g. "P38398-2") explicitly
-    when the protein object was fetched as a Protein (not Isoform) queryset.
-    """
-    gene = protein.gene
-    return {
-        "id": protein.pk,
-        "name": gene.entrez_name or protein.uniprot_name,
-        "uniprot_id": protein.uniprot_accession,
-        "gene_id": gene.entrez_id or None,
-        "symbol": gene.entrez_name or protein.uniprot_name,
-        "is_reviewed": protein.is_reviewed,
-        # isoform_uid is set when this protein is an isoform; None for canonical.
-        "isoform_uniprot_id": isoform_uid
-        if isoform_uid is not None
-        else getattr(protein, "isoform_uniprot_id", None),
-    }
-
-
-# Max distinct identifiers accepted by the single-protein search endpoints
-# (Protein Query, Browse). Mirrors BATCH_LIMIT=200 on the interaction endpoint.
-MAX_QUERY_PROTEINS = 50
-_IDENT_SPLIT = re.compile(r"[\s,;]+")
-
-
-def _split_identifiers(raw: str) -> list[str]:
-    """
-    Split a raw search string into identifiers on comma, whitespace (space,
-    tab, newline) or semicolon. Trims each token and drops empties, preserving
-    input order while removing duplicates.
-    """
-    seen: set[str] = set()
-    out: list[str] = []
-    for tok in _IDENT_SPLIT.split(raw.strip()):
-        tok = tok.strip()
-        if tok and tok not in seen:
-            seen.add(tok)
-            out.append(tok)
-    return out
-
-
-def _protein_ids_from_raw(raw: str) -> tuple[list[int], list[str]]:
-    """
-    Resolve a delimited string of identifiers (comma/whitespace/semicolon) to
-    Protein PKs. Returns (resolved_pks, unresolved_identifiers).
-    """
-    protein_ids: list[int] = []
-    unresolved: list[str] = []
-    seen: set[int] = set()
-    for ident in _split_identifiers(raw):
-        pk = Protein.objects.resolve(ident)
-        if pk is not None:
-            pk = pk.values_list("pk", flat=True).first()
-
-        if pk is not None and pk not in seen:
-            protein_ids.append(pk)
-            seen.add(pk)
-        elif pk is None:
-            unresolved.append(ident)
-    return protein_ids, unresolved
-
-
-def _get_isoforms(protein_pk: int) -> list:
-    """
-    Given a canonical protein PK, return all its Isoform objects.
-
-    Returns an empty list when the protein is already an isoform — the
-    spec says isoform inputs are never expanded further.
-
-    Resolution path:
-        protein_pk → Protein.uniprot_accession (e.g. "P38398")
-                   → Isoform.uniprot_accession startswith accession + "-"
-    """
-    # If this protein IS itself an isoform, don't expand.
-    if Isoform.objects.filter(protein_ptr_id=protein_pk).exists():
-        return []
-
-    try:
-        accession = Protein.objects.values_list("uniprot_accession", flat=True).get(
-            pk=protein_pk
-        )
-    except Protein.DoesNotExist:
-        return []
-
-    if not accession:
-        return []
-
-    return list(
-        Isoform.objects.filter(
-            uniprot_accession__startswith=accession + "-"
-        ).select_related("gene")
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -192,51 +130,12 @@ def protein_query_view(request):
 
 
 # ---------------------------------------------------------------------------
-# Shared query filters (Protein Query + Interaction Query — Batch 3)
+# Shared query filters — request-side builders
 #
-# One filter contract shared by the two React query pages so the single
-# FilterBox component emits identical params everywhere. Interaction-level
-# filters (score / source / experiment / interaction-type) are applied to an
-# Interaction queryset (or matched against a prefetched Interaction); protein-
-# level filters (degree / avg-score / reviewed / tissue) are checked per
-# Protein in Python — query-page result sets are small (one protein's partners,
-# or a user-supplied pair list), so no full-table scan is involved.
+# The contract itself (CommonFilters, and the helpers that apply it) lives in
+# services.queries so the MCP tools share it. What stays here is the two
+# request-shaped ways of populating it: GET query params and a JSON POST body.
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class CommonFilters:
-    show: str = "interactions"  # interactions | noninteractions | both
-    isoform_mode: str = "general"  # general | isoforms | both
-    min_score: float | None = None
-    max_score: float | None = None
-    source_ids: list[int] = field(default_factory=list)
-    experiment_ids: list[int] = field(default_factory=list)
-    interaction_type_ids: list[int] = field(default_factory=list)
-    tissue_ids: list[int] = field(default_factory=list)
-    min_rpkm: float | None = None
-    min_degree: int | None = None
-    min_avg_score: float | None = None
-    reviewed: str = "both"  # both | reviewed | unreviewed
-
-    @property
-    def has_source_like(self) -> bool:
-        """True when a filter is active that a NonInteraction can never satisfy
-        (non-interactions carry no sources / experiments / interaction types)."""
-        return bool(self.source_ids or self.experiment_ids or self.interaction_type_ids)
-
-    @property
-    def has_protein_level(self) -> bool:
-        return (
-            self.min_degree is not None
-            or self.min_avg_score is not None
-            or self.reviewed != "both"
-            or bool(self.tissue_ids)
-        )
-
-
-def _int_id_list(values) -> list[int]:
-    return [int(v) for v in values if str(v).isdigit()]
 
 
 def _build_common_filters(get_scalar, get_list) -> CommonFilters:
@@ -282,115 +181,6 @@ def _common_filters_from_body(body: dict) -> CommonFilters:
     return _build_common_filters(get_scalar, get_list)
 
 
-def _apply_interaction_level_filters(qs, f: CommonFilters):
-    """Apply the CommonFilters interaction-level gates (score / source /
-    experiment / interaction-type) via the shared query_filters helper."""
-    return apply_interaction_level_filters(
-        qs,
-        min_score=f.min_score,
-        max_score=f.max_score,
-        source_ids=f.source_ids,
-        experiment_ids=f.experiment_ids,
-        type_ids=f.interaction_type_ids,
-    )
-
-
-def _interaction_matches(interaction, f: CommonFilters) -> bool:
-    """Check a single (prefetched) Interaction against the interaction-level
-    filters. Requires sources / experiments / interaction_types prefetched."""
-    if f.min_score is not None and interaction.score < f.min_score:
-        return False
-    if f.max_score is not None and interaction.score > f.max_score:
-        return False
-    if f.source_ids:
-        wanted = set(f.source_ids)
-        if not any(s.pk in wanted for s in interaction.sources.all()):
-            return False
-    if f.experiment_ids:
-        wanted = set(f.experiment_ids)
-        if not any(e.pk in wanted for e in interaction.experiments.all()):
-            return False
-    if f.interaction_type_ids:
-        wanted = set(f.interaction_type_ids)
-        if not any(t.pk in wanted for t in interaction.interaction_types.all()):
-            return False
-    return True
-
-
-def _tissue_pk_set(f: CommonFilters) -> set[int] | None:
-    """PKs of proteins expressed in any selected tissue (≥ min_rpkm), or None
-    when no tissue filter is active. Computed once per request."""
-    if not f.tissue_ids:
-        return None
-    return set(
-        Protein.objects.expressed_in(f.tissue_ids, min_rpkm=f.min_rpkm).values_list(
-            "pk", flat=True
-        )
-    )
-
-
-def _protein_passes(
-    protein: Protein, f: CommonFilters, tissue_pks: set[int] | None
-) -> bool:
-    """Check one Protein against the protein-level filters."""
-    if f.min_degree is not None and (protein.degree or 0) < f.min_degree:
-        return False
-    if f.min_avg_score is not None and (
-        protein.avg_score is None or protein.avg_score < f.min_avg_score
-    ):
-        return False
-    if f.reviewed == "reviewed" and not protein.is_reviewed:
-        return False
-    if f.reviewed == "unreviewed" and protein.is_reviewed:
-        return False
-    if tissue_pks is not None and protein.pk not in tissue_pks:
-        return False
-    return True
-
-
-def _interaction_edge_qs(protein_pks, f: CommonFilters):
-    """Ordered, filter-applied Interaction queryset for the query / network
-    pages: every interaction touching a queried protein, gated by the isoform
-    mode (general: canonical-or-queried; isoforms: at least one isoform
-    endpoint; both: no isoform filter), plus the interaction-level filters.
-    Callers keep their own per-row protein-level filtering."""
-    qs = (
-        Interaction.objects.for_proteins(protein_pks)
-        .with_proteins()
-        .prefetch_related("sources", "experiments")
-        .order_by("-score")
-    )
-    if f.isoform_mode == "general":
-        qs = qs.filter(canonical_or_queried_q(protein_pks))
-    elif f.isoform_mode == "isoforms":
-        qs = qs.filter(isoform_only_q())
-    return _apply_interaction_level_filters(qs, f)
-
-
-def _noninteraction_edge_qs(protein_pks, f: CommonFilters):
-    """Ordered NonInteraction queryset for the query / network pages: the
-    isoform-mode gate (see _interaction_edge_qs) plus the score range.
-    Non-interactions carry no source / experiment / type evidence, so those
-    filters never apply (callers gate the whole leg out when a source-like
-    filter is active)."""
-    qs = (
-        NonInteraction.objects.filter(
-            Q(protein_1_id__in=protein_pks) | Q(protein_2_id__in=protein_pks)
-        )
-        .select_related("protein_1", "protein_1__gene", "protein_2", "protein_2__gene")
-        .order_by("-score")
-    )
-    if f.isoform_mode == "general":
-        qs = qs.filter(canonical_or_queried_q(protein_pks))
-    elif f.isoform_mode == "isoforms":
-        qs = qs.filter(isoform_only_q())
-    if f.min_score is not None:
-        qs = qs.filter(score__gte=f.min_score)
-    if f.max_score is not None:
-        qs = qs.filter(score__lte=f.max_score)
-    return qs
-
-
 @require_GET
 def protein_query_api(request):
     """
@@ -433,9 +223,6 @@ def protein_query_api(request):
     """
     q = request.GET.get("q", "")
     f = _common_filters_from_get(request.GET)
-    expand_isoforms = f.isoform_mode in ("isoforms", "both")
-    show = f.show
-    tissue_pks = _tissue_pk_set(f)
 
     tokens = _split_identifiers(q)
     if not tokens:
@@ -461,122 +248,28 @@ def protein_query_api(request):
             status=400,
         )
 
-    # ── Resolve each identifier → Protein (order-preserving, deduped) ──
-    resolved: list = []
-    resolved_pks: set[int] = set()
-    unresolved: list[str] = []
-    for tok in tokens:
-        protein = Protein.objects.resolve(tok).select_related("gene").first()
-        if protein is None:
-            unresolved.append(tok)
-        elif protein.pk not in resolved_pks:
-            resolved_pks.add(protein.pk)
-            resolved.append(protein)
-
-    if not resolved:
+    found = _resolve_proteins(tokens, f.isoform_mode)
+    if not found.found_any:
         return JsonResponse(
             {
-                "error": f"No proteins found for: {', '.join(unresolved)}.",
+                "error": f"No proteins found for: {', '.join(found.unresolved)}.",
                 "interactions": [],
                 "query_proteins": [],
-                "unresolved": unresolved,
+                "unresolved": found.unresolved,
             }
         )
 
-    # ── Build the combined PK set and isoform-accession display map ────
-    # A queried identifier may itself be an isoform (resolve() annotates
-    # ``isoform_uniprot_id``); when isoform_mode expands, each canonical seed
-    # also contributes its known isoforms. All are unioned into protein_pks.
-    protein_pks: list[int] = [p.pk for p in resolved]
-    isoform_uid_map: dict[int, str] = {}
-    for p in resolved:
-        uid = getattr(p, "isoform_uniprot_id", None)
-        if uid:
-            isoform_uid_map[p.pk] = uid
-
-    isoforms: list = []
-    if expand_isoforms:
-        seen_iso: set[int] = set(resolved_pks)
-        for p in resolved:
-            for iso in _get_isoforms(p.pk):
-                if iso.pk not in seen_iso:
-                    seen_iso.add(iso.pk)
-                    isoforms.append(iso)
-                    protein_pks.append(iso.pk)
-                    isoform_uid_map[iso.pk] = iso.uniprot_accession
-
-    protein_pks_set = set(protein_pks)
-
-    # ── Fetch interactions and/or non-interactions -──────────────────
-    # for_proteins() handles a single-element list the same as for_protein().
-
-    results = []
-    if show in ("interactions", "both"):
-        interactions_qs = _interaction_edge_qs(protein_pks, f)
-        for interaction in interactions_qs:
-            if interaction.protein_1_id in protein_pks_set:
-                query_side, partner = interaction.protein_1, interaction.protein_2
-            else:
-                query_side, partner = interaction.protein_2, interaction.protein_1
-            # Protein-level filters apply to the partner (B) side.
-            if not _protein_passes(partner, f, tissue_pks):
-                continue
-            results.append(
-                {
-                    "id": interaction.pk,
-                    "query_side": _protein_display(
-                        query_side, isoform_uid_map.get(query_side.pk)
-                    ),
-                    "partner": _protein_display(partner),
-                    "score": round(interaction.score, 4),
-                    "source_count": interaction.sources.all().count(),
-                    "experiment_count": interaction.experiments.all().count(),
-                    "is_noninteraction": False,
-                    "detail_url": reverse(
-                        "hippie_website:interaction_detail", args=[interaction.pk]
-                    ),
-                }
-            )
-
-    if show in ("noninteractions", "both") and not f.has_source_like:
-        noninteractions_qs = _noninteraction_edge_qs(protein_pks, f)
-        for ni in noninteractions_qs:
-            if ni.protein_1_id in protein_pks_set:
-                query_side, partner = ni.protein_1, ni.protein_2
-            else:
-                query_side, partner = ni.protein_2, ni.protein_1
-            # Protein-level filters apply to the partner (B) side.
-            if not _protein_passes(partner, f, tissue_pks):
-                continue
-            results.append(
-                {
-                    "id": ni.pk,
-                    "query_side": _protein_display(
-                        query_side, isoform_uid_map.get(query_side.pk)
-                    ),
-                    "partner": _protein_display(partner),
-                    "score": round(ni.score, 4),
-                    "source_count": None,
-                    "experiment_count": None,
-                    "is_noninteraction": True,
-                    "detail_url": reverse(
-                        "hippie_website:noninteraction_detail", args=[ni.pk]
-                    ),
-                }
-            )
-
-    # For "both" mode, re-sort by score descending (interactions first for ties)
-    if show == "both":
-        results.sort(key=lambda r: r["score"], reverse=True)
+    results = _interaction_rows(found.protein_pks, f, found.isoform_uid_map)
 
     return JsonResponse(
         {
             "query_proteins": [
-                _protein_display(p, isoform_uid_map.get(p.pk)) for p in resolved
+                _protein_display(p, found.isoform_uid_map.get(p.pk))
+                for p in found.resolved
             ],
-            "isoforms_included": expand_isoforms,
-            "expanded_proteins": [_protein_display(iso) for iso in isoforms],
-            "unresolved": unresolved,
+            "isoforms_included": f.isoform_mode in ("isoforms", "both"),
+            "expanded_proteins": [_protein_display(iso) for iso in found.isoforms],
+            "unresolved": found.unresolved,
             "interactions": results,
             "error": None,
         }
@@ -586,9 +279,6 @@ def protein_query_api(request):
 # ---------------------------------------------------------------------------
 # Interaction query
 # ---------------------------------------------------------------------------
-
-MAX_PAIRS = 5_000  # hard limit enforced server-side and client-site
-BATCH_LIMIT = 200  # max pairs accepted per individual API call
 
 
 @require_GET
@@ -637,9 +327,6 @@ def interaction_query_api(request):
 
     raw_pairs = body.get("pairs", [])
     f = _common_filters_from_body(body)
-    expand_isoforms = f.isoform_mode in ("isoforms", "both")
-    show = f.show
-    tissue_pks = _tissue_pk_set(f)
 
     if not isinstance(raw_pairs, list):
         return JsonResponse({"error": "'pairs' must be a list."}, status=400)
@@ -651,448 +338,15 @@ def interaction_query_api(request):
             status=400,
         )
 
-    # Per-request cache so repeated proteins in a batch share isoform lookups.
-    isoform_cache: dict[int, list] = {}
-
-    results = []
-    for item in raw_pairs:
-        input_a = str(item.get("a", "")).strip()
-        input_b = str(item.get("b", "")).strip()
-        input_order = int(item.get("input_order", 0))
-
-        if expand_isoforms:
-            # Isoform expansion only applies to the Interaction table.
-            int_rows: list[dict] = []
-            if show in ("interactions", "both"):
-                int_rows = _resolve_interaction_pair_with_isoforms(
-                    input_a,
-                    input_b,
-                    input_order,
-                    isoform_cache,
-                    f,
-                    tissue_pks,
-                    isoform_mode=f.isoform_mode,
-                )
-            nonint_rows: list[dict] = []
-            if show in ("noninteractions", "both"):
-                nr = _resolve_noninteraction_pair(
-                    input_a, input_b, input_order, f, tissue_pks
-                )
-                if nr["score"] >= 0:
-                    nonint_rows = [nr]
-            rows = int_rows + nonint_rows
-            # A found row (interaction OR non-interaction) supersedes the
-            # not-found (score -1) fallback the isoform resolver emits when no
-            # interaction combo matches — keeps exactly one row per input pair
-            # (mirrors the non-isoform "both" branch below).
-            found = [r for r in rows if r["score"] >= 0]
-            if found:
-                rows = found
-            elif not rows:
-                # Nothing found in either table — return a single not-found row.
-                if show == "noninteractions":
-                    rows = [
-                        _resolve_noninteraction_pair(
-                            input_a, input_b, input_order, f, tissue_pks
-                        )
-                    ]
-                else:
-                    rows = [
-                        _resolve_interaction_pair(
-                            input_a, input_b, input_order, f, tissue_pks
-                        )
-                    ]
-        else:
-            if show == "interactions":
-                rows = [
-                    _resolve_interaction_pair(
-                        input_a, input_b, input_order, f, tissue_pks
-                    )
-                ]
-            elif show == "noninteractions":
-                rows = [
-                    _resolve_noninteraction_pair(
-                        input_a, input_b, input_order, f, tissue_pks
-                    )
-                ]
-            else:  # both
-                int_row = _resolve_interaction_pair(
-                    input_a, input_b, input_order, f, tissue_pks
-                )
-                nonint_row = _resolve_noninteraction_pair(
-                    input_a, input_b, input_order, f, tissue_pks
-                )
-                found = [r for r in [int_row, nonint_row] if r["score"] >= 0]
-                rows = found if found else [int_row]
-
-        results.extend(rows)
-    return JsonResponse({"results": results})
-
-
-def _pair_not_found(
-    input_a: str,
-    input_b: str,
-    input_order: int,
-    *,
-    is_noninteraction: bool,
-    ua: dict | None = None,
-    ub: dict | None = None,
-) -> dict:
-    """Build the not-found (score -1) row for an input pair.
-
-    When ``ua`` / ``ub`` (the ``_protein_display`` dicts) are given the proteins
-    resolved but no (non-)interaction was recorded / it failed the filters;
-    otherwise an identifier was unknown. Non-interactions carry no evidence
-    counts (``None``); interactions report ``0``.
-    """
-    counts = None if is_noninteraction else 0
-    return {
-        "input_order": input_order,
-        "input_a": input_a,
-        "input_b": input_b,
-        "symbol_a": ua["symbol"] if ua else input_a,
-        "symbol_b": ub["symbol"] if ub else input_b,
-        "uniprot_a": ua["uniprot_id"] if ua else "",
-        "uniprot_b": ub["uniprot_id"] if ub else "",
-        "isoform_uniprot_a": ua["isoform_uniprot_id"] if ua else None,
-        "isoform_uniprot_b": ub["isoform_uniprot_id"] if ub else None,
-        "score": -1.0,
-        "source_count": counts,
-        "experiment_count": counts,
-        "entrez_a": ua["gene_id"] if ua else None,
-        "entrez_b": ub["gene_id"] if ub else None,
-        "is_reviewed_a": ua["is_reviewed"] if ua else None,
-        "is_reviewed_b": ub["is_reviewed"] if ub else None,
-        "is_noninteraction": is_noninteraction,
-        "interaction_id": None,
-        "detail_url": "",
-    }
-
-
-def _pair_row(
-    ua: dict,
-    ub: dict,
-    *,
-    input_a: str,
-    input_b: str,
-    input_order: int,
-    score: float,
-    source_count,
-    experiment_count,
-    obj_pk: int,
-    is_noninteraction: bool,
-) -> dict:
-    """Build a found-pair result row from two ``_protein_display`` dicts."""
-    route = (
-        "hippie_website:noninteraction_detail"
-        if is_noninteraction
-        else "hippie_website:interaction_detail"
-    )
-    return {
-        "input_order": input_order,
-        "input_a": input_a,
-        "input_b": input_b,
-        "symbol_a": ua["symbol"],
-        "symbol_b": ub["symbol"],
-        "uniprot_a": ua["uniprot_id"],
-        "uniprot_b": ub["uniprot_id"],
-        "entrez_a": ua["gene_id"],
-        "entrez_b": ub["gene_id"],
-        "isoform_uniprot_a": ua["isoform_uniprot_id"],
-        "isoform_uniprot_b": ub["isoform_uniprot_id"],
-        "is_reviewed_a": ua["is_reviewed"],
-        "is_reviewed_b": ub["is_reviewed"],
-        "score": round(score, 4),
-        "source_count": source_count,
-        "experiment_count": experiment_count,
-        "interaction_id": obj_pk,
-        "is_noninteraction": is_noninteraction,
-        "detail_url": reverse(route, args=[obj_pk]),
-    }
-
-
-def _resolve_pair(
-    input_a: str,
-    input_b: str,
-    input_order: int,
-    f: CommonFilters | None = None,
-    tissue_pks: set[int] | None = None,
-    *,
-    is_noninteraction: bool,
-) -> dict:
-    """
-    Resolve two identifiers to proteins and look up their (non-)interaction,
-    returning a result row. A score of -1.0 signals "not found" (either protein
-    unknown, or no record between them / it failed the active filters).
-
-    A found (non-)interaction that fails the active filters is reported as
-    not-found rather than dropped, so every input pair keeps exactly one row.
-    """
-    protein_a = Protein.objects.resolve(input_a).select_related("gene").first()
-    protein_b = Protein.objects.resolve(input_b).select_related("gene").first()
-
-    if protein_a is None or protein_b is None:
-        return _pair_not_found(
-            input_a, input_b, input_order, is_noninteraction=is_noninteraction
+    pairs = [
+        (
+            str(item.get("a", "")).strip(),
+            str(item.get("b", "")).strip(),
+            int(item.get("input_order", 0)),
         )
-
-    p1, p2 = (
-        (protein_a, protein_b)
-        if protein_a.pk <= protein_b.pk
-        else (protein_b, protein_a)
-    )
-    ua = _protein_display(protein_a)
-    ub = _protein_display(protein_b)
-
-    def _nf() -> dict:
-        return _pair_not_found(
-            input_a,
-            input_b,
-            input_order,
-            is_noninteraction=is_noninteraction,
-            ua=ua,
-            ub=ub,
-        )
-
-    if is_noninteraction:
-        try:
-            obj = NonInteraction.objects.get(protein_1=p1, protein_2=p2)
-        except NonInteraction.DoesNotExist:
-            return _nf()
-        # Non-interactions carry no sources / experiments / interaction-types, so
-        # any source-like filter excludes them; score + protein filters still apply.
-        if f is not None and (
-            f.has_source_like
-            or (f.min_score is not None and obj.score < f.min_score)
-            or (f.max_score is not None and obj.score > f.max_score)
-            or not _protein_passes(protein_a, f, tissue_pks)
-            or not _protein_passes(protein_b, f, tissue_pks)
-        ):
-            return _nf()
-        return _pair_row(
-            ua,
-            ub,
-            input_a=input_a,
-            input_b=input_b,
-            input_order=input_order,
-            score=obj.score,
-            source_count=None,
-            experiment_count=None,
-            obj_pk=obj.pk,
-            is_noninteraction=True,
-        )
-
-    try:
-        obj = (
-            Interaction.objects.with_proteins()
-            .prefetch_related("sources", "experiments", "interaction_types")
-            .get(protein_1=p1, protein_2=p2)
-        )
-    except Interaction.DoesNotExist:
-        return _nf()
-    if f is not None and (
-        not _interaction_matches(obj, f)
-        or not _protein_passes(protein_a, f, tissue_pks)
-        or not _protein_passes(protein_b, f, tissue_pks)
-    ):
-        return _nf()
-    return _pair_row(
-        ua,
-        ub,
-        input_a=input_a,
-        input_b=input_b,
-        input_order=input_order,
-        score=obj.score,
-        source_count=obj.sources.all().count(),
-        experiment_count=obj.experiments.all().count(),
-        obj_pk=obj.pk,
-        is_noninteraction=False,
-    )
-
-
-def _resolve_interaction_pair(
-    input_a: str,
-    input_b: str,
-    input_order: int,
-    f: CommonFilters | None = None,
-    tissue_pks: set[int] | None = None,
-) -> dict:
-    """Resolve a pair against the Interaction table (see _resolve_pair)."""
-    return _resolve_pair(
-        input_a, input_b, input_order, f, tissue_pks, is_noninteraction=False
-    )
-
-
-def _resolve_noninteraction_pair(
-    input_a: str,
-    input_b: str,
-    input_order: int,
-    f: CommonFilters | None = None,
-    tissue_pks: set[int] | None = None,
-) -> dict:
-    """Resolve a pair against the NonInteraction table (see _resolve_pair)."""
-    return _resolve_pair(
-        input_a, input_b, input_order, f, tissue_pks, is_noninteraction=True
-    )
-
-
-def _resolve_interaction_pair_with_isoforms(
-    input_a: str,
-    input_b: str,
-    input_order: int,
-    isoform_cache: dict,
-    f: CommonFilters | None = None,
-    tissue_pks: set[int] | None = None,
-    isoform_mode: str = "both",
-) -> list[dict]:
-    """
-    Like _resolve_interaction_pair but expands each canonical protein side to
-    include all its known isoforms, then checks every resulting combination for
-    a recorded interaction.
-
-    Rules (matching the spec):
-      • If a resolved protein IS an isoform, that side is NOT expanded further.
-      • If a resolved protein is canonical, expand to canonical + all isoforms.
-      • Only interactions that actually exist in the database are returned.
-      • If no combination has a recorded interaction, fall back to returning the
-        original pair as "not found" (score = -1), preserving the existing UX.
-      • In "isoforms" mode, the pure canonical×canonical combo (the original,
-        unsubstituted pair) is dropped — that combo belongs to "general" mode.
-
-    isoform_cache: a per-request dict[protein_pk -> list[Isoform]] to avoid
-    repeated DB lookups when the same protein appears in multiple pairs.
-    """
-    protein_a = Protein.objects.resolve(input_a).select_related("gene").first()
-    protein_b = Protein.objects.resolve(input_b).select_related("gene").first()
-
-    if protein_a is None or protein_b is None:
-        return [_resolve_interaction_pair(input_a, input_b, input_order, f, tissue_pks)]
-
-    # Cached isoform lookup ---------------------------------------------------
-    def cached_isoforms(pk: int) -> list:
-        if pk not in isoform_cache:
-            isoform_cache[pk] = _get_isoforms(pk)
-        return isoform_cache[pk]
-
-    isoforms_a = cached_isoforms(protein_a.pk)
-    isoforms_b = cached_isoforms(protein_b.pk)
-
-    a_pks: list[int] = [protein_a.pk] + [iso.pk for iso in isoforms_a]
-    b_pks: list[int] = [protein_b.pk] + [iso.pk for iso in isoforms_b]
-
-    # Load all relevant proteins in one query for display --------------------
-    all_pks = list(set(a_pks + b_pks))
-    proteins_map: dict[int, Protein] = {
-        p.pk: p for p in Protein.objects.filter(pk__in=all_pks).select_related("gene")
-    }
-
-    # Build isoform UID map (pk → isoform-specific accession) ----------------
-    isoform_uid_map: dict[int, str] = {
-        iso.protein_ptr_id: iso.uniprot_accession
-        for iso in Isoform.objects.filter(protein_ptr_id__in=all_pks)
-    }
-
-    # Build the set of canonical (p1_pk, p2_pk) pairs with their a/b origin --
-    # (p1_pk <= p2_pk as required by the Interaction model constraint)
-    canonical_pairs: dict[tuple[int, int], tuple[int, int]] = {}
-    for pa_pk in a_pks:
-        for pb_pk in b_pks:
-            if pa_pk == pb_pk:
-                continue
-            p1_pk, p2_pk = (min(pa_pk, pb_pk), max(pa_pk, pb_pk))
-            if (p1_pk, p2_pk) not in canonical_pairs:
-                # Store which pk was on the A side and which was on the B side
-                # (for correct display ordering in the response).
-                canonical_pairs[(p1_pk, p2_pk)] = (pa_pk, pb_pk)
-
-    if isoform_mode == "isoforms":
-        canonical_pairs = {
-            key: origin
-            for key, origin in canonical_pairs.items()
-            if origin != (protein_a.pk, protein_b.pk)
-        }
-
-    if not canonical_pairs:
-        if isoform_mode == "isoforms":
-            return [
-                _pair_not_found(
-                    input_a,
-                    input_b,
-                    input_order,
-                    is_noninteraction=False,
-                    ua=_protein_display(protein_a),
-                    ub=_protein_display(protein_b),
-                )
-            ]
-        return [_resolve_interaction_pair(input_a, input_b, input_order, f, tissue_pks)]
-
-    # Fetch all interactions in a single query --------------------------------
-    q = Q()
-    for p1_pk, p2_pk in canonical_pairs:
-        q |= Q(protein_1_id=p1_pk, protein_2_id=p2_pk)
-
-    interactions_qs = (
-        Interaction.objects.with_proteins()
-        .prefetch_related("sources", "experiments", "interaction_types")
-        .filter(q)
-    )
-    if f is not None:
-        interactions_qs = _apply_interaction_level_filters(interactions_qs, f)
-    found_interactions: dict[tuple[int, int], Interaction] = {
-        (i.protein_1_id, i.protein_2_id): i for i in interactions_qs
-    }
-
-    # Build result rows -------------------------------------------------------
-    found_results: list[dict] = []
-    for (p1_pk, p2_pk), (pa_pk, pb_pk) in canonical_pairs.items():
-        interaction = found_interactions.get((p1_pk, p2_pk))
-        if not interaction:
-            continue
-
-        pa = proteins_map.get(pa_pk)
-        pb = proteins_map.get(pb_pk)
-        if pa is None or pb is None:
-            continue
-
-        # Protein-level filters apply to both sides of every isoform combination.
-        if f is not None and not (
-            _protein_passes(pa, f, tissue_pks) and _protein_passes(pb, f, tissue_pks)
-        ):
-            continue
-
-        ua = _protein_display(pa, isoform_uid_map.get(pa_pk))
-        ub = _protein_display(pb, isoform_uid_map.get(pb_pk))
-        found_results.append(
-            _pair_row(
-                ua,
-                ub,
-                input_a=input_a,
-                input_b=input_b,
-                input_order=input_order,
-                score=interaction.score,
-                source_count=interaction.sources.all().count(),
-                experiment_count=interaction.experiments.all().count(),
-                obj_pk=interaction.pk,
-                is_noninteraction=False,
-            )
-        )
-
-    # If no isoform combination found anything, show original pair as not-found.
-    if not found_results:
-        if isoform_mode == "isoforms":
-            return [
-                _pair_not_found(
-                    input_a,
-                    input_b,
-                    input_order,
-                    is_noninteraction=False,
-                    ua=_protein_display(protein_a),
-                    ub=_protein_display(protein_b),
-                )
-            ]
-        return [_resolve_interaction_pair(input_a, input_b, input_order, f, tissue_pks)]
-
-    return found_results
+        for item in raw_pairs
+    ]
+    return JsonResponse({"results": _check_pairs(pairs, f)})
 
 
 # ---------------------------------------------------------------------------
@@ -1866,134 +1120,6 @@ def _cached_total(cache_key: str, qs) -> int:
     return total
 
 
-def _safe_int(value):
-    if value in (None, ""):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _safe_float(value):
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _vocab_options(
-    model,
-    categorise,
-    *,
-    count_field: str = "n_connected_interactions",
-    subcategorise=None,
-    extra_fields: tuple[str, ...] = (),
-) -> list[dict]:
-    """Option dicts for one filter vocabulary, ready for the filter controls.
-
-    Each option carries ``id``, ``name``, ``category`` (from
-    ``filter_categories``), an optional ``subcategory`` (a second grouping level
-    inside the category), and — when known — ``count`` from ``count_field``.
-    Rows nothing references are dropped: they are dead choices that only make
-    the list longer to scan.
-
-    The count columns are caches refreshed by ``hippie_update`` /
-    ``update_tissue_data``, so they read 0 everywhere on a database that has
-    never run them (a fresh deployment, a test fixture). Hiding on a zero count
-    would then empty the filter entirely, which is far worse than showing a few
-    unused options — so when *no* row has a count, the counter is treated as
-    unpopulated: nothing is hidden and no (misleading) zero counts are sent.
-
-    ``subcategorise`` receives the full row list as well as the row, because a
-    sub-group is only worth creating when several options share it (see the
-    tissue grouping in ``_filter_option_lists``).
-    """
-    fields = ("id", "name", count_field, *extra_fields)
-    rows = list(model.objects.order_by("name").values(*fields))
-    have_counts = any(row[count_field] for row in rows)
-    kept = [row for row in rows if row[count_field] > 0 or not have_counts]
-    options = []
-    for row in kept:
-        opt = {
-            "id": row["id"],
-            "name": row["name"],
-            "category": categorise(row),
-        }
-        if have_counts:
-            opt["count"] = row[count_field]
-        if subcategorise is not None:
-            sub = subcategorise(row, kept)
-            if sub:
-                opt["subcategory"] = sub
-        options.append(opt)
-    return options
-
-
-def _filter_option_lists() -> dict:
-    """Tissue / source / experiment / interaction-type option lists for the
-    filter controls. Shared by ``browse_filter_meta`` (the query pages) and
-    ``_ml_filter_meta`` (the ML-splits page).
-
-    Every list is limited to options something actually references, and carries a
-    ``count`` plus a ``category`` the frontend renders as collapsible groups.
-    Tissues additionally carry a ``subcategory`` — their GTEx organ prefix — so
-    the 13 brain regions collapse behind one sub-heading instead of filling the
-    Nervous system group.
-    """
-    from .models import Source, ExperimentType
-    from .filter_categories import (
-        EXPERIMENT_CATEGORY_ORDER,
-        INTERACTION_TYPE_CATEGORY_ORDER,
-        SOURCE_CATEGORY_ORDER,
-        TISSUE_CATEGORY_ORDER,
-        experiment_category,
-        interaction_type_category,
-        source_category,
-        tissue_category,
-        tissue_prefix,
-    )
-
-    def _tissue_subcategory(row, rows) -> str:
-        """Organ prefix, but only where the organ has more than one tissue.
-
-        A lone organ ("Lung", "Pituitary") would otherwise get a sub-heading
-        wrapping a single checkbox; those sit directly under their body system.
-        """
-        prefix = tissue_prefix(row["name"])
-        if sum(1 for r in rows if tissue_prefix(r["name"]) == prefix) < 2:
-            return ""
-        return prefix
-
-    return {
-        "tissues": _vocab_options(
-            Tissue,
-            lambda row: tissue_category(row["name"]),
-            count_field="n_expressed_genes",
-            subcategorise=_tissue_subcategory,
-        ),
-        "sources": _vocab_options(Source, lambda row: source_category(row["name"])),
-        "experiments": _vocab_options(
-            ExperimentType,
-            lambda row: experiment_category(row["psi_mi_code"], row["name"]),
-            extra_fields=("psi_mi_code",),
-        ),
-        "interaction_types": _vocab_options(
-            InteractionType, lambda row: interaction_type_category(row["name"])
-        ),
-        # Display order for the group headers, so the frontend does not have to
-        # hardcode a copy of the category vocabulary.
-        "category_order": {
-            "tissues": list(TISSUE_CATEGORY_ORDER),
-            "sources": list(SOURCE_CATEGORY_ORDER),
-            "experiments": list(EXPERIMENT_CATEGORY_ORDER),
-            "interaction_types": list(INTERACTION_TYPE_CATEGORY_ORDER),
-        },
-    }
-
-
 @require_GET
 def browse_filter_meta(request):
     """
@@ -2023,147 +1149,14 @@ def browse_filter_meta(request):
 # ---------------------------------------------------------------------------
 
 
-def _protein_detail_ctx(protein) -> dict:
-    """Interactor context dict for the detail templates (protein_pair_base.html):
-    the raw protein plus its display accession, Entrez id, and gene symbol."""
-    return {
-        "protein": protein,
-        "uniprot_id": protein.uniprot_accession,
-        "gene_id": protein.gene.entrez_id or None,
-        "symbol": protein.gene.entrez_name or protein.uniprot_name,
-    }
-
-
-def _digger_ctx(p1: Protein, p2: Protein) -> dict:
-    """DIGGER cross-links for the "Further information" card, shared by the
-    interaction and non-interaction detail pages.
-
-    One extra query resolves which endpoints are isoforms (and loads their
-    ENST/ENSP); canonical proteins fall back to the already-``select_related``
-    ``gene``. See ``digger_links.py`` for the URL rules.
-    """
-    from hippie_website.digger_links import (
-        _first,
-        interaction_digger,
-        protein_digger_url,
-    )
-
-    isos = {
-        i.pk: i
-        for i in Isoform.objects.select_related("gene").filter(pk__in=[p1.pk, p2.pk])
-    }
-
-    def _one(p: Protein) -> dict:
-        iso = isos.get(p.pk)
-        if iso is not None:
-            return {
-                "is_isoform": True,
-                "is_canonical": iso.is_canonical,
-                "url": protein_digger_url(
-                    is_isoform=True,
-                    ensg=iso.gene.ensg,
-                    enst=iso.enst,
-                    ensp=iso.ensp,
-                ),
-            }
-        return {
-            "is_isoform": False,
-            "is_canonical": False,
-            "url": protein_digger_url(
-                is_isoform=False, ensg=p.gene.ensg, enst=[], ensp=[]
-            ),
-        }
-
-    def _transcript_with_fallback(i: Isoform) -> str:
-        """Return the first ENST if present, else the first ENSP, else empty string. Used for DIGGER links."""
-        return _first(i.enst) or _first(i.ensp) or ""
-
-    p1_iso = p1.pk in isos
-    p2_iso = p2.pk in isos
-    g1_ensg = isos[p1.pk].gene.ensg if p1_iso else p1.gene.ensg
-    g2_ensg = isos[p2.pk].gene.ensg if p2_iso else p2.gene.ensg
-
-    return {
-        "p1": _one(p1),
-        "p2": _one(p2),
-        "interaction": interaction_digger(
-            p1_is_isoform=p1_iso,
-            p2_is_isoform=p2_iso,
-            p1_enst_p=_transcript_with_fallback(isos[p1.pk]) if p1_iso else "",
-            p2_enst_p=_transcript_with_fallback(isos[p2.pk]) if p2_iso else "",
-            g1_ensg=g1_ensg,
-            g2_ensg=g2_ensg,
-            handoff_secret=settings.HIPPIE_HANDOFF_SECRET,
-        ),
-    }
-
-
 @require_GET
 def interaction_detail_view(request, pk: int):
-    """
-    Show full evidence for a single interaction.
-
-    Uses Interaction.objects.with_full_detail() which chains:
-      with_proteins()    → both protein FKs + their UniProt/Entrez IDs
-      with_evidence()    → sources, publications, experiments,
-                           interaction_types,
-                           cross_references (+ source + species)
-    Conserved species are resolved via OrthologInteraction on the gene pair.
-    """
-    interaction = get_object_or_404(
-        Interaction.objects.with_full_detail(),
-        pk=pk,
+    """Show full evidence for a single interaction (see services.detail)."""
+    return render(
+        request,
+        "hippie_website/interaction_detail.html",
+        _interaction_detail_context(pk),
     )
-
-    # Compute bait-prey detection stats from prefetched data (no extra queries).
-    bait_prey_total_tested = sum(
-        assoc.number_of_tests for assoc in interaction.bait_prey.all()
-    )
-    bait_prey_times_observed = sum(
-        assoc.number_of_observed for assoc in interaction.bait_prey.all()
-    )
-
-    p1 = interaction.protein_1
-    p2 = interaction.protein_2
-
-    g1, g2 = p1.gene, p2.gene
-    lo_gene, hi_gene = (g1, g2) if g1.pk <= g2.pk else (g2, g1)
-    ortholog = (
-        OrthologInteraction.objects.filter(gene_1=lo_gene, gene_2=hi_gene)
-        .prefetch_related("ortholog_species")
-        .first()
-    )
-    conserved_species = ortholog.ortholog_species.all() if ortholog else []
-
-    # Annotate each source with a per-pair "all evidence" link where one is
-    # known (e.g. IntAct pairwise search); None otherwise. See source_links.py.
-    from hippie_website.source_links import pair_search_url
-
-    sources = list(interaction.sources.all())
-    for source in sources:
-        source.pair_url = pair_search_url(
-            source.name, p1.uniprot_accession, p2.uniprot_accession
-        )
-
-    context = {
-        "interaction": interaction,
-        "p1": _protein_detail_ctx(p1),
-        "p2": _protein_detail_ctx(p2),
-        # All prefetched — .all() hits the cache.
-        "sources": sources,
-        "publications": interaction.publications.all(),
-        "experiments": interaction.experiments.all().order_by("-quality_score"),
-        "species": conserved_species,
-        # Bait-prey detection stats.
-        "bait_prey_total_tested": bait_prey_total_tested,
-        "bait_prey_times_observed": bait_prey_times_observed,
-        # Shared with protein_pair_base.html
-        "pair_score": interaction.score,
-        "pair_label": "Interaction Evidence",
-        "is_noninteraction": False,
-        "digger": _digger_ctx(p1, p2),
-    }
-    return render(request, "hippie_website/interaction_detail.html", context)
 
 
 # ---------------------------------------------------------------------------
@@ -2173,40 +1166,12 @@ def interaction_detail_view(request, pk: int):
 
 @require_GET
 def noninteraction_detail_view(request, pk: int):
-    """
-    Show bait-prey detection evidence for a single non-interaction (Negatome).
-    """
-    noninteraction = get_object_or_404(
-        NonInteraction.objects.select_related(
-            "protein_1", "protein_1__gene", "protein_2", "protein_2__gene"
-        ).prefetch_related(
-            "bait_prey",
-        ),
-        pk=pk,
+    """Show bait-prey detection evidence for a single non-interaction (Negatome)."""
+    return render(
+        request,
+        "hippie_website/noninteraction_detail.html",
+        _noninteraction_detail_context(pk),
     )
-
-    bait_prey_total_tested = sum(
-        assoc.number_of_tests for assoc in noninteraction.bait_prey.all()
-    )
-    bait_prey_times_observed = sum(
-        assoc.number_of_observed for assoc in noninteraction.bait_prey.all()
-    )
-
-    p1 = noninteraction.protein_1
-    p2 = noninteraction.protein_2
-    context = {
-        "noninteraction": noninteraction,
-        "p1": _protein_detail_ctx(p1),
-        "p2": _protein_detail_ctx(p2),
-        "bait_prey_total_tested": bait_prey_total_tested,
-        "bait_prey_times_observed": bait_prey_times_observed,
-        # Shared with protein_pair_base.html
-        "pair_score": noninteraction.score,
-        "pair_label": "Non-Interaction Evidence",
-        "is_noninteraction": True,
-        "digger": _digger_ctx(p1, p2),
-    }
-    return render(request, "hippie_website/noninteraction_detail.html", context)
 
 
 # ---------------------------------------------------------------------------
@@ -2401,8 +1366,6 @@ def _protein_stats(
     filter but has zero surviving edges is an orphan: excluded from the medians
     and counted in ``n_orphaned_by_filter``."""
     import statistics
-
-    from .models import Isoform
 
     pqs = _protein_filtered_qs(params)
 
