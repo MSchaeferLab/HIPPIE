@@ -122,8 +122,14 @@ export function useAllSelectedDefaults(meta, setters) {
 }
 
 // ── Multi-select selection helpers ──────────────────────────────────────────
+// Sorted by id, the same canonical order `toggleIn` and `setIds` produce. The
+// dirty check (`filtersEqual`) is a JSON compare and therefore order-sensitive,
+// so a seeded list left in the backend's name order would read as "changed" on
+// the user's first click even though the set of ticked boxes still matched.
 export function allOptionIds(items) {
-  return (items || []).map((it) => it.id);
+  return (items || [])
+    .map((it) => it.id)
+    .sort((a, b) => String(a).localeCompare(String(b)));
 }
 
 export function isFullSelection(selected, items) {

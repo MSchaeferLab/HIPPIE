@@ -14,6 +14,7 @@ transport serves.
 """
 
 import json
+import os
 import time
 
 from django.core.cache import cache
@@ -21,22 +22,43 @@ from django.core.cache import cache
 DEFAULT_LIMIT = 60  # requests per window, per IP
 DEFAULT_WINDOW = 60  # seconds
 
+# How many appending reverse-proxy hops sit in front of this service. Production
+# has two: the system Apache that terminates TLS, then the dockerised Apache that
+# proxies into this container. Override if that chain changes (an added CDN or
+# load balancer makes it 3; a direct uvicorn with no proxy makes it 1).
+TRUSTED_PROXY_HOPS = int(os.environ.get("HIPPIE_MCP_TRUSTED_PROXY_HOPS", "2"))
+
 _CACHE_PREFIX = "mcp-ratelimit"
 
 
 def client_ip(scope: dict) -> str:
     """Best-effort client IP for an ASGI scope.
 
-    Apache sits in front of this service and appends the peer to
-    ``X-Forwarded-For``, so the direct peer is always the proxy. The leftmost
-    entry is the original client. It is caller-supplied and therefore spoofable
-    — acceptable here, because the limiter is abuse dampening, not authentication.
+    ``X-Forwarded-For`` is read from the right, not the left. Both Apache hops in
+    front of this service *append* to the header (default ``ProxyAddHeaders On``)
+    rather than replacing it, which makes the entries fall into three groups:
+
+    * The **leftmost** entry is whatever the caller sent. It survives every hop
+      untouched, so a client that supplies its own ``X-Forwarded-For`` controls
+      it — rotating that value would defeat the cap completely.
+    * The **rightmost** entry is the peer of the innermost hop: the outer Apache
+      on the same host, i.e. a loopback or docker-bridge address that is the same
+      for all traffic. Keying on it would put every request in one shared bucket.
+    * ``TRUSTED_PROXY_HOPS`` **from the right** is the entry the outermost,
+      internet-facing hop appended — the real client, and the only entry no
+      caller can forge.
+
+    Falls back to the leftmost entry when the header is shorter than the expected
+    hop count (local dev, or one proxy instead of two) and to the transport peer
+    when there is no header at all.
     """
     for name, value in scope.get("headers", ()):
         if name == b"x-forwarded-for":
-            first = value.decode("latin-1").split(",")[0].strip()
-            if first:
-                return first
+            parts = [p.strip() for p in value.decode("latin-1").split(",") if p.strip()]
+            if len(parts) >= TRUSTED_PROXY_HOPS:
+                return parts[-TRUSTED_PROXY_HOPS]
+            if parts:
+                return parts[0]
     client = scope.get("client")
     return client[0] if client else "unknown"
 

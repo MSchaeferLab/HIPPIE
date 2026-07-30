@@ -513,6 +513,20 @@ class MLSplitEndpointNotFoundTest(TestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 400)
+        # The documented contract is "400 with the failing constraint in the
+        # message". A raised BadRequest would render Django's generic, empty 400
+        # page here with DEBUG=False, so assert on the body, not just the status.
+        self.assertEqual(resp["Content-Type"], "application/json")
+        self.assertIn("min_score", resp.json()["error"])
+
+    def test_stats_400_names_the_failing_constraint(self):
+        resp = self.client.post(
+            reverse("hippie_website:browse_splits_stats"),
+            data=json.dumps({"neg_ratio": 99}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("neg_ratio", resp.json()["error"])
 
 
 class PartitionDisjointTest(SimpleTestCase):
@@ -621,27 +635,29 @@ class SplitParamsLegacyKeyTest(SimpleTestCase):
     def test_validate_accepts_both_spellings(self):
         from ..views import _validate_split_params
 
-        self.assertEqual(
-            _validate_split_params({"min_degree": 7})["min_degree_global"], 7
-        )
-        self.assertEqual(
-            _validate_split_params({"min_degree_global": 7})["min_degree_global"], 7
-        )
+        params, invalid = _validate_split_params({"min_degree": 7})
+        self.assertIsNone(invalid)
+        self.assertEqual(params["min_degree_global"], 7)
+
+        params, invalid = _validate_split_params({"min_degree_global": 7})
+        self.assertIsNone(invalid)
+        self.assertEqual(params["min_degree_global"], 7)
+
         # New key wins when both are present.
-        self.assertEqual(
-            _validate_split_params({"min_degree": 1, "min_degree_global": 9})[
-                "min_degree_global"
-            ],
-            9,
+        params, invalid = _validate_split_params(
+            {"min_degree": 1, "min_degree_global": 9}
         )
+        self.assertIsNone(invalid)
+        self.assertEqual(params["min_degree_global"], 9)
 
     def test_validate_rejects_a_negative_threshold(self):
-        from django.core.exceptions import BadRequest
-
         from ..views import _validate_split_params
 
-        with self.assertRaises(BadRequest):
-            _validate_split_params({"min_degree": -1})
+        params, invalid = _validate_split_params({"min_degree": -1})
+        self.assertIsNone(params)
+        # The message has to name the constraint, not just signal failure — it is
+        # what the caller sees in the 400 body.
+        self.assertIn("min_degree_global", invalid)
 
     def test_from_payload_maps_a_stored_legacy_job(self):
         from ..services.generate_splits import SplitParams

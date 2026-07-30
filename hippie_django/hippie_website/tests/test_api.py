@@ -1708,3 +1708,64 @@ class MultiProteinBrowseTest(HippieTestCase):
 # ---------------------------------------------------------------------------
 # Batch 6 — ML Splits: tissue coverage over survivors, status queue position
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Deployment behaviour: proxy-forwarded scheme, readiness probe
+# ---------------------------------------------------------------------------
+
+
+class ForwardedProtoTest(TestCase):
+    """TLS terminates two proxy hops away, so the scheme arrives in a header.
+
+    Every absolute URL the app hands out depends on this — the MCP connection
+    snippet on the download page is built from ``request.scheme``, and an
+    ``http://`` link on an HTTPS-only site does not work.
+    """
+
+    def test_forwarded_proto_makes_the_request_secure(self):
+        r = self.client.get(
+            reverse("hippie_website:index"), headers={"x-forwarded-proto": "https"}
+        )
+        self.assertEqual(r.wsgi_request.scheme, "https")
+        self.assertTrue(r.wsgi_request.is_secure())
+
+    def test_without_the_header_the_scheme_stays_http(self):
+        r = self.client.get(reverse("hippie_website:index"))
+        self.assertEqual(r.wsgi_request.scheme, "http")
+
+    def test_download_page_advertises_the_mcp_url_over_https(self):
+        r = self.client.get(
+            reverse("hippie_website:download"), headers={"x-forwarded-proto": "https"}
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("https://testserver", body)
+        self.assertNotIn("http://testserver", body)
+
+
+class StatusViewTest(TestCase):
+    """The docker-compose readiness probe for the ``web`` container."""
+
+    def test_reports_ok_with_every_check_passing(self):
+        r = self.client.get(reverse("hippie_website:status"))
+        self.assertEqual(r.status_code, 200)
+        payload = r.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(set(payload["checks"]), {"database", "cache", "migrations"})
+        self.assertTrue(all(c["ok"] for c in payload["checks"].values()))
+
+    def test_a_failing_check_answers_503(self):
+        """503, not 200-with-a-flag: ``urlopen`` in the healthcheck only raises on
+        a non-2xx, so a soft failure would report the container as healthy."""
+        from unittest.mock import patch
+
+        with patch("hippie_website.views.cache.get", return_value=None):
+            r = self.client.get(reverse("hippie_website:status"))
+        self.assertEqual(r.status_code, 503)
+        self.assertEqual(r.json()["status"], "degraded")
+        self.assertFalse(r.json()["checks"]["cache"]["ok"])
+
+    def test_rejects_a_post(self):
+        r = self.client.post(reverse("hippie_website:status"))
+        self.assertEqual(r.status_code, 405)

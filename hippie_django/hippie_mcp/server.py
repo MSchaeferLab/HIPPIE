@@ -165,9 +165,12 @@ def resolve_protein(
     interaction score, which are useful for judging how much a result set will
     contain before asking for it.
     """
-    matches = list(
-        Protein.objects.resolve(identifier).select_related("gene")[:MAX_LIMIT]
-    )
+    resolved = Protein.objects.resolve(identifier).select_related("gene")
+    # One extra row is enough to know the cap was hit without counting the rest.
+    window = list(resolved[: MAX_LIMIT + 1])
+    matches = window[:MAX_LIMIT]
+    truncated = len(window) > MAX_LIMIT
+    total = resolved.count() if truncated else len(matches)
     if not matches:
         return {
             "summary": (
@@ -175,6 +178,9 @@ def resolve_protein(
                 f"proteins only; check the identifier or try a gene symbol."
             ),
             "found": False,
+            "total": 0,
+            "returned": 0,
+            "truncated": False,
             "matches": [],
         }
 
@@ -200,19 +206,28 @@ def resolve_protein(
     ]
 
     first = rows[0]
-    if len(rows) == 1:
+    if total == 1:
         summary = (
             f"{identifier!r} is {first['symbol']} ({first['uniprot_id']}), "
             f"with {first['degree']} interaction partners in HIPPIE."
         )
     else:
         summary = (
-            f"{identifier!r} matches {len(rows)} HIPPIE proteins: "
+            f"{identifier!r} matches {total} HIPPIE proteins: "
             + ", ".join(f"{r['symbol']} ({r['uniprot_id']})" for r in rows[:10])
             + ". Pass a UniProt accession to disambiguate."
         )
+    if truncated:
+        summary += f" Listing {len(rows)} of the {total} matches (cap {MAX_LIMIT})."
 
-    return {"summary": summary, "found": True, "matches": rows}
+    return {
+        "summary": summary,
+        "found": True,
+        "total": total,
+        "returned": len(rows),
+        "truncated": truncated,
+        "matches": rows,
+    }
 
 
 @mcp.tool()
@@ -356,7 +371,13 @@ def get_interactions(
             "unresolved_identifiers": found.unresolved,
         }
 
-    rows = query_service.interaction_rows(found.protein_pks, f, found.isoform_uid_map)
+    # Capped in the query where the filters allow it, so a hub protein does not
+    # pay to build thousands of rows for a 25-row answer. The true total comes
+    # back alongside, because a capped result must still say what it capped.
+    capped = clamp_limit(limit)
+    rows, total = query_service.interaction_rows_page(
+        found.protein_pks, f, found.isoform_uid_map, limit=capped
+    )
     # Name the accession, not just the symbol: a symbol like TP53 matches several
     # HIPPIE records and resolution picks one, so the summary has to say which.
     symbols = [
@@ -368,7 +389,8 @@ def get_interactions(
     ]
     result = interactions_result(
         rows=rows,
-        limit=clamp_limit(limit),
+        limit=capped,
+        total=total,
         query_symbols=symbols,
         unresolved=found.unresolved,
         show=show,
@@ -427,6 +449,22 @@ def check_pairs(
     ``unknown_identifier``. Absence of evidence and evidence of absence are
     different answers here, so they are different outcomes.
     """
+    # Size is checked against the raw input, before anything is filtered out, and
+    # before the normalisation loop below walks the whole list. Checking the
+    # post-filter count instead would let a 50,000-pair request through as long as
+    # all but 200 of its entries were malformed, and would pay for a full Python
+    # pass over the input to work that out.
+    if len(pairs) > pairs_service.BATCH_LIMIT:
+        return {
+            "summary": (
+                f"Batch too large: {len(pairs)} pairs "
+                f"(max {pairs_service.BATCH_LIMIT} per call)."
+            ),
+            "error": "too_many_pairs",
+            "counts": {},
+            "rows": [],
+        }
+
     normalised: list[tuple[str, str, int]] = []
     malformed: list[int] = []
     for index, pair in enumerate(pairs):
@@ -446,16 +484,6 @@ def check_pairs(
                 "list of protein identifiers."
             ),
             "error": "no_pairs",
-            "counts": {},
-            "rows": [],
-        }
-    if len(normalised) > pairs_service.BATCH_LIMIT:
-        return {
-            "summary": (
-                f"Batch too large: {len(normalised)} pairs "
-                f"(max {pairs_service.BATCH_LIMIT} per call)."
-            ),
-            "error": "too_many_pairs",
             "counts": {},
             "rows": [],
         }
@@ -565,7 +593,12 @@ def list_filter_options(
             options = filter_lookup.options_for(k)
             overview[k] = {
                 "n_options": len(options),
-                "categories": filter_lookup.category_order_for(k),
+                # Populated categories only. A declared-but-empty label is not a
+                # usable filter value, so listing it would be an invitation to a
+                # call that fails.
+                "categories": filter_lookup.populated_category_order_for(
+                    k, options=options
+                ),
             }
         return {
             "summary": (
@@ -592,8 +625,12 @@ def list_filter_options(
             entry["psi_mi_code"] = option["psi_mi_code"]
         grouped.setdefault(option["category"], []).append(entry)
 
-    order = filter_lookup.category_order_for(kind)
-    categories = {label: grouped[label] for label in order if label in grouped}
+    # Declared order, narrowed to what these options actually carry — so
+    # category_order and categories agree, and neither names an empty category.
+    order = [
+        label for label in filter_lookup.category_order_for(kind) if label in grouped
+    ]
+    categories = {label: grouped[label] for label in order}
 
     summary = f"{len(options)} {kind} option(s)"
     if query:

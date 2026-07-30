@@ -9,5 +9,9 @@ django-vite==3.1.0
 gunicorn>=21.2
 pandas>=2.1
 pyarrow>=15.0
-# MCP server (hippie_mcp). Brings starlette, uvicorn, httpx2 and pydantic with it.
-mcp>=2.0
+# MCP server (hippie_mcp). Brings starlette, uvicorn, pydantic and httpx2 (the
+# package really is named httpx2 — it is what starlette's TestClient uses here,
+# not httpx) with it.
+# Upper bound is deliberate: this SDK removed its whole v1 surface (FastMCP,
+# mcp.server.fastmcp) in v2, and hippie_mcp imports v2-only symbols with no shim.
+mcp>=2.0,<3.0

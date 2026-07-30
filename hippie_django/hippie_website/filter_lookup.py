@@ -141,8 +141,27 @@ def options_for(kind: str) -> list[dict]:
 
 
 def category_order_for(kind: str) -> list[str]:
-    """Display order of ``kind``'s category labels, "Other" pinned last."""
+    """Display order of ``kind``'s *declared* category labels, "Other" pinned last.
+
+    Declared, not populated: the list is a static tuple in ``filter_categories``
+    and can name a category the database currently has no rows for. Anything
+    caller-facing wants :func:`populated_category_order_for` instead.
+    """
     return list(_spec(kind).category_order)
+
+
+def populated_category_order_for(
+    kind: str, *, options: list[dict] | None = None
+) -> list[str]:
+    """:func:`category_order_for`, minus categories with no live options.
+
+    A category label is only worth showing if filtering by it would select
+    something. Pass ``options`` to reuse an option list already fetched, which is
+    what :mod:`hippie_mcp.server` does — otherwise this costs one query.
+    """
+    opts = options if options is not None else options_for(kind)
+    present = {o["category"] for o in opts}
+    return [label for label in category_order_for(kind) if label in present]
 
 
 @dataclass
@@ -244,13 +263,19 @@ def resolve_filter_values(
     by_code: dict[str, dict] = {
         o["psi_mi_code"].casefold(): o for o in opts if o.get("psi_mi_code")
     }
+    # Built from the live options only. A category the vocabulary *declares* but
+    # has no rows for is deliberately absent, so it falls through to unresolved
+    # instead of matching and expanding to nothing: an empty expansion is
+    # indistinguishable from "no filter", which would silently widen the query.
+    # Such a category is not listed by list_filter_options either.
     by_category: dict[str, list[dict]] = {}
     for o in opts:
         by_category.setdefault(o["category"].casefold(), []).append(o)
-    # Category labels the vocabulary declares but has no rows for are still
-    # legal input — they simply expand to nothing rather than reading as a typo.
-    for label in spec.category_order:
-        by_category.setdefault(label.casefold(), [])
+
+    # Spelling suggestions offer only categories that exist, for the same reason.
+    populated_categories = [
+        label for label in spec.category_order if label.casefold() in by_category
+    ]
 
     seen_ids: set[int] = set()
 
@@ -325,7 +350,7 @@ def resolve_filter_values(
                 "unknown",
                 candidates=difflib.get_close_matches(
                     text,
-                    [o["name"] for o in opts] + list(spec.category_order),
+                    [o["name"] for o in opts] + populated_categories,
                     n=_MAX_CANDIDATES,
                     cutoff=0.5,
                 ),

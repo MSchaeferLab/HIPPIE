@@ -8,10 +8,12 @@ Transport, schema generation, and ``structured_content`` are covered separately
 in ``test_mcp_protocol``.
 """
 
-from django.test import TestCase
+from unittest.mock import patch
+
+from django.test import SimpleTestCase, TestCase
 
 from hippie_mcp import server
-from hippie_mcp.shaping import DEFAULT_LIMIT, MAX_LIMIT
+from hippie_mcp.shaping import DEFAULT_LIMIT, MAX_LIMIT, pairs_result
 
 from ..filter_categories import experiment_category
 from ..models import ExperimentType, Isoform, Source
@@ -113,6 +115,44 @@ class ResolveProteinTests(McpToolTestCase):
         out = server.resolve_protein("P04637")
         self.assertEqual(next(iter(out)), "summary")
 
+    def test_match_list_reports_its_own_size_like_every_other_tool(self):
+        out = server.resolve_protein("P04637")
+        self.assertEqual((out["total"], out["returned"]), (1, 1))
+        self.assertFalse(out["truncated"])
+
+
+class ResolveProteinCapTests(TestCase):
+    """The match list is capped like every other tool result, and says so.
+
+    Realistically unreachable — the broadest query resolves to ~32 records — but
+    a silent cap here would be the one place a result could look complete.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        # Three records behind one gene symbol; HIPPIE really is like this (TP53
+        # alone has eight), which is why resolve_protein exists.
+        for i in range(3):
+            make_protein(
+                "DUP", uniprot_name=f"DUP{i}_HUMAN", gene_id=88881, accession=f"DUP{i}"
+            )
+        recompute_stats()
+
+    def test_all_matches_are_listed_when_under_the_cap(self):
+        out = server.resolve_protein("DUP")
+        self.assertEqual((out["total"], out["returned"]), (3, 3))
+        self.assertFalse(out["truncated"])
+
+    def test_a_capped_match_list_reports_the_true_total(self):
+        with patch("hippie_mcp.server.MAX_LIMIT", 2):
+            out = server.resolve_protein("DUP")
+        self.assertEqual(out["returned"], 2)
+        self.assertEqual(out["total"], 3)
+        self.assertTrue(out["truncated"])
+        self.assertEqual(len(out["matches"]), 2)
+        # Never silently: the true total belongs in the prose too.
+        self.assertIn("3", out["summary"])
+
 
 class GetInteractionsTests(McpToolTestCase):
     def test_returns_partners_ordered_by_score(self):
@@ -137,6 +177,46 @@ class GetInteractionsTests(McpToolTestCase):
     def test_limit_is_clamped_to_max(self):
         out = server.get_interactions(proteins=["HUB001"], limit=10_000)
         self.assertLessEqual(out["returned"], MAX_LIMIT)
+
+    # ── the cap is applied in the query, not after the fact ─────────────────
+
+    def test_a_small_limit_still_reports_the_full_total(self):
+        """The cap rides the query's LIMIT; the total comes from a separate count.
+
+        A hub protein must not have to build every row to answer with five.
+        """
+        out = server.get_interactions(proteins=["HUB001"], limit=5)
+        self.assertEqual(out["total"], DEFAULT_LIMIT + 7)
+        self.assertEqual(out["returned"], 5)
+        self.assertEqual(len(out["rows"]), 5)
+        self.assertTrue(out["truncated"])
+
+    def test_the_capped_rows_are_the_highest_scoring_ones(self):
+        """Cheapest way to catch a LIMIT applied before the ORDER BY."""
+        capped = server.get_interactions(proteins=["HUB001"], limit=5)["rows"]
+        everything = server.get_interactions(proteins=["HUB001"], limit=MAX_LIMIT)
+        scores = [r["score"] for r in capped]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+        self.assertEqual(scores, [r["score"] for r in everything["rows"][:5]])
+
+    def test_a_protein_level_filter_falls_back_and_still_counts_correctly(self):
+        """``min_degree`` runs in Python against the partner, so the database
+        cannot count survivors — that path must build every row to stay honest."""
+        out = server.get_interactions(proteins=["HUB001"], min_degree=2, limit=5)
+        self.assertEqual(out["total"], 0)
+        self.assertEqual(out["rows"], [])
+
+        out = server.get_interactions(proteins=["HUB001"], min_degree=1, limit=5)
+        self.assertEqual(out["total"], DEFAULT_LIMIT + 7)
+        self.assertEqual(out["returned"], 5)
+
+    def test_both_mode_totals_span_the_two_legs(self):
+        out = server.get_interactions(proteins=["Q00987"], show="both", limit=1)
+        # MDM2: one interaction (TP53) and one recorded non-interaction (BRCA1).
+        self.assertEqual(out["total"], 2)
+        self.assertEqual(out["returned"], 1)
+        # Highest score first across both legs.
+        self.assertEqual(out["rows"][0]["score"], 0.97)
 
     def test_no_partners_is_an_empty_not_an_error(self):
         out = server.get_interactions(proteins=["LON001"])
@@ -191,6 +271,25 @@ class GetInteractionsTests(McpToolTestCase):
     def test_resolved_filters_are_echoed(self):
         out = server.get_interactions(proteins=["P04637"], sources=["BioGRID"])
         self.assertIn("source", out["resolved_filters"])
+
+    def test_a_multi_source_edge_counts_once(self):
+        """The total comes from a COUNT, so an M2M filter must not multiply rows.
+
+        The vocabulary filters use EXISTS subqueries for exactly this reason; a
+        rewrite to ``filter(sources__in=...)`` would join and report one edge with
+        two sources as two matches.
+        """
+        second = Source.objects.create(
+            name="IntAct",
+            url="https://www.ebi.ac.uk/intact/",
+            n_connected_interactions=1,
+        )
+        self.ix_mdm2.sources.add(second)
+        out = server.get_interactions(
+            proteins=["P04637"], sources=["BioGRID", "IntAct"]
+        )
+        self.assertEqual(out["total"], 1)
+        self.assertEqual(len(out["rows"]), 1)
 
     def test_unresolvable_filter_refuses_to_run_the_query(self):
         """The important one: a bad filter must not silently widen the result."""
@@ -257,6 +356,17 @@ class CheckPairsTests(McpToolTestCase):
         out = server.check_pairs(pairs=[["A", "B"]] * 201)
         self.assertEqual(out["error"], "too_many_pairs")
 
+    def test_oversized_batch_is_rejected_on_its_raw_size(self):
+        """Size is judged before malformed entries are discarded.
+
+        Counting only the usable pairs would let an arbitrarily large payload
+        through as long as all but ``BATCH_LIMIT`` of its entries were junk.
+        """
+        pairs = [["P04637", "Q00987"]] + [[] for _ in range(200)]
+        out = server.check_pairs(pairs=pairs)
+        self.assertEqual(out["error"], "too_many_pairs")
+        self.assertIn("201", out["summary"])
+
     def test_unresolvable_filter_refuses_to_run(self):
         out = server.check_pairs(pairs=[["P04637", "Q00987"]], sources=["not-a-source"])
         self.assertEqual(out["error"], "unresolved_filter")
@@ -303,6 +413,26 @@ class ListFilterOptionsTests(McpToolTestCase):
         self.assertEqual(set(entry), {"n_options", "categories"})
         self.assertNotIn("categories", out)
 
+    def test_overview_omits_categories_with_no_options(self):
+        """Every label listed must be a filter value that would select something.
+
+        The declared category tuples cover the whole PSI-MI vocabulary, so most
+        of them are empty in any given database — including this fixture, which
+        has two experiment types.
+        """
+        out = server.list_filter_options()
+        listed = out["vocabularies"]["experiment"]["categories"]
+        populated = {
+            experiment_category("MI:0018", "two hybrid"),
+            experiment_category("MI:0096", "pull down"),
+        }
+        self.assertEqual(set(listed), populated)
+        self.assertEqual(out["vocabularies"]["tissue"]["categories"], [])
+
+    def test_kind_category_order_matches_the_categories_returned(self):
+        out = server.list_filter_options(kind="experiment")
+        self.assertEqual(out["category_order"], list(out["categories"]))
+
     def test_kind_returns_grouped_options(self):
         out = server.list_filter_options(kind="experiment")
         names = [
@@ -342,19 +472,117 @@ class IsoformToolTests(TestCase):
             general_protein=cls.canonical,
             is_reviewed=True,
         )
-        make_interaction(cls.canonical, cls.partner, score=0.8)
-        make_interaction(cls.isoform, cls.partner, score=0.6)
+        # The isoform shares the gene, so both edges display the symbol "SRC" —
+        # the interaction ids are what tells the two apart in a result row.
+        cls.canonical_edge = make_interaction(cls.canonical, cls.partner, score=0.8)
+        cls.isoform_edge = make_interaction(cls.isoform, cls.partner, score=0.6)
         recompute_stats()
+
+    def _edge_ids(self, out) -> list[int]:
+        return [r["interaction_id"] for r in out["rows"]]
 
     def test_general_mode_excludes_isoform_edges(self):
         out = server.get_interactions(proteins=["P12931"], isoform_mode="general")
         self.assertEqual(out["total"], 1)
+        self.assertEqual(self._edge_ids(out), [self.canonical_edge.pk])
+
+    def test_isoforms_mode_returns_only_isoform_edges(self):
+        """The inverse of general mode: every row involves a non-canonical isoform.
+
+        Querying the canonical accession still reaches its isoforms — resolution
+        expands the seed — but the canonical-to-canonical edge is gated out.
+        """
+        out = server.get_interactions(proteins=["P12931"], isoform_mode="isoforms")
+        self.assertEqual(out["total"], 1)
+        self.assertEqual(self._edge_ids(out), [self.isoform_edge.pk])
+        self.assertEqual(out["rows"][0]["score"], 0.6)
 
     def test_both_mode_includes_isoform_edges(self):
         out = server.get_interactions(proteins=["P12931"], isoform_mode="both")
-        self.assertGreater(out["total"], 1)
+        self.assertEqual(out["total"], 2)
+        self.assertCountEqual(
+            self._edge_ids(out), [self.canonical_edge.pk, self.isoform_edge.pk]
+        )
 
     def test_isoform_accession_resolves(self):
         out = server.resolve_protein("P12931-2")
         self.assertTrue(out["found"])
         self.assertTrue(out["matches"][0]["is_isoform"])
+
+    # ── check_pairs, which expands each side independently ──────────────────
+
+    def test_check_pairs_general_mode_sees_only_the_canonical_edge(self):
+        out = server.check_pairs(pairs=[["P12931", "Q05397"]], isoform_mode="general")
+        self.assertEqual(out["total"], 1)
+        self.assertEqual(out["rows"][0]["outcome"], "interacts")
+        self.assertEqual(out["rows"][0]["interaction_id"], self.canonical_edge.pk)
+
+    def test_check_pairs_isoforms_mode_drops_the_canonical_combination(self):
+        out = server.check_pairs(pairs=[["P12931", "Q05397"]], isoform_mode="isoforms")
+        self.assertEqual(out["total"], 1)
+        self.assertEqual(out["rows"][0]["interaction_id"], self.isoform_edge.pk)
+        self.assertEqual(out["rows"][0]["score"], 0.6)
+
+    def test_check_pairs_both_mode_fans_one_pair_out_to_every_combination(self):
+        """One input pair, two output rows — which is why pairs_result caps rows."""
+        out = server.check_pairs(pairs=[["P12931", "Q05397"]], isoform_mode="both")
+        self.assertEqual(out["total"], 2)
+        self.assertEqual(out["returned"], 2)
+        self.assertFalse(out["truncated"])
+        self.assertCountEqual(
+            [r["interaction_id"] for r in out["rows"]],
+            [self.canonical_edge.pk, self.isoform_edge.pk],
+        )
+
+    def test_check_pairs_isoform_accession_is_not_expanded_further(self):
+        out = server.check_pairs(
+            pairs=[["P12931-2", "Q05397"]], isoform_mode="isoforms"
+        )
+        self.assertEqual(out["total"], 1)
+        self.assertEqual(out["rows"][0]["interaction_id"], self.isoform_edge.pk)
+
+
+class PairsResultCapTests(SimpleTestCase):
+    """``pairs_result``'s row cap, exercised directly.
+
+    Reaching ``MAX_LIMIT`` rows through the tool would take ~100 fixture pairs
+    with isoform fan-out; the cap itself is pure shaping, so it is tested here and
+    the fan-out that makes it reachable is tested in ``IsoformToolTests``.
+    """
+
+    @staticmethod
+    def _row(index: int) -> dict:
+        return {
+            "input_a": f"A{index}",
+            "input_b": f"B{index}",
+            "symbol_a": f"A{index}",
+            "symbol_b": f"B{index}",
+            "uniprot_a": f"ACC_A{index}",
+            "uniprot_b": f"ACC_B{index}",
+            "score": 0.9,
+            "source_count": 1,
+            "experiment_count": 1,
+            "is_noninteraction": False,
+            "interaction_id": index,
+            "detail_url": f"/interaction/{index}/",
+        }
+
+    def test_uncapped_batch_reports_no_truncation(self):
+        out = pairs_result(rows=[self._row(i) for i in range(3)], resolved_filters={})
+        self.assertEqual((out["total"], out["returned"]), (3, 3))
+        self.assertFalse(out["truncated"])
+
+    def test_rows_are_capped_and_the_cap_is_reported(self):
+        rows = [self._row(i) for i in range(MAX_LIMIT + 50)]
+        out = pairs_result(rows=rows, resolved_filters={})
+        self.assertEqual(out["total"], MAX_LIMIT + 50)
+        self.assertEqual(out["returned"], MAX_LIMIT)
+        self.assertEqual(len(out["rows"]), MAX_LIMIT)
+        self.assertTrue(out["truncated"])
+        # Never silently: the true total has to be in the prose too.
+        self.assertIn(str(MAX_LIMIT + 50), out["summary"])
+
+    def test_counts_cover_the_whole_batch_not_just_the_kept_rows(self):
+        rows = [self._row(i) for i in range(MAX_LIMIT + 50)]
+        out = pairs_result(rows=rows, resolved_filters={})
+        self.assertEqual(out["counts"]["interacts"], MAX_LIMIT + 50)

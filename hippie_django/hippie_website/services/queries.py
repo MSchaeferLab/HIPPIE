@@ -431,6 +431,57 @@ def noninteraction_edge_qs(protein_pks: list[int], f: CommonFilters) -> QuerySet
 # ---------------------------------------------------------------------------
 
 
+def _orient(edge, protein_pks_set: set[int]) -> tuple[Protein, Protein]:
+    """Split an edge into ``(query_side, partner)``.
+
+    ``protein_1`` wins when both endpoints were queried, which is what makes the
+    protein-level filters apply to exactly one side per edge.
+    """
+    if edge.protein_1_id in protein_pks_set:
+        return edge.protein_1, edge.protein_2
+    return edge.protein_2, edge.protein_1
+
+
+def _interaction_row(
+    interaction: Interaction,
+    query_side: Protein,
+    partner: Protein,
+    uid_map: dict[int, str],
+) -> dict:
+    return {
+        "id": interaction.pk,
+        "query_side": protein_display(query_side, uid_map.get(query_side.pk)),
+        "partner": protein_display(partner),
+        "score": round(interaction.score, 4),
+        # Reads the prefetch cache, so this is a len(), not a COUNT query.
+        "source_count": interaction.sources.all().count(),
+        "experiment_count": interaction.experiments.all().count(),
+        "is_noninteraction": False,
+        "detail_url": reverse(
+            "hippie_website:interaction_detail", args=[interaction.pk]
+        ),
+    }
+
+
+def _noninteraction_row(
+    ni: NonInteraction,
+    query_side: Protein,
+    partner: Protein,
+    uid_map: dict[int, str],
+) -> dict:
+    return {
+        "id": ni.pk,
+        "query_side": protein_display(query_side, uid_map.get(query_side.pk)),
+        "partner": protein_display(partner),
+        "score": round(ni.score, 4),
+        # Non-interactions carry no source / experiment evidence.
+        "source_count": None,
+        "experiment_count": None,
+        "is_noninteraction": True,
+        "detail_url": reverse("hippie_website:noninteraction_detail", args=[ni.pk]),
+    }
+
+
 def interaction_rows(
     protein_pks: list[int],
     f: CommonFilters,
@@ -445,6 +496,9 @@ def interaction_rows(
 
     An edge touching two queried proteins appears once, because the underlying
     queryset returns it once.
+
+    Returns *every* match. A caller that only wants the top few should use
+    :func:`interaction_rows_page`, which can push the cap into the query.
     """
     uid_map = isoform_uid_map or {}
     protein_pks_set = set(protein_pks)
@@ -453,58 +507,83 @@ def interaction_rows(
 
     if f.show in ("interactions", "both"):
         for interaction in interaction_edge_qs(protein_pks, f):
-            if interaction.protein_1_id in protein_pks_set:
-                query_side, partner = interaction.protein_1, interaction.protein_2
-            else:
-                query_side, partner = interaction.protein_2, interaction.protein_1
+            query_side, partner = _orient(interaction, protein_pks_set)
             # Protein-level filters apply to the partner (B) side.
             if not protein_passes(partner, f, tissue_pks):
                 continue
-            results.append(
-                {
-                    "id": interaction.pk,
-                    "query_side": protein_display(
-                        query_side, uid_map.get(query_side.pk)
-                    ),
-                    "partner": protein_display(partner),
-                    "score": round(interaction.score, 4),
-                    "source_count": interaction.sources.all().count(),
-                    "experiment_count": interaction.experiments.all().count(),
-                    "is_noninteraction": False,
-                    "detail_url": reverse(
-                        "hippie_website:interaction_detail", args=[interaction.pk]
-                    ),
-                }
-            )
+            results.append(_interaction_row(interaction, query_side, partner, uid_map))
 
     if f.show in ("noninteractions", "both") and not f.has_source_like:
         for ni in noninteraction_edge_qs(protein_pks, f):
-            if ni.protein_1_id in protein_pks_set:
-                query_side, partner = ni.protein_1, ni.protein_2
-            else:
-                query_side, partner = ni.protein_2, ni.protein_1
+            query_side, partner = _orient(ni, protein_pks_set)
             # Protein-level filters apply to the partner (B) side.
             if not protein_passes(partner, f, tissue_pks):
                 continue
-            results.append(
-                {
-                    "id": ni.pk,
-                    "query_side": protein_display(
-                        query_side, uid_map.get(query_side.pk)
-                    ),
-                    "partner": protein_display(partner),
-                    "score": round(ni.score, 4),
-                    "source_count": None,
-                    "experiment_count": None,
-                    "is_noninteraction": True,
-                    "detail_url": reverse(
-                        "hippie_website:noninteraction_detail", args=[ni.pk]
-                    ),
-                }
-            )
+            results.append(_noninteraction_row(ni, query_side, partner, uid_map))
 
     # For "both" mode, re-sort by score descending (interactions first for ties)
     if f.show == "both":
         results.sort(key=lambda r: r["score"], reverse=True)
 
     return results
+
+
+def interaction_rows_page(
+    protein_pks: list[int],
+    f: CommonFilters,
+    isoform_uid_map: dict[int, str] | None = None,
+    *,
+    limit: int,
+) -> tuple[list[dict], int]:
+    """The top ``limit`` edge rows by score, plus the true total match count.
+
+    For a caller that shows a capped result and states the total — the MCP tools
+    — building every row first is pure waste: a hub protein has thousands of
+    partners, and each discarded row costs a serialisation pass plus its share of
+    the source / experiment prefetch.
+
+    So when no protein-level filter is active, the cap goes into the query
+    (``LIMIT``, riding the existing ``-score`` ordering) and the total comes from
+    a separate lean ``COUNT`` — the interaction-level filters are ``EXISTS``
+    subqueries that never multiply rows, so that count is exact. Nothing is
+    annotated onto the counted queryset, per the ``browse_proteins_api`` lesson.
+
+    When a protein-level filter *is* active the fallback is today's behaviour:
+    those filters run in Python against the partner side, so the database cannot
+    know how many rows survive them, and the honest total needs every row built.
+    Correctness over speed — a wrong total is worse than a slow one.
+
+    In "both" mode each leg is capped separately before the merge, which still
+    yields the global top ``limit``: the top *k* of a union is contained in the
+    union of the per-leg top *k*.
+    """
+    if f.has_protein_level:
+        rows = interaction_rows(protein_pks, f, isoform_uid_map)
+        return rows[:limit], len(rows)
+
+    uid_map = isoform_uid_map or {}
+    protein_pks_set = set(protein_pks)
+    results: list[dict] = []
+    total = 0
+
+    if f.show in ("interactions", "both"):
+        qs = interaction_edge_qs(protein_pks, f)
+        total += qs.count()
+        results.extend(
+            _interaction_row(i, *_orient(i, protein_pks_set), uid_map)
+            for i in qs[:limit]
+        )
+
+    if f.show in ("noninteractions", "both") and not f.has_source_like:
+        qs = noninteraction_edge_qs(protein_pks, f)
+        total += qs.count()
+        results.extend(
+            _noninteraction_row(n, *_orient(n, protein_pks_set), uid_map)
+            for n in qs[:limit]
+        )
+
+    # Stable, so interactions still win ties against non-interactions.
+    if f.show == "both":
+        results.sort(key=lambda r: r["score"], reverse=True)
+
+    return results[:limit], total

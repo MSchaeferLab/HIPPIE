@@ -52,7 +52,14 @@
     ProxyPassReverse ${APACHE_PUBLISHED_PATH}/ http://web:8000/
 
     # mod_proxy_http already sets X-Forwarded-For; add the proto.
-    RequestHeader set X-Forwarded-Proto expr=%{REQUEST_SCHEME}
+    #
+    # setifempty, not set: in production an outer Apache terminates TLS and sets
+    # this to "https" before proxying here over plain HTTP on localhost. `set`
+    # would overwrite that with this vhost's own REQUEST_SCHEME ("http"), and
+    # Django would then build every absolute URL as http:// on an https:// site.
+    # setifempty preserves an upstream value and still fills in a sensible default
+    # for a local `docker compose up` with no proxy in front.
+    RequestHeader setifempty X-Forwarded-Proto expr=%{REQUEST_SCHEME}
 
     ErrorLog  ${APACHE_LOG_DIR}/error.log
     CustomLog ${APACHE_LOG_DIR}/access.log combined

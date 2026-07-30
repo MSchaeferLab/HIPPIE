@@ -58,10 +58,30 @@ def _transport_security() -> TransportSecuritySettings | None:
     with a port wildcard, because the allowlist matches ``host:port`` patterns
     and a ``Host`` header may or may not carry the port.
 
+    Two Django spellings need translating rather than copying, because the SDK
+    matcher only understands literal hosts and a trailing ``:*`` port wildcard:
+
+    * ``'*'`` means "any host" to Django. Registered literally it would allow
+      exactly one host named ``*`` and reject everything real, so it disables
+      DNS-rebinding protection instead — which is what the operator asked for.
+    * ``'.example.com'`` means "example.com and any subdomain". The SDK has no
+      subdomain wildcard, so it becomes ``example.com`` plus ``*.example.com``.
+
     Returning ``None`` (no ALLOWED_HOSTS, i.e. local dev) leaves the SDK's
     localhost-only default in place, which is the right answer there.
     """
-    hosts = [h for h in settings.ALLOWED_HOSTS if h and h != "*"]
+    raw = [h for h in settings.ALLOWED_HOSTS if h]
+    if "*" in raw:
+        # Any host is allowed; an allowlist would only be able to narrow that.
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+    hosts: list[str] = []
+    for host in raw:
+        if host.startswith("."):
+            hosts.append(host[1:])
+            hosts.append(f"*{host}")
+        else:
+            hosts.append(host)
     if not hosts:
         return None
 

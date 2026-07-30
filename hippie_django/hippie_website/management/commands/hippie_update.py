@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandParser
-from django.db import connection, transaction
+from django.db import connection, models, transaction
 from django.db.models.functions import Lower
 
 from . import _biomart
@@ -1014,7 +1014,9 @@ def _refresh_secondary_accessions() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _recompute_vocab_interaction_counts(model, related_name: str) -> None:
+def _recompute_vocab_interaction_counts(
+    model: type[models.Model], related_name: str
+) -> None:
     """Set ``model.n_connected_interactions`` to the count of linked Interactions.
 
     Shared by Source, ExperimentType and InteractionType — all three expose the

@@ -18,6 +18,8 @@ urlpatterns = [
         name="download_dataset",
     ),
     path("information/", views.information_view, name="information"),
+    # Readiness probe for the web container's docker-compose healthcheck.
+    path("status/", views.status_view, name="status"),
     path("machine-learning/", views.machine_learning_view, name="machine_learning"),
     # ── Detail pages ───────────────────────────────────────────
     path(

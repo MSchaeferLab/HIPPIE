@@ -312,7 +312,16 @@ def resolve_interaction_pair_with_isoforms(
                 # (for correct display ordering in the response).
                 canonical_pairs[(p1_pk, p2_pk)] = (pa_pk, pb_pk)
 
-    if isoform_mode == "isoforms":
+    if isoform_mode == "isoforms" and not (
+        protein_a.pk in isoform_uid_map or protein_b.pk in isoform_uid_map
+    ):
+        # Drop the unsubstituted pair, but only when both sides resolved to
+        # canonical proteins — that combo is what "general" mode answers. When an
+        # input identifier is itself an isoform accession the original pair
+        # already IS an isoform edge, and dropping it would report "no record"
+        # for an interaction this mode exists to surface. Same rule the query
+        # side applies via ``isoform_only_q``: at least one endpoint must be a
+        # non-canonical isoform, and an isoform input satisfies that on its own.
         canonical_pairs = {
             key: origin
             for key, origin in canonical_pairs.items()

@@ -106,9 +106,39 @@ class FilterLookupTests(TestCase):
         )
         self.assertEqual(res.matched[0].matched_by, "category")
 
-    def test_declared_category_with_no_rows_resolves_to_nothing(self):
-        """A legal label the database happens to have no rows for is not a typo."""
-        empty = next(
+    def test_declared_category_with_no_rows_does_not_resolve(self):
+        """A declared label with no live rows must fail, not expand to nothing.
+
+        An empty expansion reaches the query as "no filter", which silently
+        widens the result set instead of answering what was asked. So a category
+        nothing currently belongs to is treated as unresolved — the same as a
+        typo — and is not offered by ``list_filter_options`` either.
+        """
+        empty = self._empty_source_category()
+        res = fl.resolve_filter_values("source", [empty])
+        self.assertFalse(res.ok)
+        self.assertEqual(res.ids, [])
+        self.assertEqual(res.matched, [])
+        self.assertEqual(res.unresolved[0].value, empty)
+
+    def test_empty_category_is_not_offered_as_a_suggestion(self):
+        """The did-you-mean pool lists populated categories only."""
+        empty = self._empty_source_category()
+        res = fl.resolve_filter_values("source", [empty[:6] + "zzz"])
+        self.assertFalse(res.ok)
+        self.assertNotIn(empty, res.unresolved[0].candidates)
+
+    def test_populated_category_order_drops_empty_categories(self):
+        populated = fl.populated_category_order_for("source")
+        self.assertNotIn(self._empty_source_category(), populated)
+        self.assertIn(source_category(self.biogrid.name), populated)
+        # Still a subset of the declared order, in declared order.
+        declared = fl.category_order_for("source")
+        self.assertEqual(populated, [c for c in declared if c in populated])
+
+    def _empty_source_category(self) -> str:
+        """A declared source category that no test row belongs to."""
+        return next(
             label
             for label in fl.category_order_for("source")
             if label
@@ -117,10 +147,6 @@ class FilterLookupTests(TestCase):
                 source_category(self.intact.name),
             }
         )
-        res = fl.resolve_filter_values("source", [empty])
-        self.assertTrue(res.ok)
-        self.assertEqual(res.ids, [])
-        self.assertEqual(res.matched[0].matched_by, "category")
 
     # ── tier 5: substrings ─────────────────────────────────────────────────
 

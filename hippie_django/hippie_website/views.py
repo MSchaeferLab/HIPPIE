@@ -16,8 +16,11 @@ All database access goes through the custom managers defined in managers.py:
 import hashlib
 import json
 import os
+import time
 from django.conf import settings
 from django.core.cache import cache
+from django.db import connections
+from django.db.migrations.executor import MigrationExecutor
 from django.db.models import (
     CharField,
     Exists,
@@ -1226,8 +1229,15 @@ def machine_learning_view(request):
 # ---------------------------------------------------------------------------
 
 
-def _validate_split_params(body: dict) -> dict:
+def _validate_split_params(body: dict) -> tuple[dict | None, str | None]:
     """Coerce and validate the split/stats parameter payload.
+
+    Returns ``(params, None)`` on success or ``(None, message)`` on failure,
+    mirroring ``_parse_json_body`` — the caller turns the message into a
+    ``JsonResponse``. It does not raise ``BadRequest``: with ``DEBUG=False``
+    Django renders an uncaught one as a generic message-less 400 page, so the
+    constraint that failed never reaches the caller, which is the opposite of
+    what the API docs promise.
 
     Keys mirror ``SplitParams`` field names exactly so the dict can be splatted
     into ``SplitParams(**params)`` (see tasks.run_split_job).
@@ -1237,8 +1247,6 @@ def _validate_split_params(body: dict) -> dict:
     degree within the filtered subgraph). The old key is still accepted so
     Browse → ML Splits deep links and bookmarked URLs keep working.
     """
-    from django.core.exceptions import BadRequest
-
     min_degree = body.get("min_degree_global", body.get("min_degree", 0))
 
     try:
@@ -1260,22 +1268,22 @@ def _validate_split_params(body: dict) -> dict:
             "seed": int(body.get("seed", 78539105873)),
         }
     except (ValueError, TypeError) as exc:
-        raise BadRequest(str(exc))
+        return None, str(exc)
     if not 0.0 <= params["min_score"] <= 1.0:
-        raise BadRequest("min_score must be between 0.0 and 1.0")
+        return None, "min_score must be between 0.0 and 1.0"
     if not 0.0 <= params["max_score"] <= 1.0:
-        raise BadRequest("max_score must be between 0.0 and 1.0")
+        return None, "max_score must be between 0.0 and 1.0"
     if params["max_score"] < params["min_score"]:
-        raise BadRequest("max_score must be >= min_score")
+        return None, "max_score must be >= min_score"
     if not 0.0 <= params["min_avg_score"] <= 1.0:
-        raise BadRequest("min_avg_score must be between 0.0 and 1.0")
+        return None, "min_avg_score must be between 0.0 and 1.0"
     if params["min_degree_global"] < 0:
-        raise BadRequest("min_degree_global must be >= 0")
+        return None, "min_degree_global must be >= 0"
     if params["min_rpkm"] < 0:
-        raise BadRequest("min_rpkm must be >= 0")
+        return None, "min_rpkm must be >= 0"
     if not 0.1 <= params["neg_ratio"] <= 10.0:
-        raise BadRequest("neg_ratio must be between 0.1 and 10.0")
-    return params
+        return None, "neg_ratio must be between 0.1 and 10.0"
+    return params, None
 
 
 def _ml_filter_meta() -> dict:
@@ -1325,7 +1333,9 @@ def browse_splits_create(request):
     body, err = _parse_json_body(request)
     if err:
         return err
-    params = _validate_split_params(body)  # raises 400 on bad input
+    params, invalid = _validate_split_params(body)
+    if invalid:
+        return JsonResponse({"error": invalid}, status=400)
     job = SplitJob.objects.create(params=params)
     run_split_job.delay(str(job.id))
     return JsonResponse({"job_id": str(job.id), "status": job.status}, status=202)
@@ -1519,7 +1529,10 @@ def browse_splits_stats(request):
     body, err = _parse_json_body(request)
     if err:
         return err
-    params = SplitParams.from_payload(_validate_split_params(body))
+    validated, invalid = _validate_split_params(body)
+    if invalid:
+        return JsonResponse({"error": invalid}, status=400)
+    params = SplitParams.from_payload(validated)
     iqs = build_interaction_queryset(params)
     interaction_stats, degree_by_node, score_sum_by_node = _interaction_stats(iqs)
     return JsonResponse(
@@ -1575,4 +1588,68 @@ def browse_splits_download(request, job_id):
         open(job.zip_path, "rb"),
         as_attachment=True,
         filename=f"hippie_splits_{job_id}.zip",
-    )  # ---------------------------------------------------------------------------
+    )
+
+
+# ---------------------------------------------------------------------------
+# Operational status
+# ---------------------------------------------------------------------------
+
+
+@require_GET
+def status_view(request):
+    """Readiness check for the ``web`` container, deeper than liveness.
+
+    This is the docker-compose healthcheck target, and the whole stack is
+    sequenced off it: ``worker``, ``mcp`` and ``apache`` all wait for ``web`` to
+    report healthy, which is what puts "migrations finished" strictly before
+    "traffic served".
+
+    Checks the database connection, the cache, and that no migration is still
+    pending — the last one being the real safety net, since it catches a
+    ``migrate`` that ran without applying everything, which an
+    entrypoint-didn't-crash check cannot.
+
+    Deliberately does NOT check Celery: ``worker`` waits on this endpoint, so
+    checking the worker here would make the two wait on each other.
+
+    Answers 503 when anything fails, so ``urllib.request.urlopen`` in the
+    healthcheck raises and the container is marked unhealthy. Reachable at
+    ``/status/`` on the container port; note that the requesting Host
+    (``127.0.0.1``) must be in ``DJANGO_ALLOWED_HOSTS`` or every check gets a 400.
+    """
+    checks: dict[str, dict] = {}
+    ok = True
+
+    try:
+        with connections["default"].cursor() as cursor:
+            cursor.execute("SELECT 1")
+        checks["database"] = {"ok": True}
+    except Exception as exc:  # pragma: no cover - depends on a real outage
+        checks["database"] = {"ok": False, "error": str(exc)}
+        ok = False
+
+    try:
+        marker = f"status-check-{time.time()}"
+        cache.set(marker, "1", timeout=5)
+        cache_ok = cache.get(marker) == "1"
+        cache.delete(marker)
+        checks["cache"] = {"ok": cache_ok}
+        ok = ok and cache_ok
+    except Exception as exc:  # pragma: no cover - depends on a real outage
+        checks["cache"] = {"ok": False, "error": str(exc)}
+        ok = False
+
+    try:
+        executor = MigrationExecutor(connections["default"])
+        plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
+        checks["migrations"] = {"ok": not plan, "pending": len(plan)}
+        ok = ok and not plan
+    except Exception as exc:  # pragma: no cover - depends on a real outage
+        checks["migrations"] = {"ok": False, "error": str(exc)}
+        ok = False
+
+    return JsonResponse(
+        {"status": "ok" if ok else "degraded", "checks": checks},
+        status=200 if ok else 503,
+    )

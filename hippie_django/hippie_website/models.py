@@ -261,7 +261,9 @@ class ExperimentType(models.Model):
     # Denormalised evidence volume, mirroring Source.n_connected_interactions.
     # The filter option lists show it per option and hide zero-count entries;
     # reading a scalar beats a GROUP BY over the ~2M-row through table on every
-    # request. Refreshed by hippie_update._assign_evidence_counts.
+    # request. Refreshed by hippie_update._recompute_source_interaction_counts,
+    # which fans out to _recompute_vocab_interaction_counts for all three
+    # evidence vocabularies.
     n_connected_interactions = models.PositiveIntegerField(default=0)
 
     class Meta:

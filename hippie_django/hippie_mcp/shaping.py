@@ -131,13 +131,16 @@ def interactions_result(
     show: str,
     resolved_filters: dict,
     fmt: str,
+    total: int | None = None,
 ) -> dict:
     """Assemble the ``get_interactions`` payload.
 
-    ``rows`` is the full filtered set (already score-ordered by the service);
-    this applies the cap and reports what it dropped.
+    ``rows`` is score-ordered by the service and may already be capped at
+    ``limit`` — in which case ``total`` carries the true match count, because
+    ``len(rows)`` no longer knows it. Pass ``total=None`` only when ``rows`` is
+    the complete set.
     """
-    total = len(rows)
+    total = len(rows) if total is None else total
     kept = [flatten_edge_row(r) for r in rows[:limit]]
     noun = "non-interactions" if show == "noninteractions" else "interactions"
 
@@ -211,10 +214,22 @@ def flatten_pair_row(row: dict) -> dict:
 
 
 def pairs_result(*, rows: list[dict], resolved_filters: dict) -> dict:
-    """Assemble the ``check_pairs`` payload."""
-    flat = [flatten_pair_row(r) for r in rows]
+    """Assemble the ``check_pairs`` payload.
+
+    Rows are capped at ``MAX_LIMIT`` — the same ceiling as the input
+    ``BATCH_LIMIT``, so a well-formed batch is never truncated. Isoform mode is
+    what makes the cap necessary: one input pair fans out to one row per isoform
+    combination that has a record, so 200 pairs in can be more than 200 rows out.
+    ``counts`` is computed over the full set, not the kept slice, so the totals
+    describe the batch that was actually checked.
+    """
+    flat_all = [flatten_pair_row(r) for r in rows]
+    total = len(flat_all)
+    # Input order, not score order — check_pairs answers per input pair.
+    flat = flat_all[:MAX_LIMIT]
+
     counts: dict[str, int] = {}
-    for r in flat:
+    for r in flat_all:
         counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
 
     parts = []
@@ -227,12 +242,21 @@ def pairs_result(*, rows: list[dict], resolved_filters: dict) -> dict:
     if counts.get("unknown_identifier"):
         parts.append(f"{counts['unknown_identifier']} with an unknown identifier")
 
-    summary = f"Checked {len(flat)} pair{'s' if len(flat) != 1 else ''}"
+    summary = f"Checked {total} pair{'s' if total != 1 else ''}"
     summary += f": {', '.join(parts)}." if parts else "."
+    if len(flat) < total:
+        summary += (
+            f" Returning the first {len(flat)} of {total} result rows "
+            f"(cap {MAX_LIMIT}); the counts above cover all {total}. "
+            f"Split the batch to see the rest."
+        )
 
     out: dict = {
         "summary": summary,
         "counts": counts,
+        "total": total,
+        "returned": len(flat),
+        "truncated": len(flat) < total,
         "rows": flat,
     }
     if resolved_filters:
