@@ -78,10 +78,56 @@ python manage.py runserver
 hippie_django/
   hippie/           # Django project settings, urls, wsgi
   hippie_website/   # Main app: models, views, forms, migrations
+    services/       # Query logic, shared by the website and the MCP server
+      queries.py    #   CommonFilters, identifier resolution, interaction rows
+      pairs.py      #   pair lookup ("does A interact with B")
+      detail.py     #   one interaction's full evidence (template ctx + JSON)
+      vocab.py      #   filter option lists
+      generate_splits.py
+    filter_lookup.py  # name / PSI-MI code / category label / id → vocabulary PKs
     management/commands/  # hippie_update, import_pod_data, export_downloads, …
     migrations/     # squash carefully — schema is sensitive
+  hippie_mcp/       # MCP server (ASGI, separate container) — see below
 data/               # raw import data lives here
 ```
+
+## Service layer
+Query logic lives in `hippie_website/services/`, not in views. Views own request
+parsing and response construction only. The MCP tools call the same functions, so
+the website and an agent cannot disagree about what a query means — the drift
+check for that is comparing `/api/query/` counts against `get_interactions`.
+
+`views.py` re-imports the extracted helpers under their original private names
+(`_protein_display`, `_resolve_interaction_pair`, `_filter_option_lists`, …)
+because the existing tests import them from there. Keep those aliases when
+moving more logic out.
+
+## MCP server (`hippie_mcp`)
+Five read-only tools over streamable HTTP: `resolve_protein`,
+`get_interactions`, `check_pairs`, `get_interaction_detail`,
+`list_filter_options`. Served by uvicorn in its own container
+(`uvicorn hippie_mcp.asgi:app`), proxied by Apache at `/mcp`.
+
+- **MCP SDK is 2.0** — `from mcp.server import MCPServer`. The v1 `FastMCP` API
+  and `mcp.server.fastmcp` no longer exist; wire types are snake_case
+  (`input_schema`, not `inputSchema`).
+- Tools are `def`, not `async def`, so the SDK runs them on a worker thread and
+  the sync ORM is legal. Every tool body is wrapped in `hippie_mcp.db.with_db`
+  for connection hygiene — a pooled thread otherwise holds a connection past
+  MariaDB's `wait_timeout`.
+- Return `dict[str, object]`, not `dict` — a bare `dict` yields no output schema
+  and no `structured_content`.
+- Tool results are capped (`shaping.py`) and always report the full match count.
+  Never let a truncated result look complete.
+- A filter value that resolves to nothing **fails the call**. An unresolved
+  filter would collapse to "no filter" and silently return a wider result set.
+- `asgi.py` calls `django.setup()` before importing anything model-touching, and
+  its lifespan must enter `mcp.session_manager.run()` — a mounted sub-app's own
+  lifespan never runs, and without it every request dies with
+  `RuntimeError: Task group is not initialized`.
+- `transport_security` is derived from `DJANGO_ALLOWED_HOSTS`. Without it, DNS
+  rebinding protection answers every request behind a real hostname with
+  `421 Misdirected Request`.
 
 ## Workflow Patterns
 - Feature branches → PR → merge to main (no direct pushes to main observed)

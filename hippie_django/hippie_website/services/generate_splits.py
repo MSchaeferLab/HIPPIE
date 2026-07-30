@@ -25,13 +25,31 @@ class SplitParams:
     # An interaction survives only if BOTH endpoints pass these.
     tissue_ids: tuple = ()
     min_rpkm: float = 0.0
-    min_degree: int = 0
+    # Gates the GLOBAL Protein.degree column — degree across all of HIPPIE, not
+    # degree within the subgraph left by the interaction-level filters above.
+    # Named for that distinction because the two diverge sharply under a narrow
+    # source filter, and the stats box reports the *subgraph* degree.
+    min_degree_global: int = 0
     min_avg_score: float = 0.0
     isoform_mode: str = "general"  # general | isoforms | both
 
     # ── Negative sampling ─────────────────────────────────────────────────
     neg_ratio: float = 1.0
     seed: int = 78539105873
+
+    @classmethod
+    def from_payload(cls, payload: dict) -> "SplitParams":
+        """Build from a stored/POSTed param dict, tolerating the legacy key.
+
+        ``SplitJob.params`` rows written before ``min_degree`` was renamed to
+        ``min_degree_global`` are still on disk and still replayable, so the old
+        key is mapped rather than rejected.
+        """
+        data = dict(payload)
+        if "min_degree" in data:
+            data.setdefault("min_degree_global", data.pop("min_degree"))
+            data.pop("min_degree", None)
+        return cls(**data)
 
 
 @dataclass
@@ -55,11 +73,18 @@ def allowed_protein_id_qs(params: SplitParams):
     (refreshed by ``recompute_protein_stats``) — global values, matching the
     Browse page. Isoform inclusion is handled at the *edge* level via the
     ``involves_isoform`` flag, so it is intentionally not applied here.
+
+    Note the asymmetry this creates, which the UI labels spell out: a protein
+    passes on its degree across ALL of HIPPIE, but the resulting subgraph is then
+    cut down by the interaction-level filters, so surviving nodes can end up with
+    a far lower degree inside the split than the threshold suggests.
     """
     from hippie_website.models import Protein
 
     active = (
-        bool(params.tissue_ids) or params.min_degree > 0 or params.min_avg_score > 0
+        bool(params.tissue_ids)
+        or params.min_degree_global > 0
+        or params.min_avg_score > 0
     )
     if not active:
         return None
@@ -68,7 +93,7 @@ def allowed_protein_id_qs(params: SplitParams):
         Protein.objects.all(),
         tissue_ids=params.tissue_ids,
         min_rpkm=params.min_rpkm,
-        min_degree=params.min_degree,
+        min_degree=params.min_degree_global,
         min_avg_score=params.min_avg_score,
     )
     return qs.values("pk")

@@ -513,6 +513,20 @@ class MLSplitEndpointNotFoundTest(TestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 400)
+        # The documented contract is "400 with the failing constraint in the
+        # message". A raised BadRequest would render Django's generic, empty 400
+        # page here with DEBUG=False, so assert on the body, not just the status.
+        self.assertEqual(resp["Content-Type"], "application/json")
+        self.assertIn("min_score", resp.json()["error"])
+
+    def test_stats_400_names_the_failing_constraint(self):
+        resp = self.client.post(
+            reverse("hippie_website:browse_splits_stats"),
+            data=json.dumps({"neg_ratio": 99}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("neg_ratio", resp.json()["error"])
 
 
 class PartitionDisjointTest(SimpleTestCase):
@@ -539,3 +553,115 @@ class PartitionDisjointTest(SimpleTestCase):
         self.assertTrue(a.isdisjoint(b))
         self.assertTrue(b.isdisjoint(c))
         self.assertTrue(a.isdisjoint(c))
+
+
+class MinDegreeGlobalTest(TestCase):
+    """The degree gate is global; the reported median degree is not.
+
+    A reviewer set source=I2D with a minimum degree of 5 and saw a median degree
+    of 1, and read that as a broken filter. It is not: ``min_degree_global``
+    gates ``Protein.degree`` — the count across all of HIPPIE — while
+    ``median_degree`` counts only the edges left after the source filter. The two
+    numbers answer different questions and legitimately diverge. These tests pin
+    that behaviour so it cannot drift silently, since the UI labels now promise
+    exactly this.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from ..models import Source
+
+        cls.hub = make_protein("HUB", accession="ACC_HUB")
+        cls.partners = [make_protein(f"P{i}", accession=f"ACC_P{i}") for i in range(6)]
+        # HUB is well connected across the database as a whole…
+        for p in cls.partners:
+            make_interaction(cls.hub, p, score=0.9)
+        # …but only one of those edges is reported by the narrow source.
+        cls.narrow = Source.objects.create(name="I2D", n_connected_interactions=1)
+        cls.wide = Source.objects.create(name="BioGRID", n_connected_interactions=5)
+        edges = list(cls.hub.interactions_as_1.all()) + list(
+            cls.hub.interactions_as_2.all()
+        )
+        for i, edge in enumerate(edges):
+            edge.sources.add(cls.narrow if i == 0 else cls.wide)
+        recompute_stats()
+
+    def _stats(self, **overrides):
+        from ..services.generate_splits import SplitParams, build_interaction_queryset
+        from ..views import _interaction_stats, _protein_stats
+
+        params = SplitParams(**overrides)
+        iqs = build_interaction_queryset(params)
+        interaction, degree_by_node, score_sum_by_node = _interaction_stats(iqs)
+        return interaction, _protein_stats(
+            params, degree_by_node, score_sum_by_node, iqs
+        )
+
+    def test_gate_uses_global_degree_not_subgraph_degree(self):
+        interaction, protein = self._stats(
+            source_ids=[self.narrow.pk], min_degree_global=5
+        )
+        # HUB has global degree 6, so it passes the gate even though only one of
+        # its edges carries this source. Its partner on that edge has global
+        # degree 1, so the edge is dropped — both endpoints must pass.
+        self.assertEqual(interaction["n_interactions"], 0)
+        self.assertEqual(protein["n_proteins"], 0)
+
+    def test_reported_median_reflects_the_filtered_subgraph(self):
+        # Without the degree gate, the single I2D edge survives and the reported
+        # degree is 1 — far below any global-degree threshold a user might set.
+        interaction, protein = self._stats(source_ids=[self.narrow.pk])
+        self.assertEqual(interaction["n_interactions"], 1)
+        self.assertEqual(protein["median_degree"], 1)
+        # The same protein's global degree, which the gate reads, is 6.
+        self.assertEqual(Protein.objects.get(pk=self.hub.pk).degree, 6)
+
+    def test_gate_still_bites_on_the_unfiltered_graph(self):
+        """Sanity check that min_degree_global is applied at all."""
+        _, kept = self._stats(min_degree_global=5)
+        self.assertEqual(kept["n_proteins"], 0)  # only HUB passes; partners do not
+        _, all_proteins = self._stats()
+        self.assertEqual(all_proteins["n_proteins"], 7)
+
+
+class SplitParamsLegacyKeyTest(SimpleTestCase):
+    """``min_degree`` was renamed to ``min_degree_global``.
+
+    Browse hand-off links, bookmarked URLs and SplitJob rows written before the
+    rename still carry the old key, so both spellings must land on the same
+    field rather than raising.
+    """
+
+    def test_validate_accepts_both_spellings(self):
+        from ..views import _validate_split_params
+
+        params, invalid = _validate_split_params({"min_degree": 7})
+        self.assertIsNone(invalid)
+        self.assertEqual(params["min_degree_global"], 7)
+
+        params, invalid = _validate_split_params({"min_degree_global": 7})
+        self.assertIsNone(invalid)
+        self.assertEqual(params["min_degree_global"], 7)
+
+        # New key wins when both are present.
+        params, invalid = _validate_split_params(
+            {"min_degree": 1, "min_degree_global": 9}
+        )
+        self.assertIsNone(invalid)
+        self.assertEqual(params["min_degree_global"], 9)
+
+    def test_validate_rejects_a_negative_threshold(self):
+        from ..views import _validate_split_params
+
+        params, invalid = _validate_split_params({"min_degree": -1})
+        self.assertIsNone(params)
+        # The message has to name the constraint, not just signal failure — it is
+        # what the caller sees in the 400 body.
+        self.assertIn("min_degree_global", invalid)
+
+    def test_from_payload_maps_a_stored_legacy_job(self):
+        from ..services.generate_splits import SplitParams
+
+        params = SplitParams.from_payload({"min_degree": 4, "min_score": 0.5})
+        self.assertEqual(params.min_degree_global, 4)
+        self.assertEqual(params.min_score, 0.5)

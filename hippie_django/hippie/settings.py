@@ -46,6 +46,13 @@ CSRF_TRUSTED_ORIGINS = [
     if h.strip()
 ]
 
+# TLS terminates at the outermost Apache, which forwards X-Forwarded-Proto; the
+# app itself is only ever reached over plain HTTP inside the docker network.
+# Without this, request.scheme / is_secure() report "http" on an https:// site
+# and anything that builds an absolute URL (the MCP connection snippet on the
+# download page, for one) hands out a link nobody can use.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 
 # Application definition
 

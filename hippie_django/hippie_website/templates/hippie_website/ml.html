@@ -20,14 +20,8 @@
     font-size: .8rem; line-height: 1.55; margin: .75rem 0;
   }
   pre.code-block .c { color: #8a8aa0; }
-  .leak-warn {
-    border-left: 4px solid #dc3545; background: #fdf0f1;
-    padding: .75rem 1rem; border-radius: 0 8px 8px 0; font-size: .875rem; margin: .75rem 0;
-  }
-  .leak-ok {
-    border-left: 4px solid #2e7d5b; background: #eef7f1;
-    padding: .75rem 1rem; border-radius: 0 8px 8px 0; font-size: .875rem; margin: .75rem 0;
-  }
+  /* Callouts live in hippie.css as .hippie-note--warn / --ok, shared with the
+     ML Splits page. */
   .paper-card { display: flex; flex-direction: column; gap: .35rem; }
 </style>
 
@@ -109,7 +103,7 @@
         choices: random non-edges, or curated non-interactions as provided by HIPPIE. Random negatives are biased by node
         degree, which a model can exploit instead of learning biology.</li>
     </ul>
-    <div class="leak-warn">
+    <div class="hippie-note hippie-note--warn">
       <strong>Leakage trap:</strong> If the same protein appears in both train and test —
       or two near-identical sequences are split across train/test — the model can memorise per-protein
       or per-family signal and report inflated accuracy. Decide your split strategy <em>before</em>
@@ -123,12 +117,14 @@
   <div class="hippie-card">
     <div class="ml-step-head"><span class="ml-step-num">2</span><h3>How do I pick that in HIPPIE?</h3></div>
     <p>
-      The <a href="{% url 'hippie_website:download' %}">Download page</a> provides one pre-computed split for the high-
-      confidence interactions, one for the high-and-medium-confidence ones, and one for the whole database. If you
-      need your dataset filtered in a different way, e.g. just choosing proteins that have a min. expression in a
-      specific tissue, you can use the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool. It applies the same
+      The <a href="{% url 'hippie_website:download' %}#ml-splits">Download page</a> provides three pre-computed splits:
+      one for the high-confidence interactions, one for the high-and-medium-confidence ones, and one for the whole
+      database. If you need your dataset filtered in a different way, e.g. just choosing proteins that have a min.
+      expression in a specific tissue (median gene-level RNA-seq from
+      GTEx{% if current_release.gtex_version %} {{ current_release.gtex_version }}{% endif %}),
+      you can use the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool. It applies the same
       filters as <a href="{% url 'hippie_website:browse' %}">Browse</a> (confidence score, source,
-      experiment type, interaction type, tissue / RPKM, node degree) and then builds a labeled
+      experiment type, interaction type, tissue / RPKM, node degree across all of HIPPIE) and then builds a labeled
       train/validation/test dataset with two negative sampling options for you. <br>
       For this tutorial we will download the split of the whole database. LEFT OFF HERE
     </p>
@@ -204,13 +200,13 @@ def pair_vec(a, b):
 Xtr = np.array([pair_vec(a, b) for a, b in train[["protein_a", "protein_b"]].itertuples(index=False)])
 seq_clf = LogisticRegression(max_iter=1000).fit(Xtr, train["label"])</pre>
 
-    <div class="leak-warn">
+    <div class="hippie-note hippie-note--warn">
       <strong>Where leakage creeps in (paper 2, Q on data splitting).</strong> A <em>random</em> pair
       split lets the <em>same protein</em> sit in both train and test. The sequence model then just
       recognises proteins it has already seen — not interactions. A naive random split can push AUROC
       from ~0.6 to &gt;0.9 of pure illusion.
     </div>
-    <div class="leak-ok">
+    <div class="hippie-note hippie-note--ok">
       <strong>Fix.</strong> Split on <em>proteins</em>, not pairs: assign each protein to train or
       test, and cluster by sequence similarity (e.g. MMseqs2 / DataSAIL) so near-identical proteins
       never straddle the split. The <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool's

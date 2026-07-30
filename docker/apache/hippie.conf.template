@@ -34,11 +34,32 @@
     ProxyPass        ${APACHE_PUBLISHED_PATH}/static/    !
     ProxyPass        ${APACHE_PUBLISHED_PATH}/media/     !
     ProxyPass        ${APACHE_PUBLISHED_PATH}/downloads/ !
+
+    # MCP endpoint → the hippie_mcp container (uvicorn/ASGI), not gunicorn.
+    # ProxyPass rules are evaluated in the order they appear, so this must stay
+    # above the catch-all below or the MCP path would be forwarded to the web
+    # container. Long timeout because streamable HTTP holds the response open;
+    # gzip is off for the same reason — an output filter that buffers would
+    # defeat the streaming.
+    ProxyPass        ${APACHE_PUBLISHED_PATH}/mcp http://mcp:8001/mcp timeout=300
+    ProxyPassReverse ${APACHE_PUBLISHED_PATH}/mcp http://mcp:8001/mcp
+    <Location ${APACHE_PUBLISHED_PATH}/mcp>
+        SetEnv proxy-sendchunked 1
+        SetEnv no-gzip 1
+    </Location>
+
     ProxyPass        ${APACHE_PUBLISHED_PATH}/ http://web:8000/ timeout=120
     ProxyPassReverse ${APACHE_PUBLISHED_PATH}/ http://web:8000/
 
     # mod_proxy_http already sets X-Forwarded-For; add the proto.
-    RequestHeader set X-Forwarded-Proto expr=%{REQUEST_SCHEME}
+    #
+    # setifempty, not set: in production an outer Apache terminates TLS and sets
+    # this to "https" before proxying here over plain HTTP on localhost. `set`
+    # would overwrite that with this vhost's own REQUEST_SCHEME ("http"), and
+    # Django would then build every absolute URL as http:// on an https:// site.
+    # setifempty preserves an upstream value and still fills in a sensible default
+    # for a local `docker compose up` with no proxy in front.
+    RequestHeader setifempty X-Forwarded-Proto expr=%{REQUEST_SCHEME}
 
     ErrorLog  ${APACHE_LOG_DIR}/error.log
     CustomLog ${APACHE_LOG_DIR}/access.log combined

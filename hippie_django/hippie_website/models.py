@@ -172,6 +172,12 @@ class Tissue(models.Model):
     """
 
     name = models.CharField(max_length=100, unique=True)
+    # Denormalised number of genes with an expression record in this tissue —
+    # the tissue filter shows it per option, the way the evidence vocabularies
+    # show n_connected_interactions. Counting live would mean a GROUP BY over
+    # the whole gene2tissue table on every page load. Refreshed at the end of
+    # update_tissue_data.
+    n_expressed_genes = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "tissue"
@@ -252,6 +258,13 @@ class ExperimentType(models.Model):
     quality_score = models.FloatField(
         help_text="Weight in HIPPIE confidence scoring", null=True, blank=True
     )
+    # Denormalised evidence volume, mirroring Source.n_connected_interactions.
+    # The filter option lists show it per option and hide zero-count entries;
+    # reading a scalar beats a GROUP BY over the ~2M-row through table on every
+    # request. Refreshed by hippie_update._recompute_source_interaction_counts,
+    # which fans out to _recompute_vocab_interaction_counts for all three
+    # evidence vocabularies.
+    n_connected_interactions = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "experiment_type"
@@ -278,6 +291,8 @@ class InteractionType(models.Model):
 
     name = models.CharField(max_length=100, unique=True)
     psi_mi_code = models.CharField(max_length=30, blank=True, default="")
+    # See ExperimentType.n_connected_interactions.
+    n_connected_interactions = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "interaction_type"
@@ -649,6 +664,16 @@ class ReleaseMeta(models.Model):
     def current(cls) -> "ReleaseMeta | None":
         """Most recent release by date (then number), or None if none exist."""
         return cls.objects.order_by("-release_date", "-release_number").first()
+
+    @property
+    def gtex_version(self) -> str:
+        """Version of the GTEx expression data in this release (``""`` if absent).
+
+        The tissue filters name their data source, and templates cannot index a
+        ``resource_versions`` key containing spaces and parentheses. The label
+        comes from ``hippie_update._RESOURCE_LABELS["gtex_gene_reads"]``.
+        """
+        return (self.resource_versions or {}).get("GTEx (gene reads)", "")
 
     def set_quartiles(self, dataset: str, stats: dict[str, float]) -> None:
         """

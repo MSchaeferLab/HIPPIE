@@ -22,7 +22,7 @@ def run_split_job(self, job_id: str):
 
     try:
         work_dir = Path(tempfile.mkdtemp(prefix=f"split_{job_id}_"))
-        summary = generate_splits(SplitParams(**job.params), work_dir, cb)
+        summary = generate_splits(SplitParams.from_payload(job.params), work_dir, cb)
 
         zip_base = Path(settings.MEDIA_ROOT) / "splits" / str(job_id)
         zip_base.parent.mkdir(parents=True, exist_ok=True)

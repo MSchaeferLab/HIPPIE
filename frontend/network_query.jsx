@@ -12,6 +12,7 @@ import {
   FILTER_DEFAULTS,
   filtersToBody,
   filtersEqual,
+  useAllSelectedDefaults,
   confThresholds,
   useFilterMeta,
 } from "./filters.jsx";
@@ -275,6 +276,9 @@ function App() {
   const [appliedFilters, setAppliedFilters] = useState(FILTER_DEFAULTS);
   const [appliedSeedKey, setAppliedSeedKey] = useState("");
   const meta = useFilterMeta(filterMetaUrl);
+  // Tick every option once the lists arrive. Seeds draft and applied together so
+  // the page does not come up dirty.
+  useAllSelectedDefaults(meta, [setFilters, setAppliedFilters]);
 
   // Results ------------------------------------------------------------------
   const [rows, setRows] = useState([]);
@@ -298,7 +302,7 @@ function App() {
       const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
-        body: JSON.stringify({ proteins: seeds.join("\n"), ...filtersToBody(f) }),
+        body: JSON.stringify({ proteins: seeds.join("\n"), ...filtersToBody(f, meta) }),
         signal: controller.signal,
       });
       const data = await res.json();
@@ -322,7 +326,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [meta]);
 
   const switchMode = (m) => {
     setMode(m);

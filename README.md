@@ -111,10 +111,14 @@ the **host machine** via `DB_HOST=host.docker.internal`, which resolves to the
 cp .env.example .env       # then edit secrets / passwords / domain
 docker compose build
 docker compose up -d
-
-# Migrations are manual (RUN_MIGRATIONS=0) — run once the DB is reachable:
-docker compose exec web python manage.py migrate
 ```
+
+Migrations apply automatically, and the stack is sequenced around them: only
+`web` has `RUN_MIGRATIONS=1`, it migrates in its entrypoint before gunicorn
+starts, and `worker`, `mcp` and `apache` all wait for `web` to report healthy
+(`GET /status/` — database, cache, and no pending migration) before they start.
+So nothing serves traffic or touches Celery until the schema is current, and no
+two containers can race `migrate` (MariaDB has no transactional DDL).
 
 Open `http://localhost:8080/`.
 
@@ -140,18 +144,39 @@ stack:
 # HIPPIE Django app
 RedirectMatch ^/hippie$ /hippie/
 ProxyPreserveHost On
+
+# MCP endpoint first: ProxyPass rules match in order, and the catch-all below
+# would otherwise swallow this one. The long timeout and the two SetEnvs are
+# what keep MCP's streamable HTTP working — it holds the response open, so the
+# default 60s ProxyTimeout would cut long calls off, and a buffering output
+# filter (gzip) would defeat the streaming.
+ProxyPass        /hippie/mcp  http://localhost:8080/hippie/mcp timeout=300
+ProxyPassReverse /hippie/mcp  http://localhost:8080/hippie/mcp
+<Location /hippie/mcp>
+    SetEnv proxy-sendchunked 1
+    SetEnv no-gzip 1
+</Location>
+
 ProxyPass        /hippie/  http://localhost:8080/hippie/
 ProxyPassReverse /hippie/  http://localhost:8080/hippie/
+
+# TLS terminates here, so this hop states the real scheme. The containerised
+# Apache uses `setifempty` for the same header and therefore preserves it;
+# Django trusts it via SECURE_PROXY_SSL_HEADER, which is what makes
+# request.scheme (and every absolute URL built from it) say https.
 RequestHeader    set X-Forwarded-Proto "https"
 RequestHeader    set X-Forwarded-Port  "443"
 ```
+
+Both this hop and the containerised one *append* to `X-Forwarded-For`, so the
+MCP rate limiter reads the client IP two entries from the right
+(`HIPPIE_MCP_TRUSTED_PROXY_HOPS=2`, the default). Adding or removing a proxy in
+front of this stack means changing that number.
 
 Useful one-shots:
 
 ```bash
 docker compose exec web python manage.py createsuperuser
-docker compose exec web python manage.py seed_test_data
-docker compose exec web python manage.py test_import_bait_prey
 docker compose logs -f web worker apache
 docker compose down              # stop; volumes preserved
 docker compose down -v           # stop + wipe static / media volumes (host DB untouched)
@@ -212,11 +237,11 @@ docker compose exec web python manage.py update_tissue_data \
 docker compose exec web python manage.py update_review_status
 ```
 
-`collectstatic` runs automatically on each `web` boot; migrations are manual
-(`RUN_MIGRATIONS=0`) so they are never applied automatically against the host
-DB — run `docker compose exec web python manage.py migrate` deliberately. The
-`worker` container reuses the same image with `RUN_MIGRATIONS=0` and
-`RUN_COLLECTSTATIC=0` to avoid racing the web container. The `apache`
+`collectstatic` and `migrate` both run automatically on each `web` boot, in that
+container's entrypoint and before gunicorn starts. `worker` and `mcp` reuse the
+same image with `RUN_MIGRATIONS=0` and `RUN_COLLECTSTATIC=0` and wait on `web`'s
+health check, so exactly one container migrates and nothing serves against a
+stale schema. The `apache`
 container enables `proxy`, `proxy_http`, `headers`, `rewrite`, and
 `expires` modules and forwards everything except `/static/` and `/media/`
 to `web:8000`.

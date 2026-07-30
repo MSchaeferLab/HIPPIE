@@ -146,6 +146,32 @@ a:hover { color: var(--hippie-accent); text-decoration: underline; }
 }
 
 /* ==========================================================
+   Notes / callouts
+   Left accent bar + tinted background. Promoted here from a page-local block
+   in ml.html so the ML Splits page (and anything else) can use them too.
+   ========================================================== */
+.hippie-note {
+  border-left: 4px solid var(--hippie-border);
+  background: var(--hippie-bg);
+  padding: .75rem 1rem;
+  border-radius: 0 8px 8px 0;
+  font-size: .875rem;
+  margin: .75rem 0;
+}
+.hippie-note--info {
+  border-left-color: var(--hippie-teal);
+  background: var(--hippie-teal-soft);
+}
+.hippie-note--warn {
+  border-left-color: #dc3545;
+  background: #fdf0f1;
+}
+.hippie-note--ok {
+  border-left-color: #2e7d5b;
+  background: #eef7f1;
+}
+
+/* ==========================================================
    Hero
    ========================================================== */
 .hippie-hero {
