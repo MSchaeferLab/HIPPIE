@@ -109,9 +109,35 @@ class DiggerLinksTest(HippieTestCase):
         )
         token = res["url"].split("token=", 1)[1]
         self.assertEqual(
-            signing.loads(token, key="test-secret", salt="hippie-handoff"),
+            signing.TimestampSigner(
+                key="test-secret", salt="hippie-handoff", algorithm="sha1"
+            ).unsign_object(token),
             {"organism": "human", "input": ["ENSG00000012048", "ENSG00000141510"]},
         )
+
+    def test_handoff_token_is_signed_with_sha1(self):
+        """DIGGER runs Django 2.2, which can only verify HMAC-SHA1.
+
+        Django 3.1+ defaults ``Signer`` to SHA-256; if this project ever goes
+        back to plain ``signing.dumps()``, DIGGER starts answering 400 "Invalid
+        handoff token" for every link on the interaction detail page. Pin both
+        the digest size and the fact that the modern default does *not* verify.
+        """
+        res = interaction_digger(
+            p1_is_isoform=False,
+            p2_is_isoform=False,
+            p1_enst_p="",
+            p2_enst_p="",
+            g1_ensg=["ENSG00000012048"],
+            g2_ensg=["ENSG00000141510"],
+            handoff_secret="test-secret",
+        )
+        token = res["url"].split("token=", 1)[1]
+        signature = token.rsplit(":", 1)[1]
+        # unpadded urlsafe-b64 of a 20-byte SHA-1 digest; SHA-256 would be 43.
+        self.assertEqual(len(signature), 27)
+        with self.assertRaises(signing.BadSignature):
+            signing.loads(token, key="test-secret", salt="hippie-handoff")
 
     def test_interaction_canonical_missing_ensg_is_none(self):
         res = interaction_digger(
