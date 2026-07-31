@@ -24,20 +24,37 @@ BASE = "https://exbio.wzw.tum.de/digger"
 # Salt for the DIGGER signed-token handoff; must match DIGGER's ``salt`` exactly.
 HANDOFF_SALT = "hippie-handoff"
 
+# DIGGER runs Django 2.2, whose ``salted_hmac`` hardcodes SHA-1 — both for the
+# key derivation and the HMAC itself. Django 3.1+ defaults ``Signer`` to SHA-256,
+# so a token signed with the modern default never verifies over there (the
+# endpoint answers 400 "Invalid handoff token" no matter how right the secret
+# is). Every other byte of the format — JSON separators, urlsafe-b64 without
+# padding, base62 timestamp, ``:`` separator — is identical across the two
+# versions, so pinning the algorithm is the whole compatibility shim.
+#
+# HMAC-SHA1 is not weakened by the SHA-1 collision attacks, and the payload is
+# two public Ensembl gene IDs, so this is not a security downgrade that matters.
+# Drop it if DIGGER ever moves to Django 3.1+.
+HANDOFF_ALGORITHM = "sha1"
+
 
 def _handoff_url(input_ids: list[str], secret: str) -> str:
     """Signed-token GET link into DIGGER's ``receive-token`` endpoint.
 
     The token carries ``{"organism": "human", "input": [...]}`` signed with the
-    shared ``secret`` (default JSON serializer, ``HANDOFF_SALT``). DIGGER's
-    ``Multi_proteins`` dispatches on the first id: ENSG → gene analysis,
-    ENST/ENSP → isoform analysis.
+    shared ``secret`` (default JSON serializer, ``HANDOFF_SALT``,
+    ``HANDOFF_ALGORITHM``). DIGGER's ``Multi_proteins`` dispatches on the first
+    id: ENSG → gene analysis, ENST/ENSP → isoform analysis.
+
+    ``signing.dumps`` cannot express the algorithm, so the signer is built by
+    hand; ``sign_object`` is what ``dumps`` calls underneath and produces the
+    same bytes.
     """
-    token = signing.dumps(
-        {"organism": "human", "input": input_ids},
+    token = signing.TimestampSigner(
         key=secret,
         salt=HANDOFF_SALT,
-    )
+        algorithm=HANDOFF_ALGORITHM,
+    ).sign_object({"organism": "human", "input": input_ids})
     return f"{BASE}/receive-token/?token={token}"
 
 
