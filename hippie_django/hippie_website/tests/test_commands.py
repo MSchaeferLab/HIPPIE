@@ -1,14 +1,21 @@
+import gzip
 import tempfile
+from io import StringIO
 from pathlib import Path
 
 from django.core.management import CommandError, call_command
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 
 from ..models import (
     Gene,
-    Tissue,
     GeneTissue,
+    OrthologInteraction,
+    Species,
+    Tissue,
 )
+from .factories import make_interaction, make_protein
 
 
 class UpdateTissueDataCommandTest(TestCase):
@@ -139,6 +146,74 @@ class MitabCvNameParsingTest(TestCase):
         self.assertEqual(
             source, "proteinchip(r) on a surface-enhanced laser desorption/ionization"
         )
+
+
+# ---------------------------------------------------------------------------
+# export_downloads — public release files
+# ---------------------------------------------------------------------------
+
+
+class ExportDownloadsCommandTest(TestCase):
+    """End-to-end smoke test for the download export.
+
+    The command streams every Interaction through ``prefetch_related``; a stale
+    lookup there (e.g. a field removed by a migration) only blows up at runtime
+    against a real database, so run it for real over a tiny fixture.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.p1 = make_protein(
+            "BRCA1", uniprot_name="BRCA1_HUMAN", gene_id=672, accession="P38398"
+        )
+        cls.p2 = make_protein(
+            "TP53", uniprot_name="P53_HUMAN", gene_id=7157, accession="P04637"
+        )
+        make_interaction(cls.p1, cls.p2, score=0.9)
+
+        # Conserved species live on OrthologInteraction, keyed on the gene pair.
+        g1, g2 = cls.p1.gene, cls.p2.gene
+        lo, hi = (g1, g2) if g1.pk <= g2.pk else (g2, g1)
+        ortholog = OrthologInteraction.objects.create(gene_1=lo, gene_2=hi)
+        mouse = Species.objects.create(name="Mus musculus", NCBI_tax_id=10090)
+        ortholog.ortholog_species.add(mouse)
+
+    def _run(self):
+        tmpdir = tempfile.mkdtemp()
+        call_command("export_downloads", tmpdir, stdout=StringIO())
+        return Path(tmpdir)
+
+    def test_writes_all_three_files(self):
+        out = self._run()
+        for name in (
+            "HIPPIE-current.mitab.txt.gz",
+            "HIPPIE-current.txt.gz",
+            "HIPPIE-current.stats.txt.gz",
+        ):
+            self.assertTrue((out / name).exists(), f"{name} missing")
+
+    def test_mitab_row_carries_conserved_species(self):
+        out = self._run()
+        with gzip.open(out / "HIPPIE-current.mitab.txt.gz", "rt") as f:
+            header, row = f.read().splitlines()[:2]
+        cols = row.split("\t")
+        self.assertEqual(len(cols), len(header.split("\t")))
+        # "Presence In Other Species" is the 16th MITAB column (index 15).
+        self.assertEqual(cols[15], "taxid:10090(Mus musculus)")
+
+    def test_species_lookup_does_not_scale_with_interaction_count(self):
+        """The ortholog map is loaded once, not once per exported row."""
+        with CaptureQueriesContext(connection) as ctx:
+            self._run()
+        baseline = len(ctx.captured_queries)
+
+        for i in range(5):
+            extra = make_protein(f"X{i}", gene_id=90000 + i, accession=f"Q0000{i}")
+            make_interaction(self.p1, extra, score=0.5)
+
+        with CaptureQueriesContext(connection) as ctx:
+            self._run()
+        self.assertEqual(len(ctx.captured_queries), baseline)
 
 
 # ---------------------------------------------------------------------------

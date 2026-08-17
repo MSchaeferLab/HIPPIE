@@ -16,6 +16,7 @@ evidence (sources / pmids / experiments), so they appear in the stats file only.
 """
 
 import gzip
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +34,7 @@ from hippie_website.models import (
     NonInteraction,
     Protein,
     OrthologInteraction,
+    Species,
 )
 from hippie_website.stats_utils import compute_quartiles
 
@@ -132,7 +134,58 @@ def _protein_aliases(p: Protein) -> str:
     return "|".join(parts) if parts else NULL
 
 
-def _mitab_row(inter: Interaction) -> list[str]:
+def _ortholog_species_by_gene_pair() -> dict[tuple[int, int], str]:
+    """Map a canonical gene pair ``(lo_pk, hi_pk)`` to its rendered MITAB field.
+
+    Conserved species live on ``OrthologInteraction`` (keyed on genes), not on
+    ``Interaction``, so they cannot be prefetched along with the export
+    queryset. Querying per interaction would add two queries to every one of
+    the ~10^6 exported rows, so the whole (small) table is loaded once instead.
+    """
+    species: dict[int, tuple[int, str]] = {
+        pk: (tax_id, name)
+        for pk, tax_id, name in Species.objects.values_list("pk", "NCBI_tax_id", "name")
+    }
+    oi_pairs: dict[int, tuple[int, int]] = {
+        pk: (g1, g2)
+        for pk, g1, g2 in OrthologInteraction.objects.values_list(
+            "pk", "gene_1_id", "gene_2_id"
+        ).iterator(chunk_size=CHUNK)
+    }
+
+    pair_species: dict[tuple[int, int], set[int]] = defaultdict(set)
+    through = OrthologInteraction.ortholog_species.through
+    for oi_pk, sp_pk in through.objects.values_list(
+        "orthologinteraction_id", "species_id"
+    ).iterator(chunk_size=CHUNK):
+        gene_pair = oi_pairs.get(oi_pk)
+        if gene_pair is not None:
+            pair_species[gene_pair].add(sp_pk)
+
+    # Species combinations repeat heavily across gene pairs — render each
+    # distinct combination once and share the string so the map stays small.
+    rendered: dict[frozenset[int], str] = {}
+    out: dict[tuple[int, int], str] = {}
+    for gene_pair, sp_pks in pair_species.items():
+        key = frozenset(sp_pks)
+        text = rendered.get(key)
+        if text is None:
+            text = (
+                "|".join(
+                    _field("taxid", str(species[pk][0]), species[pk][1])
+                    for pk in sorted(sp_pks)
+                    if pk in species
+                )
+                or NULL
+            )
+            rendered[key] = text
+        out[gene_pair] = text
+    return out
+
+
+def _mitab_row(
+    inter: Interaction, species_by_gene_pair: dict[tuple[int, int], str]
+) -> list[str]:
     a = inter.protein_1
     b = inter.protein_2
 
@@ -146,23 +199,9 @@ def _mitab_row(inter: Interaction) -> list[str]:
         or NULL
     )
 
-    g1, g2 = inter.protein_1.gene, inter.protein_2.gene
-    lo_gene, hi_gene = (g1, g2) if g1.pk <= g2.pk else (g2, g1)
-    ortholog = (
-        OrthologInteraction.objects.filter(gene_1=lo_gene, gene_2=hi_gene)
-        .prefetch_related("ortholog_species")
-        .first()
-    )
-    if ortholog:
-        species = (
-            "|".join(
-                _field("taxid", str(sp.NCBI_tax_id), sp.name)
-                for sp in ortholog.ortholog_species.all()
-            )
-            or NULL
-        )
-    else:
-        species = NULL
+    g1, g2 = a.gene_id, b.gene_id
+    gene_pair = (g1, g2) if g1 <= g2 else (g2, g1)
+    species = species_by_gene_pair.get(gene_pair, NULL)
 
     return [
         _field("entrez gene", str(a.gene.entrez_id)),
@@ -310,11 +349,14 @@ class Command(BaseCommand):
                 "publications",
                 "interaction_types",
                 "sources",
-                "conserved_species",
                 "cross_references__source",
             )
             .order_by("pk")
         )
+
+        # Conserved species hang off OrthologInteraction (gene-keyed), so they
+        # cannot ride the prefetch above — load them once up front.
+        species_by_gene_pair = _ortholog_species_by_gene_pair()
 
         mitab_path = out_dir / MITAB_FILENAME
         txt_path = out_dir / TXT_FILENAME
@@ -326,7 +368,7 @@ class Command(BaseCommand):
             mitab.write("\t".join(MITAB_HEADER) + "\n")
             txt.write("\t".join(TXT_HEADER) + "\n")
             for inter in qs.iterator(chunk_size=CHUNK):
-                mitab.write("\t".join(_mitab_row(inter)) + "\n")
+                mitab.write("\t".join(_mitab_row(inter, species_by_gene_pair)) + "\n")
                 txt.write("\t".join(_txt_row(inter)) + "\n")
                 written += 1
                 if written % 100_000 == 0:

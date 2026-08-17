@@ -235,7 +235,49 @@ docker compose exec web python manage.py update_tissue_data \
 
 # 8. Refresh Protein.is_reviewed from UniProt's reviewed (Swiss-Prot) accession list
 docker compose exec web python manage.py update_review_status
+
+# 9. Regenerate the public download files (see below)
+docker compose exec web python manage.py export_downloads data/user_downloads
 ```
+
+### Updating the public download files
+
+`export_downloads` regenerates the three files served at `/downloads/<file>`.
+It reads the database only — it downloads nothing — so run it **after** the
+import steps above, whenever interactions, scores, evidence or orthology data
+have changed. Anything else leaves the published files describing a stale
+database.
+
+```bash
+docker compose exec web python manage.py export_downloads data/user_downloads
+```
+
+The `path` argument is relative to the container's WORKDIR (`/code/hippie_django`),
+so `data/user_downloads` resolves to `hippie_django/data/user_downloads/` on the
+host via the bind mount. Files are overwritten in place; the directory is created
+if missing. Written:
+
+| File | Contents |
+|------|----------|
+| `HIPPIE-current.mitab.txt.gz`  | PSI-MI TAB 2.5 — 15 mandatory columns + 3 HIPPIE extensions (`Presence In Other Species`, `Gene Name Interactor A/B`) |
+| `HIPPIE-current.txt.gz`        | compact tab format keyed on `uniprot_accession` |
+| `HIPPIE-current.stats.txt.gz`  | score quartiles and counts over {interactions, non-interactions, both} × {all, isoforms-only, non-isoforms-only} |
+
+Runtime notes:
+
+* The export streams every `Interaction` in chunks of 10 000 with a server-side
+  cursor, so it takes minutes on a full database and holds one connection open
+  throughout. Run it in a shell you can leave open (or under `nohup` /
+  `tmux`) — a dropped connection mid-run leaves partially written `.gz` files.
+* Only `NonInteraction` scores reach the stats file; the two download files
+  cover interactions only, because non-interactions carry no evidence.
+* Conserved species come from `OrthologInteraction` (keyed on the **gene** pair,
+  not the interaction), which the command loads into memory once up front. If
+  `Presence In Other Species` is empty everywhere, step 4
+  (`update_homology_data`) has not been run against the current data.
+* Apache serves `hippie_django/data/user_downloads/` read-only at
+  `/downloads/<file>` directly from disk, so new files are live as soon as the
+  command finishes — no restart needed.
 
 `collectstatic` and `migrate` both run automatically on each `web` boot, in that
 container's entrypoint and before gunicorn starts. `worker` and `mcp` reuse the
