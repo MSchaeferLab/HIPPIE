@@ -597,6 +597,7 @@ class SplitJob(models.Model):
         ("RUNNING", "RUNNING"),
         ("DONE", "DONE"),
         ("FAILED", "FAILED"),
+        ("CANCELLED", "CANCELLED"),
     ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     status = models.CharField(max_length=10, choices=STATUS, default="PENDING")
@@ -607,7 +608,30 @@ class SplitJob(models.Model):
     summary = models.JSONField(null=True, blank=True)
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Set when the Celery task actually picks the job up, which can be a long
+    # time after created_at — one run holds the only execution slot for up to
+    # two hours. The run card shows elapsed time from here, not from creation,
+    # so "running for 14 min" means 14 minutes of solving and not 14 minutes of
+    # queueing.
+    started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+
+    # ── Cancellation ─────────────────────────────────────────────────────
+    # The flag the running task polls, deliberately separate from `status`.
+    # Writing status="CANCELLED" from the view instead would race the task's own
+    # status writes and could be overwritten by a DONE landing microseconds
+    # later; a request-only field that the task only ever reads cannot be.
+    cancel_requested = models.BooleanField(default=False)
+
+    # ── Nextflow bookkeeping ─────────────────────────────────────────────
+    # Absolute in-container paths under NF_RUN_ROOT. work_dir is removed on
+    # success and on cancel and kept on failure, so on a FAILED job these two
+    # are the pointers to .nextflow.log and the failing task's .command.err.
+    work_dir = models.CharField(max_length=512, blank=True)
+    outdir = models.CharField(max_length=512, blank=True)
+    # Nextflow's own run name (`-name`), which is what identifies the run in
+    # .nextflow.log and in the trace.
+    nf_run_name = models.CharField(max_length=80, blank=True)
 
     class Meta:
         indexes = [

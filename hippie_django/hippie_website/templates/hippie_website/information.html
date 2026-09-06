@@ -348,7 +348,7 @@
       <code>experiment</code>, <code>interaction_type</code> and <code>tissue</code>.
     </p>
     <div class="hippie-card--muted mb-2">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>POST</b> /api/browse/splits/<br><b>POST</b> /api/browse/splits/stats/<br><b>GET</b> &nbsp;/api/browse/splits/&lt;job_id&gt;/<br><b>GET</b> &nbsp;/api/browse/splits/&lt;job_id&gt;/download/</code>
+      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>POST</b> /api/browse/splits/<br><b>POST</b> /api/browse/splits/stats/<br><b>GET</b> &nbsp;/api/browse/splits/&lt;job_id&gt;/<br><b>POST</b> /api/browse/splits/&lt;job_id&gt;/cancel/<br><b>GET</b> &nbsp;/api/browse/splits/&lt;job_id&gt;/download/</code>
     </div>
     <p>
       <code>POST /api/browse/splits/</code> queues a job and answers <code>202</code> with
@@ -358,13 +358,39 @@
       is what the preview boxes on the
       <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page show.
       <code>GET /api/browse/splits/&lt;job_id&gt;/</code> reports
-      <code>{ status, step, progress, params, created_at, queue_position, summary, error,
-      download_url }</code>; <code>status</code> is <code>PENDING</code>,
-      <code>RUNNING</code>, <code>DONE</code> or <code>FAILED</code>, and
-      <code>download_url</code> is filled in only once the job is <code>DONE</code>.
-      <code>GET /api/browse/splits/&lt;job_id&gt;/download/</code> then streams the ZIP archive
-      of the labelled train / validation / test sets; it answers <code>404</code> until the job
-      finishes.
+      <code>{ status, step, progress, params, created_at, started_at, queue_position,
+      cancel_requested, summary, error, download_url }</code>; <code>status</code> is
+      <code>PENDING</code>, <code>RUNNING</code>, <code>DONE</code>, <code>FAILED</code> or
+      <code>CANCELLED</code>, and <code>download_url</code> is filled in only once the job is
+      <code>DONE</code>. Splits are generated one at a time and a run takes tens of minutes to
+      two hours, so poll no more than once every few seconds and read elapsed time from
+      <code>started_at</code> rather than <code>created_at</code> — a job can wait in the queue
+      far longer than it runs.
+      <code>POST /api/browse/splits/&lt;job_id&gt;/cancel/</code> stops a queued or running job:
+      <code>200</code> when it was <code>PENDING</code> (cancelled outright),
+      <code>202</code> when it was <code>RUNNING</code> (the pipeline is signalled and the job
+      reaches <code>CANCELLED</code> within about ten seconds), and <code>409</code> when it has
+      already finished.
+      <code>GET /api/browse/splits/&lt;job_id&gt;/download/</code> then streams the ZIP archive;
+      it answers <code>404</code> until the job is <code>DONE</code>.
+    </p>
+    <p class="mb-1">The archive holds four labelled CSVs, each
+      <code>protein1,protein2,label[,score]</code> with <code>label</code> 1 for interacting and
+      0 for not:</p>
+    <ul>
+      <li><code>train.csv</code>, <code>val.csv</code>, <code>test_balanced.csv</code> — 1:1
+        positives to negatives, negatives chosen by an ILP that matches degree, taxon-pair,
+        self-loop and GO-Jaccard bias.</li>
+      <li><code>test_realistic.csv</code> — 1:10, with <em>uniform</em> negatives. It simulates
+        an uncontrolled screen, so it is deliberately not bias-matched.</li>
+      <li><code>summary.json</code> and <code>README.txt</code>, naming the filters used, the
+        per-split counts, and the exact pipeline commit the split was cut with.</li>
+    </ul>
+    <p>
+      Splits are leakage-aware by sequence homology and not only by graph cut: the positives are
+      partitioned by an ILP over a precomputed sequence-similarity clustering of the proteome,
+      and CD-HIT-2D then removes train/test pairs that remain homologous. Expect materially
+      fewer pairs than the raw filtered interaction count.
     </p>
     <p class="mb-1">Accepted body keys (all optional — every one has a default):</p>
     <ul>
@@ -373,9 +399,13 @@
       <li><code>min_rpkm</code> = minimum tissue expression, used together with <code>tissue_ids</code>.</li>
       <li><code>min_degree_global</code>, <code>min_avg_score</code> = protein-level thresholds, both evaluated over the whole database rather than the filtered subgraph. The older name <code>min_degree</code> is still accepted.</li>
       <li><code>isoform_mode</code> = <code>general</code>, <code>isoforms</code> or <code>both</code>.</li>
-      <li><code>neg_ratio</code> = sampled negatives per positive (0.1–10.0, default 1.0).</li>
-      <li><code>seed</code> = integer RNG seed, so a split can be reproduced exactly.</li>
     </ul>
+    <p>
+      <code>neg_ratio</code> and <code>seed</code> are no longer accepted. The negative ratio is
+      fixed per split (1:1, and 1:10 for <code>test_realistic.csv</code>) and the seed is a
+      pipeline parameter, so both are properties of the pipeline rather than of a request. Bodies
+      that still carry them are accepted and the keys ignored.
+    </p>
     <p>
       Out-of-range values answer <code>400</code> with the failing constraint in the message.
       Ready-made splits of the current release, if you do not need your own filters, are on the
