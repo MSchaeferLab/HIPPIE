@@ -112,6 +112,11 @@ def run_split_job(self, job_id: str):
 
     proc = None
     try:
+        # Before anything expensive: the JVM, the pipeline checkout and the
+        # licence either exist or this run is going to die twenty minutes deep
+        # inside SOLVE_ILP with an error that names a path in a work dir.
+        nf.preflight()
+
         params = SplitParams.from_payload(job.params)
         export, artifacts_fingerprint = nf.prepare_job_dir(params, layout)
         if export.n_written == 0:
@@ -196,6 +201,19 @@ def run_split_job(self, job_id: str):
         # Only on success: nothing in here is needed once the zip exists, and a
         # kept work dir is several GB of staged intermediates per run.
         shutil.rmtree(layout.root, ignore_errors=True)
+
+    except nf.PreflightError as exc:
+        # Deployment misconfiguration, not a run that went wrong. The message is
+        # the whole of the diagnosis and a traceback around it would only bury
+        # it — the run card shows job.error verbatim.
+        _finish(
+            job,
+            status="FAILED",
+            step="failed",
+            error=str(exc),
+            finished_at=timezone.now(),
+        )
+        raise
 
     except Exception:
         if proc is not None and proc.poll() is None:

@@ -935,6 +935,7 @@ class RunSplitJobTaskTest(TestCase):
             proc = _FakeProc(returncode=2)
 
             with (
+                patch("hippie_website.tasks.nf.preflight"),
                 patch("hippie_website.tasks.nf.job_layout", return_value=layout),
                 patch(
                     "hippie_website.tasks.nf.prepare_job_dir",
@@ -974,6 +975,7 @@ class RunSplitJobTaskTest(TestCase):
                 n_proteins=0,
             )
             with (
+                patch("hippie_website.tasks.nf.preflight"),
                 patch("hippie_website.tasks.nf.job_layout", return_value=layout),
                 patch(
                     "hippie_website.tasks.nf.prepare_job_dir",
@@ -1017,6 +1019,7 @@ class RunSplitJobTaskTest(TestCase):
                 return proc
 
             with (
+                patch("hippie_website.tasks.nf.preflight"),
                 patch("hippie_website.tasks.nf.job_layout", return_value=layout),
                 patch(
                     "hippie_website.tasks.nf.prepare_job_dir",
@@ -1575,6 +1578,7 @@ class RunSplitJobRedeliveryTest(TestCase):
                 return export, "fp0123456789abcd"
 
             with (
+                patch("hippie_website.tasks.nf.preflight"),
                 patch("hippie_website.tasks.nf.job_layout", return_value=layout),
                 patch("hippie_website.tasks.nf.prepare_job_dir", side_effect=_prepare),
                 patch("subprocess.Popen", return_value=_FakeProc(returncode=2)),
@@ -1624,6 +1628,7 @@ class RunSplitJobRedeliveryTest(TestCase):
                 n_proteins=4,
             )
             with (
+                patch("hippie_website.tasks.nf.preflight"),
                 patch("hippie_website.tasks.nf.job_layout", return_value=layout),
                 patch(
                     "hippie_website.tasks.nf.prepare_job_dir",
@@ -1640,3 +1645,134 @@ class RunSplitJobRedeliveryTest(TestCase):
         job.refresh_from_db()
         self.assertIsNotNone(job.heartbeat_at)
         self.assertGreater(job.heartbeat_at, timezone.now() - timedelta(minutes=5))
+
+
+# ---------------------------------------------------------------------------
+# Preflight: refuse a run that cannot succeed, before the JVM starts
+# ---------------------------------------------------------------------------
+
+
+class PreflightTest(SimpleTestCase):
+    """Each of these failures otherwise surfaces twenty minutes into SOLVE_ILP,
+    times the retry ladder, as an error naming a path inside a work dir."""
+
+    def _env(self, pipeline, config, licence):
+        from unittest.mock import patch
+
+        return (
+            patch(
+                "hippie_website.services.nextflow_runner.pipeline_dir",
+                return_value=pipeline,
+            ),
+            patch(
+                "hippie_website.services.nextflow_runner.hippie_config",
+                return_value=config,
+            ),
+            patch(
+                "hippie_website.services.nextflow_runner.gurobi_license",
+                return_value=licence,
+            ),
+        )
+
+    def _ok_tree(self, td):
+        pipeline = Path(td) / "pipeline"
+        pipeline.mkdir()
+        (pipeline / "main.nf").write_text("workflow {}\n")
+        config = Path(td) / "hippie.config"
+        config.write_text("params {}\n")
+        licence = Path(td) / "gurobi.lic"
+        licence.write_text("WLSACCESSID=x\n")
+        return pipeline, config, licence
+
+    def _run(self, pipeline, config, licence):
+        from ..services.nextflow_runner import preflight
+
+        a, b, c = self._env(pipeline, config, licence)
+        with a, b, c:
+            preflight()
+
+    def test_a_complete_deployment_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._run(*self._ok_tree(td))
+
+    def test_an_unfetched_submodule_is_named_as_such(self):
+        from ..services.nextflow_runner import PreflightError
+
+        with tempfile.TemporaryDirectory() as td:
+            pipeline, config, licence = self._ok_tree(td)
+            (pipeline / "main.nf").unlink()
+            with self.assertRaises(PreflightError) as ctx:
+                self._run(pipeline, config, licence)
+            self.assertIn("submodule", str(ctx.exception))
+
+    def test_a_licence_that_docker_turned_into_a_directory_is_diagnosed(self):
+        """The real failure mode: Docker creates a directory at both ends of a
+        bind mount whose host path is missing, Nextflow's checkIfExists is happy
+        with it, and Gurobi is the first thing in the chain to notice."""
+        from ..services.nextflow_runner import PreflightError
+
+        with tempfile.TemporaryDirectory() as td:
+            pipeline, config, licence = self._ok_tree(td)
+            licence.unlink()
+            licence.mkdir()
+            with self.assertRaises(PreflightError) as ctx:
+                self._run(pipeline, config, licence)
+            message = str(ctx.exception)
+            self.assertIn("directory, not a file", message)
+            self.assertIn("GUROBI_LICENSE_PATH", message)
+
+    def test_a_missing_licence_is_diagnosed(self):
+        from ..services.nextflow_runner import PreflightError
+
+        with tempfile.TemporaryDirectory() as td:
+            pipeline, config, licence = self._ok_tree(td)
+            licence.unlink()
+            with self.assertRaises(PreflightError) as ctx:
+                self._run(pipeline, config, licence)
+            self.assertIn("No Gurobi licence", str(ctx.exception))
+
+    def test_an_empty_licence_is_diagnosed(self):
+        from ..services.nextflow_runner import PreflightError
+
+        with tempfile.TemporaryDirectory() as td:
+            pipeline, config, licence = self._ok_tree(td)
+            licence.write_text("")
+            with self.assertRaises(PreflightError) as ctx:
+                self._run(pipeline, config, licence)
+            self.assertIn("empty", str(ctx.exception))
+
+    def test_a_missing_config_is_diagnosed(self):
+        from ..services.nextflow_runner import PreflightError
+
+        with tempfile.TemporaryDirectory() as td:
+            pipeline, config, licence = self._ok_tree(td)
+            config.unlink()
+            with self.assertRaises(PreflightError) as ctx:
+                self._run(pipeline, config, licence)
+            self.assertIn("parameter file", str(ctx.exception))
+
+
+class PreflightFailsTheJobCleanlyTest(TestCase):
+    def test_the_run_card_shows_the_diagnosis_not_a_traceback(self):
+        from unittest.mock import patch
+
+        from ..models import SplitJob
+        from ..services.nextflow_runner import PreflightError
+        from ..tasks import run_split_job
+
+        job = SplitJob.objects.create(params={}, status="PENDING")
+        with (
+            patch(
+                "hippie_website.tasks.nf.preflight",
+                side_effect=PreflightError("no licence, and here is why"),
+            ),
+            patch("subprocess.Popen") as popen,
+            self.assertRaises(PreflightError),
+        ):
+            run_split_job(str(job.id))
+
+        popen.assert_not_called()
+        job.refresh_from_db()
+        self.assertEqual(job.status, "FAILED")
+        self.assertEqual(job.error, "no licence, and here is why")
+        self.assertNotIn("Traceback", job.error)

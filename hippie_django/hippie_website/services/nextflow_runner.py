@@ -64,6 +64,74 @@ def pipeline_dir() -> Path:
     return Path(os.environ.get("PIPELINE_DIR", "/opt/pipeline"))
 
 
+def gurobi_license() -> Path:
+    """The WLS licence file, as the pipeline will see it.
+
+    Same expression ``conf/hippie.config`` evaluates for ``params.gurobi_license``
+    (``System.getenv('GRB_LICENSE_FILE') ?: '/etc/gurobi/gurobi.lic'``), so a
+    check here is a check of the thing the run will actually stage.
+    """
+    return Path(os.environ.get("GRB_LICENSE_FILE") or "/etc/gurobi/gurobi.lic")
+
+
+class PreflightError(RuntimeError):
+    """A run cannot possibly succeed, and we knew before starting the JVM."""
+
+
+def preflight() -> None:
+    """Fail a misconfigured run in a second instead of in twenty minutes.
+
+    Every check here is for something that makes SOLVE_ILP die *after* the
+    pipeline has loaded the PPIs, built the problem and compiled it — a quarter
+    of an hour, times the retry ladder, ending in an error that names a path
+    inside a work dir nobody has ever seen. The cost of the run is not in
+    starting it, so it is worth refusing to.
+    """
+    main_nf = pipeline_dir() / "main.nf"
+    if not main_nf.is_file():
+        raise PreflightError(
+            f"The pipeline checkout at {pipeline_dir()} has no main.nf. On the "
+            "server this almost always means the submodule was never fetched: "
+            "run `git submodule update --init` and rebuild. Note that a plain "
+            "`git pull` does not update a submodule."
+        )
+
+    config = hippie_config()
+    if not config.is_file():
+        raise PreflightError(
+            f"The pipeline parameter file {config} is missing. It is COPYed "
+            "into the worker image from conf/hippie.config; a worker built "
+            "before that file existed will not have it."
+        )
+
+    licence = gurobi_license()
+    if licence.is_dir():
+        # Docker creates a *directory* at both ends of a bind mount whose host
+        # path does not exist, and Nextflow's `checkIfExists` is satisfied by
+        # one. It then stages the directory into the task work dir, and Gurobi
+        # is the first thing in the chain that notices.
+        raise PreflightError(
+            f"{licence} is a directory, not a file. Docker created it that way "
+            "because the host path in the GUROBI_LICENSE_PATH bind mount does "
+            "not exist. On the server: `docker compose down`, remove the empty "
+            f"directory, put the real WLS licence at the host path (default "
+            "./secrets/gurobi.lic) or point GUROBI_LICENSE_PATH at wherever it "
+            "actually is, then `docker compose up -d`."
+        )
+    if not licence.is_file():
+        raise PreflightError(
+            f"No Gurobi licence at {licence}. Both solvers are pinned to Gurobi "
+            "with no fallback, so a run without one cannot complete. Mount a WLS "
+            "licence there (GUROBI_LICENSE_PATH in .env)."
+        )
+    if licence.stat().st_size == 0:
+        raise PreflightError(
+            f"The Gurobi licence at {licence} is empty. A truncated or "
+            "placeholder licence fails the same way a missing one does, only "
+            "twenty minutes later."
+        )
+
+
 def hippie_config() -> Path:
     """HIPPIE's hard-coded parameter file, passed to Nextflow with ``-c``."""
     override = os.environ.get("NF_HIPPIE_CONFIG")
