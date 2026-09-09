@@ -44,6 +44,19 @@ function formatElapsed(startedAt) {
   return `${s}s`;
 }
 
+// Coarse on purpose. The estimate is a median of past runs multiplied by a
+// queue depth, so quoting it to the minute past the first hour would claim a
+// precision it does not have.
+function formatWait(seconds) {
+  if (seconds == null) return null;
+  if (seconds < 60) return "under a minute";
+  const mins = Math.round(seconds / 60);
+  if (mins < 90) return `~${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = Math.round((mins % 60) / 15) * 15;
+  return m === 0 || m === 60 ? `~${h + (m === 60 ? 1 : 0)} h` : `~${h}h ${m}m`;
+}
+
 const TEAL  = "var(--hippie-teal)";
 const RED   = "var(--hippie-accent, #e8590c)";
 const GREY  = "var(--hippie-ink-muted)";
@@ -407,7 +420,11 @@ function RunCard({ jobId }) {
 
   const border  = status === "FAILED" || status === "NOT_FOUND" ? RED
                 : status === "DONE" ? TEAL : "var(--hippie-border)";
-  const queued  = status === "PENDING" && (data?.queue_position || 0) > 0;
+  // Position 0 is still queued, not started: with concurrency 1 it is waiting on
+  // whatever is running. Showing it the step label instead would render an empty
+  // step as "Starting…" for however long that run has left.
+  const queued  = status === "PENDING";
+  const waitEta = queued ? formatWait(data?.estimated_wait_seconds) : null;
   const recap   = data ? paramSummary(data.params) : null;
   const elapsed = running ? formatElapsed(data?.started_at) : null;
   const cancelPending = cancelling || data?.cancel_requested;
@@ -458,7 +475,9 @@ function RunCard({ jobId }) {
             <span className="text-muted-sm">
               <span className="spinner-sm me-1"></span>
               {queued
-                ? `Queued — position ${data.queue_position}`
+                ? ((data.queue_position || 0) === 0
+                    ? "Queued — next in line"
+                    : `Queued — ${data.queue_position} run${data.queue_position === 1 ? "" : "s"} ahead`)
                 : (STEP_LABELS[data.step] || data.step || "Starting…")}
             </span>
             {/* Elapsed time instead of a progress bar. The ILP steps run against
@@ -468,10 +487,19 @@ function RunCard({ jobId }) {
                 running for {elapsed}
               </span>
             )}
+            {/* The queue is uncapped and nothing is deduplicated, so the wait is
+                the only back-pressure a user gets. Quote it rather than hide it. */}
+            {waitEta && (
+              <span className="text-muted-sm mono" style={{whiteSpace:"nowrap"}}>
+                {waitEta} until start
+              </span>
+            )}
           </div>
           <p className="text-muted-sm mb-2" style={{fontSize:".72rem"}}>
-            Splits are generated one at a time and can take up to two hours. You can
-            close this page — the run continues, and the share link brings it back.
+            Splits are generated one at a time, first come first served, and a run
+            can take up to two hours — so a busy queue means a long wait rather than
+            a slower run. You can close this page: the run continues, and the share
+            link brings it back.
           </p>
           <button type="button" onClick={handleCancel} disabled={cancelPending} style={{
             background:"transparent", color: cancelPending ? GREY : RED,

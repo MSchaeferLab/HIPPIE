@@ -191,8 +191,53 @@ CELERY_RESULT_BACKEND = os.environ.get(
 )
 CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
+
+# Ack a split job only once it has finished, not when the worker receives it.
+# With the default (ack on receipt) a worker restart silently destroyed the
+# message: the SplitJob row stayed PENDING forever with nothing behind it.
+CELERY_TASK_ACKS_LATE = True
+
+# One reserved message at a time. The worker runs --concurrency=1, so with the
+# default multiplier of 4 it holds three extra jobs hostage behind a two-hour
+# run — invisible in the queue, and lost outright on a restart before acks_late
+# was turned on. Prefetching buys throughput on short tasks; there are none here.
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+
+# acks_late on the Redis transport needs this raised. Redis has no real ack:
+# the broker re-delivers any message still unacked after visibility_timeout,
+# which for a task that legitimately runs for hours means running it a second
+# time. Ceiling for one run is SOLVE_ILP (4 h cap) followed by the negative
+# samplers in two waves (maxForks = 2, 4 h cap each) = 12 h; 14 h clears that.
+# run_split_job also refuses to start on top of a live run, so a redelivery
+# that does slip through is a no-op rather than a duplicate.
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": int(os.environ.get("CELERY_VISIBILITY_TIMEOUT", 14 * 3600)),
+}
+
 # Uncomment to run tasks synchronously (no Redis required for dev/testing):
 # CELERY_TASK_ALWAYS_EAGER = True
+
+# ── ML splits housekeeping ─────────────────────────────────────────────────
+# Terminal SplitJobs (DONE/FAILED/CANCELLED) older than this are deleted by
+# `manage.py prune_split_jobs`, along with their zip and any kept work dir.
+# PENDING and RUNNING jobs are never pruned by age: the queue is deliberately
+# uncapped, so a legitimately queued job can be days old.
+SPLIT_JOB_RETENTION_DAYS = int(os.environ.get("SPLIT_JOB_RETENTION_DAYS", 7))
+
+# A RUNNING job whose task has not written a heartbeat within this many seconds
+# is presumed dead (worker OOM-killed, container replaced mid-run) and marked
+# FAILED. Heartbeat-based rather than age-based on purpose: runs are hours long
+# and vary, but a live task writes every POLL_SECONDS regardless.
+SPLIT_JOB_HEARTBEAT_TIMEOUT = int(
+    os.environ.get("SPLIT_JOB_HEARTBEAT_TIMEOUT", 15 * 60)
+)
+
+# Wait quoted for a queued job before any run has finished on this deployment
+# (and after a prune has taken the history with it). Once there are finished
+# runs the estimate is their median — see services/split_queue.py.
+SPLIT_JOB_DEFAULT_RUN_SECONDS = int(
+    os.environ.get("SPLIT_JOB_DEFAULT_RUN_SECONDS", 90 * 60)
+)
 
 # ── Cache ──────────────────────────────────────────────────────────────────
 # Used to memoise the browse-page row counts so pagination and repeat loads

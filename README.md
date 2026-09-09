@@ -5,8 +5,8 @@
 Clone the repository:
 
 ```bash
-git clone --recurse-submodules https://github.com/PelzKo/HIPPIE_FACELIFT.git
-cd HIPPIE_FACELIFT
+git clone --recurse-submodules https://github.com/MSchaeferLab/HIPPIE.git
+cd HIPPIE
 ```
 
 `--recurse-submodules` fetches `pipeline/`, the pinned checkout of
@@ -16,6 +16,11 @@ generates the ML splits. In an existing clone:
 ```bash
 git submodule update --init
 ```
+
+A plain `git pull` does **not** move a submodule. Every pull that changes the
+pin needs `git submodule update --init` again — otherwise the worker keeps
+running the old pipeline checkout and records its commit in every run's
+`summary.json`. `git config submodule.recurse true` makes `git pull` do it.
 
 Create the virtual environment and install the dependencies:
 Because of version conflicts on the server, we are running this with python 3.11 and numpy 1.25
@@ -284,6 +289,34 @@ spends its full 1800 s budget on essentially any input — the assignment proble
 is hard to prove optimal even though it is small — so that cost is a floor, not
 something a narrow filter avoids. Each run card has a **Cancel** button, which
 is what makes a mis-clicked two-hour run recoverable.
+
+The resource caps are the pipeline's alone: the `worker` container itself is
+deliberately **not** given a cgroup limit, so Django, Celery and the management
+commands keep the whole box. Pinning `executor { cpus = 2; memory = '8.GB' }` is
+what bounds Nextflow, and it has to be the executor pool rather than
+`resourceLimits` — the local executor sizes its pool from the *host*, so
+per-task caps alone let two 8 GB tasks run side by side on 8 GB.
+
+**The queue is uncapped and undeduplicated.** Jobs run first-come-first-served,
+one at a time; ten simultaneous requests are twenty hours of queue, and ten
+identical requests are ten identical runs. Nothing throttles that by design —
+instead each run card quotes its position and a live wait estimate (median of
+recent finished runs × queue depth, minus what is left of the run in progress),
+so the cost shows up in front of the user rather than as a page that never
+finishes.
+
+**Housekeeping is a cron, not a background task.** `manage.py prune_split_jobs`
+— run it **in the worker container** — fails `RUNNING` jobs whose task has
+stopped heartbeating, deletes terminal jobs older than
+`SPLIT_JOB_RETENTION_DAYS` (default 7) together with their zip and work dir, and
+sweeps files with no job row left. It is not a Celery task on purpose: the
+worker has one execution slot and a split holds it for hours, so a queued
+housekeeping task would never run on the days it is most needed. See
+`docs/DEPLOY_nextflow_splits.md` for the crontab line.
+
+```bash
+docker compose exec worker python manage.py prune_split_jobs --dry-run
+```
 
 #### Three things must be in place
 

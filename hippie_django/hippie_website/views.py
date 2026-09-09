@@ -94,6 +94,7 @@ from .services.vocab import (  # noqa: F401
     filter_option_lists as _filter_option_lists,
     vocab_options as _vocab_options,
 )
+from .services import split_queue
 from .services.detail import (  # noqa: F401
     digger_ctx as _digger_ctx,
     interaction_detail_context as _interaction_detail_context,
@@ -1552,22 +1553,11 @@ def browse_splits_stats(request):
 @require_GET
 def browse_splits_status(request, job_id):
     job = get_object_or_404(SplitJob, pk=job_id)
-    # Queue position = number of jobs still PENDING that were created before this
-    # one (FIFO by created_at). 0 once the job is picked up (RUNNING/DONE/FAILED)
-    # or when nothing precedes it. Lets each run card show its wait in line.
-    # `id` (tie-broken on) is a random UUID, not a real ordinal, but it makes
-    # the count deterministic when two jobs share a created_at tie instead of
-    # both reporting the same position.
-    queue_position = (
-        SplitJob.objects.filter(status="PENDING")
-        .filter(
-            Q(created_at__lt=job.created_at)
-            | Q(created_at=job.created_at, id__lt=job.id)
-        )
-        .count()
-        if job.status == "PENDING"
-        else 0
-    )
+    # The queue is uncapped and undeduplicated by choice, so the run card has to
+    # be honest about the consequence: position in line, and the wait that
+    # position actually implies. See services/split_queue.py.
+    position = split_queue.queue_position(job)
+    estimated_wait = split_queue.estimated_wait_seconds(job, position)
     return JsonResponse(
         {
             "status": job.status,
@@ -1579,7 +1569,9 @@ def browse_splits_status(request, job_id):
             # concurrency is 1, so a job can sit queued far longer than it runs,
             # and "running for 14 min" has to mean 14 minutes of pipeline.
             "started_at": job.started_at.isoformat() if job.started_at else None,
-            "queue_position": queue_position,
+            "queue_position": position,
+            # Seconds until this job is expected to start; null once it has.
+            "estimated_wait_seconds": estimated_wait,
             "cancel_requested": job.cancel_requested,
             "summary": job.summary,
             "error": job.error or None,

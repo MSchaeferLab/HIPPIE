@@ -4,8 +4,10 @@ import signal
 import subprocess
 import time
 import traceback
+from datetime import timedelta
 
 from celery import shared_task
+from django.conf import settings
 from django.utils import timezone
 
 from .models import SplitJob
@@ -31,6 +33,19 @@ def _finish(job: SplitJob, **fields) -> None:
     job.save(update_fields=[*fields.keys()])
 
 
+def _has_live_task(job: SplitJob) -> bool:
+    """Is some other worker currently running this job?
+
+    Only the heartbeat can answer that. ``status == "RUNNING"`` on its own
+    cannot: it is exactly what a job killed with its container leaves behind,
+    and treating that as live would make the row unrunnable forever.
+    """
+    if job.heartbeat_at is None:
+        return False
+    timeout = int(getattr(settings, "SPLIT_JOB_HEARTBEAT_TIMEOUT", 15 * 60))
+    return job.heartbeat_at > timezone.now() - timedelta(seconds=timeout)
+
+
 @shared_task(bind=True)
 def run_split_job(self, job_id: str):
     """Run one ML-splits job through the Nextflow ppi-splitting-pipeline.
@@ -41,6 +56,16 @@ def run_split_job(self, job_id: str):
     supervising the run, and packaging what comes back.
     """
     job = SplitJob.objects.get(pk=job_id)
+
+    # Redelivery guard. `acks_late` leaves the message on the broker for the
+    # whole run, and Redis re-queues anything still unacked after
+    # visibility_timeout — so a run that outlives that window arrives here a
+    # second time. Two hours of solver work must not be repeated, and worse, a
+    # duplicate would race the original over the same work dir and the same row.
+    if job.status in ("DONE", "FAILED"):
+        return
+    if job.status == "RUNNING" and _has_live_task(job):
+        return
 
     # A job cancelled while still queued must not start. The view also revokes
     # the Celery task, but a worker that had already prefetched this message
@@ -56,12 +81,34 @@ def run_split_job(self, job_id: str):
         return
 
     layout = nf.job_layout(job_id)
+
+    # Reaching here with status RUNNING means the previous attempt died with its
+    # worker (stale heartbeat) and this is a genuine retry. Its half-written
+    # ppis.csv and Nextflow work dir would otherwise be inherited by a run that
+    # never produced them, so the directory starts empty.
+    if job.status == "RUNNING":
+        shutil.rmtree(layout.root, ignore_errors=True)
+
+    now = timezone.now()
     job.status = "RUNNING"
     job.step = "exporting_interactions"
-    job.started_at = timezone.now()
+    job.started_at = now
+    # First beat written with the claim, not at the first poll: the export and
+    # the JVM start-up sit between the two, and a null heartbeat during those
+    # would make the reaper fall back to started_at for no reason.
+    job.heartbeat_at = now
     job.work_dir = str(layout.work)
     job.outdir = str(layout.outdir)
-    job.save(update_fields=["status", "step", "started_at", "work_dir", "outdir"])
+    job.save(
+        update_fields=[
+            "status",
+            "step",
+            "started_at",
+            "heartbeat_at",
+            "work_dir",
+            "outdir",
+        ]
+    )
 
     proc = None
     try:
@@ -107,10 +154,15 @@ def run_split_job(self, job_id: str):
                 shutil.rmtree(layout.root, ignore_errors=True)
                 return
 
+            # One UPDATE per poll whether or not the step changed — the beat is
+            # the liveness signal, and a run that spends 30 minutes inside
+            # SOLVE_ILP changes step exactly once in that time.
             step = nf.current_step(layout)
+            fields: dict[str, object] = {"heartbeat_at": timezone.now()}
             if step != last_step:
                 last_step = step
-                SplitJob.objects.filter(pk=job_id).update(step=step)
+                fields["step"] = step
+            SplitJob.objects.filter(pk=job_id).update(**fields)
 
         if proc.returncode != 0:
             # Work dir deliberately kept: .command.err and .nextflow.log are the

@@ -359,13 +359,20 @@
       <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page show.
       <code>GET /api/browse/splits/&lt;job_id&gt;/</code> reports
       <code>{ status, step, progress, params, created_at, started_at, queue_position,
-      cancel_requested, summary, error, download_url }</code>; <code>status</code> is
+      estimated_wait_seconds, cancel_requested, summary, error, download_url }</code>;
+      <code>status</code> is
       <code>PENDING</code>, <code>RUNNING</code>, <code>DONE</code>, <code>FAILED</code> or
       <code>CANCELLED</code>, and <code>download_url</code> is filled in only once the job is
       <code>DONE</code>. Splits are generated one at a time and a run takes tens of minutes to
       two hours, so poll no more than once every few seconds and read elapsed time from
       <code>started_at</code> rather than <code>created_at</code> — a job can wait in the queue
-      far longer than it runs.
+      far longer than it runs. The queue is first-come-first-served and neither capped nor
+      deduplicated, so <code>estimated_wait_seconds</code> (seconds until the job is expected
+      to <em>start</em>, <code>null</code> once it has) is the honest cost of submitting during
+      a busy period. It is an estimate: the median duration of recent successful runs times
+      the number of jobs ahead, less whatever is left of the run in progress.
+      Finished jobs are kept for a limited period and then deleted along with their archive,
+      so download a split you care about rather than relying on the job id indefinitely.
       <code>POST /api/browse/splits/&lt;job_id&gt;/cancel/</code> stops a queued or running job:
       <code>200</code> when it was <code>PENDING</code> (cancelled outright),
       <code>202</code> when it was <code>RUNNING</code> (the pipeline is signalled and the job

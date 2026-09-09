@@ -614,6 +614,12 @@ class SplitJob(models.Model):
     # so "running for 14 min" means 14 minutes of solving and not 14 minutes of
     # queueing.
     started_at = models.DateTimeField(null=True, blank=True)
+    # Written by the running task on every poll (POLL_SECONDS). This, and not
+    # started_at, is how a dead run is told from a slow one: runs are hours long
+    # and their length varies with the filters, so any age-based liveness test
+    # would either kill live jobs or leave dead ones RUNNING forever. Stale =>
+    # `prune_split_jobs` marks the job FAILED.
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 
     # ── Cancellation ─────────────────────────────────────────────────────

@@ -1152,3 +1152,491 @@ class ArtifactFingerprintTest(SimpleTestCase):
             )
             summary = nf.collect_summary(layout, export, "abc", "fp0123456789abcd")
         self.assertEqual(summary.artifacts_fingerprint, "fp0123456789abcd")
+
+
+# ---------------------------------------------------------------------------
+# Queue transparency: position and the wait that position implies
+# ---------------------------------------------------------------------------
+
+
+class SplitQueueEstimateTest(TestCase):
+    """The queue is uncapped and undeduplicated by choice, so the quoted wait is
+    the only back-pressure a user gets. It has to be right."""
+
+    def _job(self, status, created_offset=0, started=None, finished=None):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ..models import SplitJob
+
+        job = SplitJob.objects.create(params={}, status=status)
+        SplitJob.objects.filter(pk=job.pk).update(
+            created_at=timezone.now() + timedelta(seconds=created_offset),
+            started_at=started,
+            finished_at=finished,
+        )
+        job.refresh_from_db()
+        return job
+
+    def test_typical_duration_falls_back_before_any_run_has_finished(self):
+        from django.conf import settings
+
+        from ..services.split_queue import typical_run_seconds
+
+        self.assertEqual(typical_run_seconds(), settings.SPLIT_JOB_DEFAULT_RUN_SECONDS)
+
+    def test_typical_duration_is_the_median_of_finished_runs(self):
+        """Median, not mean: one four-hour outlier must not move every quote."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ..services.split_queue import typical_run_seconds
+
+        base = timezone.now() - timedelta(days=1)
+        for minutes in (10, 20, 30, 240):
+            self._job("DONE", started=base, finished=base + timedelta(minutes=minutes))
+        # median of [600, 1200, 1800, 14400] = 1500
+        self.assertEqual(typical_run_seconds(), 1500)
+
+    def test_wait_counts_the_remainder_of_the_running_job_not_a_whole_one(self):
+        """A queued user should watch the estimate fall as the job ahead
+        finishes, not see it drop in one step when the slot frees."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ..services.split_queue import estimated_wait_seconds, typical_run_seconds
+
+        base = timezone.now() - timedelta(days=1)
+        for _ in range(3):
+            self._job("DONE", started=base, finished=base + timedelta(minutes=60))
+        typical = typical_run_seconds()
+        self.assertEqual(typical, 3600)
+
+        # One run 50 minutes in, one job queued ahead of ours.
+        self._job("RUNNING", started=timezone.now() - timedelta(minutes=50))
+        self._job("PENDING", created_offset=-10)
+        mine = self._job("PENDING", created_offset=0)
+
+        wait = estimated_wait_seconds(mine)
+        # 1 job ahead x 3600 + ~600 s left of the running one.
+        self.assertAlmostEqual(wait, 3600 + 600, delta=30)
+
+    def test_a_run_that_has_outlasted_the_estimate_contributes_zero(self):
+        """Under-quoting beats an estimate that marches backwards past the run
+        it is waiting on."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ..services.split_queue import estimated_wait_seconds
+
+        base = timezone.now() - timedelta(days=1)
+        self._job("DONE", started=base, finished=base + timedelta(minutes=30))
+        self._job("RUNNING", started=timezone.now() - timedelta(hours=5))
+        mine = self._job("PENDING")
+
+        self.assertEqual(estimated_wait_seconds(mine), 0)
+
+    def test_status_endpoint_exposes_the_wait_and_nulls_it_once_started(self):
+        from ..models import SplitJob
+
+        pending = self._job("PENDING")
+        running = SplitJob.objects.create(params={}, status="RUNNING")
+
+        body = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[pending.pk])
+        ).json()
+        self.assertIsNotNone(body["estimated_wait_seconds"])
+        self.assertEqual(body["queue_position"], 0)
+
+        body = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[running.pk])
+        ).json()
+        self.assertIsNone(body["estimated_wait_seconds"])
+
+
+# ---------------------------------------------------------------------------
+# Housekeeping: reaping dead runs, pruning old ones, sweeping orphans
+# ---------------------------------------------------------------------------
+
+
+class SplitMaintenanceTest(TestCase):
+    """Nothing else bounds the nf_work volume or the splits directory, and
+    nothing else notices a run whose worker was killed."""
+
+    def _run_maintenance(self, nf_root, media_root, **kwargs):
+        from unittest.mock import patch
+
+        from django.test import override_settings
+
+        from ..services.split_maintenance import run_maintenance
+
+        with (
+            patch.dict(os.environ, {"NF_RUN_ROOT": str(nf_root)}),
+            override_settings(MEDIA_ROOT=str(media_root)),
+        ):
+            return run_maintenance(**kwargs)
+
+    def test_a_run_with_a_stale_heartbeat_is_failed_not_left_running(self):
+        """A worker killed with its container leaves a row that polls forever
+        and is counted by nothing."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ..models import SplitJob
+        from ..services.split_maintenance import MaintenanceReport, reap_stale_jobs
+
+        dead = SplitJob.objects.create(params={}, status="RUNNING")
+        SplitJob.objects.filter(pk=dead.pk).update(
+            started_at=timezone.now() - timedelta(hours=3),
+            heartbeat_at=timezone.now() - timedelta(hours=2),
+        )
+        alive = SplitJob.objects.create(params={}, status="RUNNING")
+        SplitJob.objects.filter(pk=alive.pk).update(
+            started_at=timezone.now() - timedelta(hours=3),
+            heartbeat_at=timezone.now(),
+        )
+
+        reap_stale_jobs(MaintenanceReport(), timeout_seconds=900)
+
+        dead.refresh_from_db()
+        alive.refresh_from_db()
+        self.assertEqual(dead.status, "FAILED")
+        self.assertIn("no heartbeat", dead.error)
+        self.assertIsNotNone(dead.finished_at)
+        self.assertEqual(
+            alive.status, "RUNNING", "a long run is not the same as a dead one"
+        )
+
+    def test_a_running_job_with_no_timestamps_at_all_is_left_alone(self):
+        """Nothing to be stale against; guessing would risk failing a live run."""
+        from ..models import SplitJob
+        from ..services.split_maintenance import MaintenanceReport, reap_stale_jobs
+
+        job = SplitJob.objects.create(params={}, status="RUNNING")
+        reap_stale_jobs(MaintenanceReport(), timeout_seconds=1)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "RUNNING")
+
+    def test_prune_removes_old_terminal_jobs_with_their_zip_and_work_dir(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ..models import SplitJob
+
+        with (
+            tempfile.TemporaryDirectory() as nf_root,
+            tempfile.TemporaryDirectory() as media,
+        ):
+            nf_root, media = Path(nf_root), Path(media)
+            job = SplitJob.objects.create(params={}, status="DONE")
+            root = nf_root / str(job.id)
+            (root / "work").mkdir(parents=True)
+            zip_path = media / "splits" / f"{job.id}.zip"
+            zip_path.parent.mkdir(parents=True)
+            zip_path.write_bytes(b"PK\x03\x04")
+            SplitJob.objects.filter(pk=job.pk).update(
+                finished_at=timezone.now() - timedelta(days=30),
+                work_dir=str(root / "work"),
+                zip_path=str(zip_path),
+            )
+
+            report = self._run_maintenance(nf_root, media, older_than_days=7)
+
+            self.assertEqual(report.pruned, [str(job.id)])
+            self.assertFalse(root.exists())
+            self.assertFalse(zip_path.exists())
+            self.assertFalse(SplitJob.objects.filter(pk=job.pk).exists())
+
+    def test_prune_spares_queued_running_and_recent_jobs(self):
+        """The queue is uncapped, so a PENDING job can legitimately be days old
+        and still be waiting its turn — age alone must not collect it."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ..models import SplitJob
+
+        old = timezone.now() - timedelta(days=30)
+        pending = SplitJob.objects.create(params={}, status="PENDING")
+        running = SplitJob.objects.create(params={}, status="RUNNING")
+        recent = SplitJob.objects.create(params={}, status="DONE")
+        SplitJob.objects.filter(pk=pending.pk).update(created_at=old)
+        SplitJob.objects.filter(pk=running.pk).update(
+            created_at=old, started_at=timezone.now(), heartbeat_at=timezone.now()
+        )
+        SplitJob.objects.filter(pk=recent.pk).update(finished_at=timezone.now())
+
+        with (
+            tempfile.TemporaryDirectory() as nf_root,
+            tempfile.TemporaryDirectory() as media,
+        ):
+            report = self._run_maintenance(
+                Path(nf_root), Path(media), older_than_days=7
+            )
+
+        self.assertEqual(report.pruned, [])
+        self.assertEqual(SplitJob.objects.count(), 3)
+
+    def test_orphan_dirs_and_zips_with_no_job_row_are_swept(self):
+        import uuid as _uuid
+
+        from ..models import SplitJob
+
+        with (
+            tempfile.TemporaryDirectory() as nf_root,
+            tempfile.TemporaryDirectory() as media,
+        ):
+            nf_root, media = Path(nf_root), Path(media)
+            orphan_id = str(_uuid.uuid4())
+            (nf_root / orphan_id).mkdir()
+            (media / "splits").mkdir()
+            (media / "splits" / f"{orphan_id}.zip").write_bytes(b"PK")
+
+            # Neither of these is UUID-named, so neither is ours to remove.
+            (nf_root / "not-a-job").mkdir()
+            (media / "splits" / "README.txt").write_text("keep me")
+
+            kept = SplitJob.objects.create(params={}, status="DONE")
+            (nf_root / str(kept.id)).mkdir()
+
+            report = self._run_maintenance(nf_root, media)
+
+            self.assertEqual(report.orphan_dirs, [str(nf_root / orphan_id)])
+            self.assertFalse((nf_root / orphan_id).exists())
+            self.assertFalse((media / "splits" / f"{orphan_id}.zip").exists())
+            self.assertTrue((nf_root / "not-a-job").is_dir())
+            self.assertTrue((media / "splits" / "README.txt").is_file())
+            self.assertTrue((nf_root / str(kept.id)).is_dir())
+
+    def test_dry_run_reports_without_deleting_anything(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ..models import SplitJob
+
+        with (
+            tempfile.TemporaryDirectory() as nf_root,
+            tempfile.TemporaryDirectory() as media,
+        ):
+            nf_root, media = Path(nf_root), Path(media)
+            job = SplitJob.objects.create(params={}, status="FAILED")
+            (nf_root / str(job.id) / "work").mkdir(parents=True)
+            SplitJob.objects.filter(pk=job.pk).update(
+                finished_at=timezone.now() - timedelta(days=30),
+                work_dir=str(nf_root / str(job.id) / "work"),
+            )
+
+            report = self._run_maintenance(
+                nf_root, media, older_than_days=7, dry_run=True
+            )
+
+            self.assertEqual(report.pruned, [str(job.id)])
+            self.assertEqual(report.removed_dirs, [])
+            self.assertTrue((nf_root / str(job.id)).is_dir())
+            self.assertTrue(SplitJob.objects.filter(pk=job.pk).exists())
+
+    def test_a_row_whose_work_dir_is_not_its_own_uuid_is_never_rmtreed(self):
+        """_job_root hands a path straight to rmtree, so a malformed row must
+        not be able to aim it somewhere else."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from ..models import SplitJob
+        from ..services.split_maintenance import _job_root
+
+        with tempfile.TemporaryDirectory() as nf_root:
+            nf_root = Path(nf_root)
+            victim = nf_root / "important"
+            victim.mkdir()
+            job = SplitJob.objects.create(params={}, status="DONE")
+            SplitJob.objects.filter(pk=job.pk).update(
+                finished_at=timezone.now() - timedelta(days=30),
+                work_dir=str(victim / "work"),
+            )
+            job.refresh_from_db()
+
+            self.assertIsNone(_job_root(job))
+
+    def test_the_management_command_runs_and_reports(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        with (
+            tempfile.TemporaryDirectory() as nf_root,
+            tempfile.TemporaryDirectory() as media,
+        ):
+            from unittest.mock import patch
+
+            from django.test import override_settings
+
+            out = StringIO()
+            with (
+                patch.dict(os.environ, {"NF_RUN_ROOT": nf_root}),
+                override_settings(MEDIA_ROOT=media),
+            ):
+                call_command("prune_split_jobs", "--dry-run", stdout=out, stderr=out)
+            self.assertIn("would prune", out.getvalue())
+
+
+# ---------------------------------------------------------------------------
+# acks_late: the same job can be delivered twice
+# ---------------------------------------------------------------------------
+
+
+class RunSplitJobRedeliveryTest(TestCase):
+    """`acks_late` keeps the message on the broker for the whole run, and Redis
+    re-queues anything unacked past visibility_timeout. Two hours of solver work
+    must not be repeated, and a duplicate must not race the original."""
+
+    def test_a_redelivery_on_top_of_a_live_run_is_a_no_op(self):
+        from unittest.mock import patch
+
+        from django.utils import timezone
+
+        from ..models import SplitJob
+        from ..tasks import run_split_job
+
+        job = SplitJob.objects.create(params={}, status="RUNNING")
+        SplitJob.objects.filter(pk=job.pk).update(
+            started_at=timezone.now(), heartbeat_at=timezone.now()
+        )
+
+        with patch("subprocess.Popen") as popen:
+            run_split_job(str(job.id))
+
+        popen.assert_not_called()
+        job.refresh_from_db()
+        self.assertEqual(job.status, "RUNNING")
+
+    def test_a_redelivery_of_a_finished_job_is_a_no_op(self):
+        from unittest.mock import patch
+
+        from ..models import SplitJob
+        from ..tasks import run_split_job
+
+        for status in ("DONE", "FAILED"):
+            job = SplitJob.objects.create(params={}, status=status)
+            with patch("subprocess.Popen") as popen:
+                run_split_job(str(job.id))
+            popen.assert_not_called()
+            job.refresh_from_db()
+            self.assertEqual(job.status, status)
+
+    def test_a_stale_running_job_is_retried_from_an_empty_directory(self):
+        """The previous attempt died with its worker. Its half-written ppis.csv
+        and work dir must not be inherited by a run that never produced them."""
+        from datetime import timedelta
+        from unittest.mock import patch
+
+        from django.utils import timezone
+
+        from ..models import SplitJob
+        from ..services import nextflow_runner as nf
+        from ..services.export_ppis import ExportResult
+        from ..tasks import run_split_job
+
+        job = SplitJob.objects.create(params={}, status="RUNNING")
+        SplitJob.objects.filter(pk=job.pk).update(
+            started_at=timezone.now() - timedelta(hours=3),
+            heartbeat_at=timezone.now() - timedelta(hours=2),
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            layout = nf.job_layout(str(job.id), root=Path(td))
+            layout.work.mkdir(parents=True)
+            stale_marker = layout.root / "ppis.csv"
+            stale_marker.write_text("half,written\n")
+
+            export = ExportResult(
+                path=layout.ppis,
+                n_written=5,
+                n_dropped_unknown=0,
+                n_dropped_blank=0,
+                n_proteins=4,
+            )
+
+            def _prepare(_params, _layout, *a, **kw):
+                self.assertFalse(
+                    stale_marker.exists(),
+                    "the previous attempt's directory must be gone before the retry",
+                )
+                _layout.root.mkdir(parents=True, exist_ok=True)
+                _layout.work.mkdir(parents=True, exist_ok=True)
+                _layout.log.write_text("ERROR ~ boom\n")
+                return export, "fp0123456789abcd"
+
+            with (
+                patch("hippie_website.tasks.nf.job_layout", return_value=layout),
+                patch("hippie_website.tasks.nf.prepare_job_dir", side_effect=_prepare),
+                patch("subprocess.Popen", return_value=_FakeProc(returncode=2)),
+                patch("hippie_website.tasks.POLL_SECONDS", 0),
+            ):
+                run_split_job(str(job.id))
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, "FAILED")
+
+    def test_the_poll_loop_writes_a_heartbeat_on_every_pass(self):
+        """The beat is the liveness signal, so it cannot ride on `step` changing
+        — a run spends half an hour inside SOLVE_ILP without changing step."""
+        from datetime import timedelta
+        from unittest.mock import patch
+
+        from django.utils import timezone
+
+        from ..models import SplitJob
+        from ..services import nextflow_runner as nf
+        from ..services.export_ppis import ExportResult
+        from ..tasks import run_split_job
+
+        job = SplitJob.objects.create(params={}, status="PENDING")
+
+        class _BackdatingProc(_FakeProc):
+            """Ages the heartbeat before the loop body gets a chance to refresh
+            it, so a loop that does not write one leaves it visibly stale."""
+
+            def poll(self):
+                result = super().poll()
+                if result is None:
+                    SplitJob.objects.filter(pk=job.pk).update(
+                        heartbeat_at=timezone.now() - timedelta(hours=2)
+                    )
+                return result
+
+        with tempfile.TemporaryDirectory() as td:
+            layout = nf.job_layout(str(job.id), root=Path(td))
+            layout.work.mkdir(parents=True)
+            layout.log.write_text("ERROR ~ boom\n")
+            export = ExportResult(
+                path=layout.ppis,
+                n_written=5,
+                n_dropped_unknown=0,
+                n_dropped_blank=0,
+                n_proteins=4,
+            )
+            with (
+                patch("hippie_website.tasks.nf.job_layout", return_value=layout),
+                patch(
+                    "hippie_website.tasks.nf.prepare_job_dir",
+                    return_value=(export, "fp0123456789abcd"),
+                ),
+                patch(
+                    "subprocess.Popen",
+                    return_value=_BackdatingProc(returncode=2, exits_after=2),
+                ),
+                patch("hippie_website.tasks.POLL_SECONDS", 0),
+            ):
+                run_split_job(str(job.id))
+
+        job.refresh_from_db()
+        self.assertIsNotNone(job.heartbeat_at)
+        self.assertGreater(job.heartbeat_at, timezone.now() - timedelta(minutes=5))
