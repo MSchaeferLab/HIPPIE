@@ -13,15 +13,49 @@ const cfg = window.SPLITS_CONFIG;
 const meta = cfg.meta || EMPTY_META;
 const initial = cfg.initial || {};
 
+// Coarse pipeline steps, in execution order. Derived server-side from the
+// Nextflow trace — deliberately not a percentage: the ILP steps are bounded by
+// their own solver budget, not by how many tasks have finished, so a task-count
+// fraction would sit still for an hour and read as a hang.
 const STEP_LABELS = {
-  building_graph:     "Building interaction graph…",
-  partitioning:       "Partitioning graph into splits…",
-  sampling_negatives: "Sampling negative edges…",
-  pruning:            "Pruning isolated nodes…",
-  writing_files:      "Writing CSV files…",
-  done:               "Done",
-  starting:           "Starting…",
+  starting:                "Starting pipeline…",
+  exporting_interactions:  "Exporting filtered interactions…",
+  sorting_interactions:    "Sorting interactions…",
+  partitioning:            "Partitioning the graph (ILP)…",
+  clustering_sequences:    "Clustering sequences (CD-HIT-2D)…",
+  removing_redundancy:     "Removing homologous train/test pairs…",
+  sampling_negatives:      "Sampling negatives (ILP)…",
+  packaging:               "Packaging results…",
+  done:                    "Done",
+  cancelled:               "Cancelled",
+  failed:                  "Failed",
 };
+
+// "running for 3m 07s" / "1h 12m". Seconds are dropped past the hour mark —
+// at that scale they are noise, and the string re-renders every second.
+function formatElapsed(startedAt) {
+  if (!startedAt) return null;
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+// Coarse on purpose. The estimate is a median of past runs multiplied by a
+// queue depth, so quoting it to the minute past the first hour would claim a
+// precision it does not have.
+function formatWait(seconds) {
+  if (seconds == null) return null;
+  if (seconds < 60) return "under a minute";
+  const mins = Math.round(seconds / 60);
+  if (mins < 90) return `~${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = Math.round((mins % 60) / 15) * 15;
+  return m === 0 || m === 60 ? `~${h + (m === 60 ? 1 : 0)} h` : `~${h}h ${m}m`;
+}
 
 const TEAL  = "var(--hippie-teal)";
 const RED   = "var(--hippie-accent, #e8590c)";
@@ -57,12 +91,11 @@ const INTERACTION_INIT = {
 };
 
 // ── Filter help text (definition lists shown in section-header pop-ups) ──────
-// The two filter panels live in filters.jsx (shared with the query pages); only
-// the sampling card is unique to this page.
-const SAMPLING_HELP = DL([
-  ["Negative ratio", "Number of sampled negative (non-interacting) edges generated per positive edge."],
-  ["Random seed", "RNG seed for reproducible negative sampling and train/val/test partitioning."],
-]);
+// Both filter panels live in filters.jsx, shared with the query pages. There is
+// no sampling card any more: the pipeline fixes the negative ratio per split
+// (1:1 for train/val/test_balanced, 1:10 for test_realistic) and takes its seed
+// from conf/hippie.config, so exposing either control would offer a choice the
+// run ignores.
 
 // ── Statistics display primitives ───────────────────────────────────────────
 // InfoPopover + DL are imported from shared.jsx (used across query pages).
@@ -210,34 +243,6 @@ function InteractionStatsBox({ stats, loading, error }) {
   );
 }
 
-// ── Negative-sampling config ────────────────────────────────────────────────
-function SamplingCard({ negRatio, setNegRatio, seed, setSeed }) {
-  return (
-    <div className="hippie-card mb-3">
-      <div className="filter-section-label">
-        Negative Sampling
-        <InfoPopover title="Negative Sampling" html={SAMPLING_HELP} />
-      </div>
-      <div className="row g-3">
-        <div className="col-md-6">
-          <label className="form-label" htmlFor="neg-ratio">
-            Negative ratio{" "}
-            <span className="text-muted-sm" style={{fontSize:".75rem"}}>(neg edges per positive edge)</span>
-          </label>
-          <input id="neg-ratio" type="number" className="form-control"
-                 min="0.1" max="10" step="0.1" value={negRatio}
-                 onChange={e => setNegRatio(e.target.value)} />
-        </div>
-        <div className="col-md-6">
-          <label className="form-label" htmlFor="seed">Random seed</label>
-          <input id="seed" type="number" className="form-control"
-                 value={seed} onChange={e => setSeed(e.target.value)} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Run-history cards ─────────────────────────────────────────────────────
 // Each generated run is its own self-polling card, newest on top. A card
 // transitions running → done/failed in place; ids persist in localStorage
@@ -277,9 +282,10 @@ function paramSummary(p) {
   if (p.min_avg_score > 0)      parts.push(`min avg≥${toNum(p.min_avg_score, 0).toFixed(2)}`);
   if (p.isoform_mode === "isoforms") parts.push("isoforms only");
   else if (p.isoform_mode === "both") parts.push("including isoforms");
-  parts.push(`neg ratio ${p.neg_ratio}`);
-  parts.push(`seed ${p.seed}`);
-  return parts.join(" · ");
+  // neg_ratio / seed deliberately not shown even when an old job's stored
+  // params still carry them — they described the retired in-process sampler and
+  // would misdescribe what the pipeline actually did.
+  return parts.length ? parts.join(" · ") : "no filters — full HIPPIE";
 }
 
 const PILL = {
@@ -287,6 +293,7 @@ const PILL = {
   RUNNING:   { bg:TEAL,                   fg:"#fff",  label:"Running"   },
   DONE:      { bg:TEAL,                   fg:"#fff",  label:"Done"      },
   FAILED:    { bg:RED,                    fg:"#fff",  label:"Failed"    },
+  CANCELLED: { bg:"var(--hippie-border)", fg:GREY,   label:"Cancelled" },
   NOT_FOUND: { bg:RED,                    fg:"#fff",  label:"Not Found" },
 };
 
@@ -301,10 +308,22 @@ function StatusPill({ status }) {
   );
 }
 
+// The pipeline publishes four labelled files, not three splits x (pos, neg):
+// train / val / test_balanced at 1:1, plus test_realistic at 1:10. The last one
+// is why the ratio bar is worth keeping — it is visibly different from the
+// other three, which is the point of shipping it.
+const SPLIT_BLURB = {
+  train:          "1:1 · ILP negatives",
+  val:            "1:1 · ILP negatives",
+  test_balanced:  "1:1 · ILP negatives",
+  test_realistic: "1:10 · uniform negatives",
+};
+
 function SplitCards({ summary }) {
   if (!summary || !summary.splits) return null;
   return (
-    <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:".75rem", marginTop:"1rem"}}>
+    <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",
+                 gap:".75rem", marginTop:"1rem"}}>
       {summary.splits.map(s => {
         const total = s.n_pos + s.n_neg;
         const posFrac = total > 0 ? s.n_pos / total : 0;
@@ -316,6 +335,9 @@ function SplitCards({ summary }) {
             <div style={{fontFamily:"var(--font-mono)", fontSize:".7rem", fontWeight:700,
                          textTransform:"uppercase", letterSpacing:".1em", color:TEAL, marginBottom:".35rem"}}>
               {s.name}
+            </div>
+            <div style={{fontFamily:"var(--font-mono)", fontSize:".6rem", color:GREY, marginBottom:".35rem"}}>
+              {SPLIT_BLURB[s.name] || ""}
             </div>
             <div style={{fontFamily:"var(--font-display)", fontSize:"1.6rem", lineHeight:1.1, marginBottom:".5rem"}}>
               {total.toLocaleString()}
@@ -340,11 +362,31 @@ function SplitCards({ summary }) {
 
 // Self-contained, self-polling run card. Fetches its own status until a
 // terminal state, so several concurrent runs each track independently.
+// Terminal states stop the poll loop and hide the cancel control. CANCELLED is
+// terminal exactly like FAILED — the card stays in the history rather than
+// vanishing, so a cancel reads as something that happened and not as a run that
+// was never made.
+const TERMINAL = ["DONE", "FAILED", "CANCELLED", "NOT_FOUND"];
+
+// A split now runs for tens of minutes, so the old 1.5 s cadence would be
+// thousands of pointless requests per job. Poll fast enough that Queued -> Running
+// feels immediate, then back off once the pipeline is clearly in for a long haul.
+function pollDelay(status, ticks) {
+  if (status === "PENDING") return 3000;
+  return ticks < 5 ? 3000 : 10000;
+}
+
 function RunCard({ jobId }) {
   const [data, setData] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  // Re-render once a second purely so the elapsed-time string advances between
+  // polls; the poll cadence itself stays slow.
+  const [, setNow] = useState(0);
   const timer = useRef(null);
+  const ticks = useRef(0);
+
   useEffect(() => {
     let cancelled = false;
     function tick() {
@@ -357,22 +399,45 @@ function RunCard({ jobId }) {
         .then(d => {
           if (cancelled || !d) return;
           setData(d);
-          if (d.status !== "DONE" && d.status !== "FAILED")
-            timer.current = setTimeout(tick, 1500);
+          ticks.current += 1;
+          if (!TERMINAL.includes(d.status))
+            timer.current = setTimeout(tick, pollDelay(d.status, ticks.current));
         })
-        .catch(() => { if (!cancelled) timer.current = setTimeout(tick, 3000); });
+        .catch(() => { if (!cancelled) timer.current = setTimeout(tick, 10000); });
     }
     tick();
     return () => { cancelled = true; clearTimeout(timer.current); };
   }, [jobId]);
 
   const status = notFound ? "NOT_FOUND" : (data?.status || "PENDING");
-  const running = status !== "DONE" && status !== "FAILED" && status !== "NOT_FOUND";
+  const running = !TERMINAL.includes(status);
+
+  useEffect(() => {
+    if (!running || !data?.started_at) return;
+    const id = setInterval(() => setNow(n => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [running, data?.started_at]);
+
   const border  = status === "FAILED" || status === "NOT_FOUND" ? RED
                 : status === "DONE" ? TEAL : "var(--hippie-border)";
-  const pct     = Math.round((data?.progress || 0) * 100);
-  const queued  = status === "PENDING" && (data?.queue_position || 0) > 0;
+  // Position 0 is still queued, not started: with concurrency 1 it is waiting on
+  // whatever is running. Showing it the step label instead would render an empty
+  // step as "Starting…" for however long that run has left.
+  const queued  = status === "PENDING";
+  const waitEta = queued ? formatWait(data?.estimated_wait_seconds) : null;
   const recap   = data ? paramSummary(data.params) : null;
+  const elapsed = running ? formatElapsed(data?.started_at) : null;
+  const cancelPending = cancelling || data?.cancel_requested;
+
+  async function handleCancel() {
+    setCancelling(true);
+    try {
+      await fetch(cfg.statusBase + jobId + "/cancel/", {
+        method: "POST",
+        headers: { "X-CSRFToken": getCookie("csrftoken") },
+      });
+    } catch { /* the next poll reports the real state either way */ }
+  }
 
   // Deep-link back to this page with the job id so a colleague can load + download it.
   const shareLink = () => {
@@ -406,19 +471,51 @@ function RunCard({ jobId }) {
 
       {data && running && (
         <>
-          <div className="d-flex justify-content-between align-items-center mb-1">
+          <div className="d-flex justify-content-between align-items-center gap-2 mb-1">
             <span className="text-muted-sm">
               <span className="spinner-sm me-1"></span>
               {queued
-                ? `Queued — position ${data.queue_position}`
+                ? ((data.queue_position || 0) === 0
+                    ? "Queued — next in line"
+                    : `Queued — ${data.queue_position} run${data.queue_position === 1 ? "" : "s"} ahead`)
                 : (STEP_LABELS[data.step] || data.step || "Starting…")}
             </span>
-            <span className="text-muted-sm">{pct}%</span>
+            {/* Elapsed time instead of a progress bar. The ILP steps run against
+                a solver time budget, so any percentage here would be invented. */}
+            {elapsed && (
+              <span className="text-muted-sm mono" style={{whiteSpace:"nowrap"}}>
+                running for {elapsed}
+              </span>
+            )}
+            {/* The queue is uncapped and nothing is deduplicated, so the wait is
+                the only back-pressure a user gets. Quote it rather than hide it. */}
+            {waitEta && (
+              <span className="text-muted-sm mono" style={{whiteSpace:"nowrap"}}>
+                {waitEta} until start
+              </span>
+            )}
           </div>
-          <div className="batch-progress">
-            <div className="batch-progress-fill" style={{width:`${pct}%`}} />
-          </div>
+          <p className="text-muted-sm mb-2" style={{fontSize:".72rem"}}>
+            Splits are generated one at a time, first come first served, and a run
+            can take up to two hours — so a busy queue means a long wait rather than
+            a slower run. You can close this page: the run continues, and the share
+            link brings it back.
+          </p>
+          <button type="button" onClick={handleCancel} disabled={cancelPending} style={{
+            background:"transparent", color: cancelPending ? GREY : RED,
+            border:`1px solid ${cancelPending ? "var(--hippie-border)" : RED}`,
+            borderRadius:"var(--radius-md)", padding:".35rem 1rem",
+            fontWeight:600, fontFamily:"var(--font-body)", fontSize:".85rem",
+            cursor: cancelPending ? "default" : "pointer",
+          }}>
+            <i className="bi bi-x-circle me-1"></i>
+            {cancelPending ? "Cancelling…" : "Cancel run"}
+          </button>
         </>
+      )}
+
+      {data && status === "CANCELLED" && (
+        <p className="mb-0 text-muted-sm">Cancelled before it finished — nothing to download.</p>
       )}
 
       {data && status === "DONE" && (
@@ -441,6 +538,31 @@ function RunCard({ jobId }) {
             </button>
           </div>
           <SplitCards summary={data.summary} />
+          {data.summary && (
+            <p className="mono mt-2 mb-0" style={{fontSize:".72rem", color:GREY}}>
+              {(data.summary.interactions_exported ?? 0).toLocaleString()} interactions sent
+              to the pipeline
+              {/* Non-zero means the precomputed proteome artifacts and the
+                  database have drifted apart. It is the one failure this
+                  integration has that is otherwise completely silent, so it is
+                  surfaced here and not only in the zip's README. */}
+              {data.summary.interactions_dropped > 0 && (
+                <span style={{color:RED}}>
+                  {" · "}{data.summary.interactions_dropped.toLocaleString()} dropped
+                  (accession missing from the proteome artifacts)
+                </span>
+              )}
+              {data.summary.pipeline_commit && data.summary.pipeline_commit !== "unknown" && (
+                <> · pipeline {data.summary.pipeline_commit.slice(0, 7)}</>
+              )}
+              {/* Identifies the proteome this split was cut from. Two splits
+                  sharing it are comparable; two that differ are not. */}
+              {data.summary.artifacts_fingerprint &&
+               data.summary.artifacts_fingerprint !== "unknown" && (
+                <> · proteome {data.summary.artifacts_fingerprint.slice(0, 8)}</>
+              )}
+            </p>
+          )}
         </>
       )}
 
@@ -456,9 +578,6 @@ function RunCard({ jobId }) {
 function App() {
   const [proteinFilters,     setProteinFiltersRaw]     = useState(PROTEIN_INIT);
   const [interactionFilters, setInteractionFiltersRaw] = useState(INTERACTION_INIT);
-  const [negRatio, setNegRatio] = useState("1.0");
-  const [seed,     setSeed]     = useState("78539105873");
-
   // Statistics
   const [statsFresh,   setStatsFresh]   = useState(false);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -526,9 +645,9 @@ function App() {
       min_degree_global: proteinFilters.minDegree,
       min_avg_score: proteinFilters.minAvgScore,
       isoform_mode: proteinFilters.isoformMode,
-      // sampling
-      neg_ratio:  toNum(negRatio, 1.0),
-      seed:       parseInt(seed) || 0,
+      // No sampling keys: the pipeline fixes the negative ratio per split and
+      // takes its seed from conf/hippie.config. The backend rejects neither,
+      // it simply has nowhere to put them.
     };
   }
 
@@ -598,8 +717,15 @@ function App() {
       <div className="hippie-hero">
         <h1>Generate<br /><em style={{color:TEAL}}>ML Splits</em></h1>
         <p>Configure the protein- and interaction-level filters, preview how restrictive they are
-           with “Calculate Statistics”, then partition the resulting HIPPIE interaction graph into
-           train / validation / test splits (Kernighan–Lin bisection with balanced negative sampling).</p>
+           with “Calculate Statistics”, then hand the resulting interaction set to the
+           ppi-splitting pipeline. It cuts train / validation / test splits with an ILP over a
+           precomputed sequence-similarity partition, removes homologous train/test pairs with
+           CD-HIT-2D, and samples negatives with a second ILP that matches degree, taxon-pair,
+           self-loop and GO-Jaccard bias.</p>
+        <p style={{fontSize:".85rem"}}>Runs are queued one at a time and typically take
+           <strong> tens of minutes to two hours</strong>. You get four files:
+           <code>train.csv</code>, <code>val.csv</code>, <code>test_balanced.csv</code> (all 1:1)
+           and <code>test_realistic.csv</code> (1:10, uniform negatives).</p>
       </div>
 
       {/* Nothing else on this page links to the ML guide, and a split built
@@ -627,9 +753,6 @@ function App() {
         <div className="col-lg-6"><MLInteractionFilterPanel meta={meta} filters={interactionFilters} onChange={setInteractionFilters} /></div>
         <div className="col-lg-6"><InteractionStatsBox stats={interStats} loading={statsLoading} error={statsError} /></div>
       </div>
-
-      <SamplingCard negRatio={negRatio} setNegRatio={v => setNegRatio(v)}
-                    seed={seed} setSeed={v => setSeed(v)} />
 
       <div className="d-flex gap-2 align-items-center">
         <button type="button" onClick={handleCalculateStats} disabled={statsLoading} style={calcStyle}>

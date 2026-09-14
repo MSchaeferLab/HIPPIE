@@ -53,7 +53,10 @@ services:
   worker:
     build:
       context: .
-      dockerfile: docker/web/Dockerfile
+      # Not docker/web/Dockerfile: the worker additionally carries Nextflow, a
+      # JRE and the pipeline's solver toolchain, none of which web or mcp can
+      # execute. See the header of that file.
+      dockerfile: docker/worker/Dockerfile
     restart: unless-stopped
     env_file:
       - .env
@@ -61,9 +64,35 @@ services:
       # Worker should not race the web container on migrate/collectstatic.
       RUN_MIGRATIONS: "0"
       RUN_COLLECTSTATIC: "0"
-    command: ["celery", "-A", "hippie", "worker", "-l", "info"]
+      # Read by conf/hippie.config. The path is the in-container mount point
+      # below, never a host path — Nextflow stages this file into each task's
+      # work dir, so it must resolve inside the container.
+      GRB_LICENSE_FILE: /etc/gurobi/gurobi.lic
+      # Where run_split_job puts per-job Nextflow work dirs and outdirs.
+      # Deliberately NOT under MEDIA_ROOT: Apache serves /vol/media/ directly,
+      # and a work dir contains the staged copy of the WLS licence.
+      NF_RUN_ROOT: /var/nf
+      # Mount point of the pipeline checkout, mirrored so the task can stamp
+      # `git rev-parse HEAD` into job.summary["pipeline_commit"].
+      PIPELINE_DIR: /opt/pipeline
     volumes:
       - media_volume:/code/hippie_django/media
+      # Nextflow scratch. A named volume rather than a bind so nothing under it
+      # is reachable from any Apache Alias, and so a failed run's .command.err
+      # survives a container restart.
+      - nf_work:/var/nf
+      # The ppi-splitting-pipeline checkout. Read-only: the pipeline's bin/ and
+      # main.nf are inputs to the run, and the run must not be able to edit the
+      # thing whose commit hash it records. PIPELINE_PATH overrides the source
+      # for local development (e.g. a working tree outside this repo).
+      - ${PIPELINE_PATH:-./pipeline}:/opt/pipeline:ro
+      # The five precomputed artifacts live in hippie_django/data/precomputed/,
+      # already inside this bind. web mounts the same directory read-write for
+      # the import commands; the worker only ever reads it.
+      - ./hippie_django/data:/code/hippie_django/data:ro
+      # WLS credentials, mounted from outside the image. Never COPYed into a
+      # layer — anything that has ever been in a layer is recoverable from it.
+      - ${GUROBI_LICENSE_PATH:-./secrets/gurobi.lic}:/etc/gurobi/gurobi.lic:ro
     networks:
       - hippie_net
     # Reach the MariaDB running on the Docker host (DB_HOST=host.docker.internal).
@@ -154,3 +183,8 @@ networks:
 volumes:
   static_volume:
   media_volume:
+  # Nextflow work dirs + outdirs, worker-only. Kept out of media_volume because
+  # Apache serves that one directly and a Nextflow work dir holds a staged copy
+  # of the Gurobi WLS licence. Work dirs are deleted on success and on cancel,
+  # kept on failure so .command.err and .nextflow.log are still readable.
+  nf_work:

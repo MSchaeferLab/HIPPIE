@@ -40,3 +40,12 @@ README.md
 .env.*
 !.env.example
 docker-compose.override.yml
+
+# Nothing below is COPYed by any Dockerfile, and two of them must never be:
+# the pipeline checkout is bind-mounted at /opt/pipeline so its commit stays a
+# recorded input rather than a baked layer, and the Gurobi WLS credentials are
+# recoverable from any layer that has ever held them.
+pipeline/
+secrets/
+*.lic
+nf_work/

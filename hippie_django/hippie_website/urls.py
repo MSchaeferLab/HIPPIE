@@ -64,6 +64,11 @@ urlpatterns = [
         name="browse_splits_status",
     ),
     path(
+        "api/browse/splits/<uuid:job_id>/cancel/",
+        views.browse_splits_cancel,
+        name="browse_splits_cancel",
+    ),
+    path(
         "api/browse/splits/<uuid:job_id>/download/",
         views.browse_splits_download,
         name="browse_splits_download",

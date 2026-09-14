@@ -323,3 +323,7 @@ hippie_django/media
 
 # macOS
 .DS_Store
+
+# Gurobi WLS credentials — mounted into the worker, never committed
+secrets/
+*.lic

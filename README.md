@@ -5,9 +5,22 @@
 Clone the repository:
 
 ```bash
-git clone https://github.com/PelzKo/HIPPIE_FACELIFT.git
-cd HIPPIE_FACELIFT
+git clone --recurse-submodules https://github.com/MSchaeferLab/HIPPIE.git
+cd HIPPIE
 ```
+
+`--recurse-submodules` fetches `pipeline/`, the pinned checkout of
+[ppi-splitting-pipeline](https://github.com/PelzKo/ppi-splitting-pipeline) that
+generates the ML splits. In an existing clone:
+
+```bash
+git submodule update --init
+```
+
+A plain `git pull` does **not** move a submodule. Every pull that changes the
+pin needs `git submodule update --init` again — otherwise the worker keeps
+running the old pipeline checkout and records its commit in every run's
+`summary.json`. `git config submodule.recurse true` makes `git pull` do it.
 
 Create the virtual environment and install the dependencies:
 Because of version conflicts on the server, we are running this with python 3.11 and numpy 1.25
@@ -109,9 +122,15 @@ the **host machine** via `DB_HOST=host.docker.internal`, which resolves to the
 
 ```bash
 cp .env.example .env       # then edit secrets / passwords / domain
+mkdir -p secrets && cp /path/to/gurobi.lic secrets/   # see "ML splits" below
 docker compose build
 docker compose up -d
 ```
+
+`docker compose build` builds two images: `docker/web/Dockerfile` for `web` and
+`mcp`, and `docker/worker/Dockerfile` for `worker`. The worker image is ~2 GB
+larger because it additionally carries Nextflow, a JRE and the ML-splits solver
+toolchain — see [ML splits](#ml-splits-nextflow) below.
 
 Migrations apply automatically, and the stack is sequenced around them: only
 `web` has `RUN_MIGRATIONS=1`, it migrates in its entrypoint before gunicorn
@@ -239,6 +258,146 @@ docker compose exec web python manage.py update_review_status
 # 9. Regenerate the public download files (see below)
 docker compose exec web python manage.py export_downloads data/user_downloads
 ```
+
+### ML splits (Nextflow)
+
+The **Generate ML Splits** page hands the filtered interaction set to the
+[ppi-splitting-pipeline](https://github.com/PelzKo/ppi-splitting-pipeline)
+running `--split_only`, and returns a zip with four labelled CSVs. Nothing about
+the pipeline is user-configurable: every parameter is fixed in
+`conf/hippie.config` and the page only chooses *which interactions* go in.
+
+What a run does, in order:
+
+| Step | What it is |
+|---|---|
+| export | Django streams the filtered interactions to `ppis.csv` (`protein1,protein2,score`) |
+| `SORT_PPIS` | canonical edge ordering |
+| `SOLVE_ILP` | assigns the 100 precomputed sequence-similarity clusters to train/val/test |
+| `CDHIT2D` + `REMOVE_REDUNDANT` | drops train/test pairs that are homologous, so the split is leakage-aware by sequence and not only by graph cut |
+| `SAMPLE_NEGATIVES_ILP` | negatives matched on degree, taxon-pair, self-loop and GO-Jaccard bias |
+
+Output: `train.csv`, `val.csv`, `test_balanced.csv` (1:1) and
+`test_realistic.csv` (1:10, uniform negatives), plus a generated `summary.json`
+and `README.txt` naming the filters and the pipeline commit.
+
+**Runs take tens of minutes to two hours** and concurrency is pinned to 1
+(`--concurrency=1` on the Celery worker, `process.resourceLimits = [cpus: 2,
+memory: '8.GB', time: '4.h']` in the config, so the pipeline's own much larger
+`withName:` requests get clamped rather than deadlocking). `SOLVE_ILP` alone
+spends its full 1800 s budget on essentially any input — the assignment problem
+is hard to prove optimal even though it is small — so that cost is a floor, not
+something a narrow filter avoids. Each run card has a **Cancel** button, which
+is what makes a mis-clicked two-hour run recoverable.
+
+The resource caps are the pipeline's alone: the `worker` container itself is
+deliberately **not** given a cgroup limit, so Django, Celery and the management
+commands keep the whole box. Pinning `executor { cpus = 2; memory = '8.GB' }` is
+what bounds Nextflow, and it has to be the executor pool rather than
+`resourceLimits` — the local executor sizes its pool from the *host*, so
+per-task caps alone let two 8 GB tasks run side by side on 8 GB.
+
+**The queue is uncapped and undeduplicated.** Jobs run first-come-first-served,
+one at a time; ten simultaneous requests are twenty hours of queue, and ten
+identical requests are ten identical runs. Nothing throttles that by design —
+instead each run card quotes its position and a live wait estimate (median of
+recent finished runs × queue depth, minus what is left of the run in progress),
+so the cost shows up in front of the user rather than as a page that never
+finishes.
+
+**Housekeeping is a cron, not a background task.** `manage.py prune_split_jobs`
+— run it **in the worker container** — fails `RUNNING` jobs whose task has
+stopped heartbeating, deletes terminal jobs older than
+`SPLIT_JOB_RETENTION_DAYS` (default 7) together with their zip and work dir, and
+sweeps files with no job row left. It is not a Celery task on purpose: the
+worker has one execution slot and a split holds it for hours, so a queued
+housekeeping task would never run on the days it is most needed. See
+`docs/DEPLOY_nextflow_splits.md` for the crontab line.
+
+```bash
+docker compose exec worker python manage.py prune_split_jobs --dry-run
+```
+
+#### Three things must be in place
+
+**1. Precomputed proteome artifacts** — `hippie_django/data/precomputed/`:
+
+```
+sequences.fasta            all 29,080 proteins, isoform accessions included
+go_annotations.tsv         GO BP/MF/CC per protein
+species.tsv                NCBI taxon id per protein
+partitioned_proteome.txt   KaHIP partition, 100 clusters
+node_mapping.tsv           KaHIP node id -> accession
+```
+
+These are **built out of band, once per HIPPIE release** — a full pipeline run
+including BLAST (64 cpu / 32 GB) and KaHIP (4 cpu / 8 GB), which cannot happen
+inside a request on a 2-cpu box. The web app only ever reads them. Refreshing
+means replacing the directory. `all_vs_all.tsv` also lives with them upstream
+and is deliberately **not** copied here: it is the BLAST graph KaHIP was run
+over, `--split_only` never reads it, and it is ~470 MB.
+
+The directory is inside the existing `./hippie_django/data` bind mount, so no
+new volume is needed — but note the `worker` service mounts it **read-only**.
+
+Every interaction whose endpoints are not in `node_mapping.tsv` is dropped
+before the run and the count is recorded in `job.summary["interactions_dropped"]`.
+For a matching release that count is 0; a non-zero value means the artifacts and
+the database have drifted apart.
+
+**2. A Gurobi WLS licence** at `secrets/gurobi.lic` (or wherever
+`GUROBI_LICENSE_PATH` points), mounted read-only into the worker at
+`/etc/gurobi/gurobi.lic`.
+
+WLS is the only Gurobi licence type that validates **inside a container** — a
+Named-User Academic licence is node-locked to a hostid the container does not
+have. Academic WLS is free.
+
+- The worker needs outbound HTTPS to `license.gurobi.com` for the check-out.
+- `withLabel:gurobi`'s `maxForks = 2` in the pipeline is there for the WLS
+  concurrent-session cap and must stay.
+- Both solvers are pinned explicitly (`ilp_solver = "GUROBI"`,
+  `neg_ilp_solver = "gurobi"`), so there is **no fallback**: a run that finishes
+  provably used Gurobi. A licence expiry or a sustained network outage fails the
+  run loudly rather than quietly producing a differently-optimised result under
+  the same job id. Transient "too many sessions" collisions are already covered
+  by the pipeline's retry ladder (3 attempts, 30/60/90 s backoff).
+- **Never bake the licence into an image.** `secrets/`, `*.lic` are in both
+  `.gitignore` and `.dockerignore`: the WLSACCESSID/WLSSECRET pair is
+  recoverable from any layer that has ever held it.
+
+**3. The pipeline checkout** at `pipeline/` (a git submodule), mounted
+read-only at `/opt/pipeline`. Set `PIPELINE_PATH` in `.env` to point at a
+working tree elsewhere during development. Because `bin/` is mounted rather than
+baked, the checkout's commit is a result-determining input to every split, so
+each run records `git rev-parse HEAD` in `job.summary["pipeline_commit"]`.
+
+#### Where a run's files live
+
+Per-job directories are under the `nf_work` volume at `/var/nf/<job-uuid>/`
+(`ppis.csv`, `samplesheet.csv`, `work/`, `results/`, `.nextflow.log`,
+`trace.txt`). This is deliberately **not** under `MEDIA_ROOT`: Apache serves
+`/vol/media/` directly, and Nextflow stages a copy of the licence into every
+task's work dir.
+
+The directory is deleted on success and on cancel, and **kept on failure** so
+`.nextflow.log` and the failing task's `.command.err` are still readable — both
+tails are also captured into `job.error` and shown on the run card. Only the zip
+at `MEDIA_ROOT/splits/<uuid>.zip` persists. There is no age-based retention.
+
+To debug a failed run:
+
+```bash
+docker compose exec worker ls /var/nf
+docker compose exec worker tail -50 /var/nf/<job-uuid>/.nextflow.log
+docker compose exec worker sh -c 'find /var/nf/<job-uuid>/work -name .command.err -size +0 -exec tail -30 {} +'
+```
+
+The toolchain the pipeline's `bin/*.py` run under is a second Python at
+`/opt/conda` (3.14.7 + cvxpy + gurobipy + cd-hit), deliberately kept **off** the
+global `PATH`. `conf/hippie.config`'s `env` scope puts it there for task shells
+only, so Django and Celery keep resolving `python` to the image's 3.11 and the
+two dependency sets never have to satisfy each other.
 
 ### Updating the public download files
 

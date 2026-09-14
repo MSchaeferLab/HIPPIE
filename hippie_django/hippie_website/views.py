@@ -35,6 +35,7 @@ from django.db.models.functions import Coalesce, NullIf
 from django.http import FileResponse, Http404, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import (
@@ -93,6 +94,7 @@ from .services.vocab import (  # noqa: F401
     filter_option_lists as _filter_option_lists,
     vocab_options as _vocab_options,
 )
+from .services import split_queue
 from .services.detail import (  # noqa: F401
     digger_ctx as _digger_ctx,
     interaction_detail_context as _interaction_detail_context,
@@ -1263,9 +1265,12 @@ def _validate_split_params(body: dict) -> tuple[dict | None, str | None]:
             "min_degree_global": int(min_degree or 0),
             "min_avg_score": float(body.get("min_avg_score", 0.0)),
             "isoform_mode": parse_isoform_mode(body.get("isoform_mode")),
-            # negative sampling
-            "neg_ratio": float(body.get("neg_ratio", 1.0)),
-            "seed": int(body.get("seed", 78539105873)),
+            # Negative sampling is no longer configurable here. The pipeline
+            # fixes the ratio per split (1:1 for train/val/test_balanced, 1:10
+            # for test_realistic) and the seed is a pipeline parameter, so
+            # accepting either key would let a caller believe they set something
+            # the run ignores. Old stored SplitJob.params rows still carry both;
+            # SplitParams keeps the fields so those rows stay replayable.
         }
     except (ValueError, TypeError) as exc:
         return None, str(exc)
@@ -1281,8 +1286,6 @@ def _validate_split_params(body: dict) -> tuple[dict | None, str | None]:
         return None, "min_degree_global must be >= 0"
     if params["min_rpkm"] < 0:
         return None, "min_rpkm must be >= 0"
-    if not 0.1 <= params["neg_ratio"] <= 10.0:
-        return None, "neg_ratio must be between 0.1 and 10.0"
     return params, None
 
 
@@ -1337,7 +1340,11 @@ def browse_splits_create(request):
     if invalid:
         return JsonResponse({"error": invalid}, status=400)
     job = SplitJob.objects.create(params=params)
-    run_split_job.delay(str(job.id))
+    # task_id == job id, deliberately: it is what lets browse_splits_cancel
+    # revoke a still-queued message without a second id to store and keep in
+    # sync. Both are UUID4s created here, so the collision risk is the same as
+    # Celery's own generated ids.
+    run_split_job.apply_async(args=[str(job.id)], task_id=str(job.id))
     return JsonResponse({"job_id": str(job.id), "status": job.status}, status=202)
 
 
@@ -1546,22 +1553,11 @@ def browse_splits_stats(request):
 @require_GET
 def browse_splits_status(request, job_id):
     job = get_object_or_404(SplitJob, pk=job_id)
-    # Queue position = number of jobs still PENDING that were created before this
-    # one (FIFO by created_at). 0 once the job is picked up (RUNNING/DONE/FAILED)
-    # or when nothing precedes it. Lets each run card show its wait in line.
-    # `id` (tie-broken on) is a random UUID, not a real ordinal, but it makes
-    # the count deterministic when two jobs share a created_at tie instead of
-    # both reporting the same position.
-    queue_position = (
-        SplitJob.objects.filter(status="PENDING")
-        .filter(
-            Q(created_at__lt=job.created_at)
-            | Q(created_at=job.created_at, id__lt=job.id)
-        )
-        .count()
-        if job.status == "PENDING"
-        else 0
-    )
+    # The queue is uncapped and undeduplicated by choice, so the run card has to
+    # be honest about the consequence: position in line, and the wait that
+    # position actually implies. See services/split_queue.py.
+    position = split_queue.queue_position(job)
+    estimated_wait = split_queue.estimated_wait_seconds(job, position)
     return JsonResponse(
         {
             "status": job.status,
@@ -1569,7 +1565,14 @@ def browse_splits_status(request, job_id):
             "progress": job.progress,
             "params": job.params,
             "created_at": job.created_at.isoformat(),
-            "queue_position": queue_position,
+            # The run card counts elapsed time from here, not from created_at:
+            # concurrency is 1, so a job can sit queued far longer than it runs,
+            # and "running for 14 min" has to mean 14 minutes of pipeline.
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "queue_position": position,
+            # Seconds until this job is expected to start; null once it has.
+            "estimated_wait_seconds": estimated_wait,
+            "cancel_requested": job.cancel_requested,
             "summary": job.summary,
             "error": job.error or None,
             "download_url": (
@@ -1579,6 +1582,47 @@ def browse_splits_status(request, job_id):
             ),
         }
     )
+
+
+@require_POST
+def browse_splits_cancel(request, job_id):
+    """Request cancellation of a queued or running split.
+
+    A run holds the only execution slot for up to two hours, so a mis-clicked
+    one has to be killable rather than merely waitable.
+
+    The two states are cancelled differently on purpose. A PENDING job has no
+    process to signal, so it is marked terminal here and the queued Celery
+    message is revoked; the task also re-reads the flag on start, because a
+    worker that has already prefetched the message ignores a revoke. A RUNNING
+    job is only *flagged* — the task's own poll loop does the killing, so the
+    process group is torn down by the thing that created it and the status
+    write cannot race the task's own.
+    """
+    job = get_object_or_404(SplitJob, pk=job_id)
+
+    if job.status in ("DONE", "FAILED", "CANCELLED"):
+        return JsonResponse(
+            {"error": f"Job is already {job.status}.", "status": job.status},
+            status=409,
+        )
+
+    if job.status == "PENDING":
+        job.cancel_requested = True
+        job.status = "CANCELLED"
+        job.step = "cancelled"
+        job.finished_at = timezone.now()
+        job.save(update_fields=["cancel_requested", "status", "step", "finished_at"])
+        try:
+            run_split_job.AsyncResult(str(job.id)).revoke()
+        except Exception:  # noqa: BLE001 — broker hiccup must not fail the cancel
+            pass
+        return JsonResponse({"status": job.status}, status=200)
+
+    # RUNNING
+    job.cancel_requested = True
+    job.save(update_fields=["cancel_requested"])
+    return JsonResponse({"status": job.status, "cancel_requested": True}, status=202)
 
 
 @require_GET
