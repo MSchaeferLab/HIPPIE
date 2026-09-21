@@ -90,7 +90,7 @@ class CommonFilters:
     experiment_ids: list[int] = field(default_factory=list)
     interaction_type_ids: list[int] = field(default_factory=list)
     tissue_ids: list[int] = field(default_factory=list)
-    min_rpkm: float | None = None
+    min_tpm: float | None = None
     min_degree: int | None = None
     min_avg_score: float | None = None
     reviewed: str = "both"  # both | reviewed | unreviewed
@@ -135,7 +135,7 @@ class CommonFilters:
             experiment_ids=int_id_list(data.get("experiment_ids")),
             interaction_type_ids=int_id_list(data.get("interaction_type_ids")),
             tissue_ids=int_id_list(data.get("tissue_ids")),
-            min_rpkm=safe_float(data.get("min_rpkm")),
+            min_tpm=safe_float(data.get("min_tpm")),
             min_degree=safe_int(data.get("min_degree")),
             min_avg_score=safe_float(data.get("min_avg_score")),
             reviewed=reviewed,
@@ -348,12 +348,12 @@ def interaction_matches(interaction: Interaction, f: CommonFilters) -> bool:
 
 
 def tissue_pk_set(f: CommonFilters) -> set[int] | None:
-    """PKs of proteins expressed in any selected tissue (≥ min_rpkm), or None
+    """PKs of proteins expressed in any selected tissue (≥ min_tpm), or None
     when no tissue filter is active. Computed once per request."""
     if not f.tissue_ids:
         return None
     return set(
-        Protein.objects.expressed_in(f.tissue_ids, min_rpkm=f.min_rpkm).values_list(
+        Protein.objects.expressed_in(f.tissue_ids, min_tpm=f.min_tpm).values_list(
             "pk", flat=True
         )
     )

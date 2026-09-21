@@ -270,7 +270,7 @@
         Values within one parameter are OR-ed; different parameters are AND-ed.
         <strong>Omit a parameter to disable that filter</strong> — there is no way to
         request "none of them", because a result matching no source database does not exist.</li>
-      <li><code>min_rpkm</code> = minimum tissue expression (used together with <code>tissue</code>).</li>
+      <li><code>min_tpm</code> = minimum tissue expression (used together with <code>tissue</code>).</li>
       <li><code>min_degree</code>, <code>min_avg_score</code> = protein-level thresholds, both measured
         across all of HIPPIE rather than within the filtered result set.</li>
       <li><code>reviewed</code> = <code>reviewed</code>, <code>unreviewed</code>, or <code>both</code>.</li>
@@ -403,7 +403,7 @@
     <ul>
       <li><code>min_score</code> / <code>max_score</code> = confidence-score bounds (0–1, default 0 and 1).</li>
       <li><code>source_ids</code>, <code>experiment_ids</code>, <code>type_ids</code>, <code>tissue_ids</code> = arrays of numeric ids. An empty or omitted array applies no filter.</li>
-      <li><code>min_rpkm</code> = minimum tissue expression, used together with <code>tissue_ids</code>.</li>
+      <li><code>min_tpm</code> = minimum tissue expression, used together with <code>tissue_ids</code>.</li>
       <li><code>min_degree_global</code>, <code>min_avg_score</code> = protein-level thresholds, both evaluated over the whole database rather than the filtered subgraph. The older name <code>min_degree</code> is still accepted.</li>
       <li><code>isoform_mode</code> = <code>general</code>, <code>isoforms</code> or <code>both</code>.</li>
     </ul>
@@ -448,10 +448,10 @@
       <li><strong>Interaction type</strong> — keep interactions classified as any of the selected
         interaction types.</li>
       <li><strong>Tissue expression</strong> — keep interactions whose proteins are expressed in any of
-        the selected tissues; an optional minimum median RPKM raises the required expression level.
+        the selected tissues; an optional minimum median TPM raises the required expression level.
         Expression is median gene-level RNA-seq from
         GTEx{% if current_release.gtex_version %} {{ current_release.gtex_version }}{% endif %}.
-        Only genes reaching a median of 1.0&nbsp;RPKM in at least one tissue were imported, so a
+        Only genes reaching a median of 1.0&nbsp;TPM in at least one tissue were imported, so a
         threshold below 1.0 has no additional effect.</li>
       <li><strong>Protein filters</strong> — restrict to proteins by <em>degree</em> (the number of
         interactions touching a protein) and by <em>average score</em> (the mean confidence across those

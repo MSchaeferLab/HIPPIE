@@ -23,7 +23,7 @@ export const FILTER_DEFAULTS = {
   experiment: [], // ids
   interactionType: [], // ids
   tissue: [], // ids
-  minRpkm: 0,
+  minTpm: 0,
   minDegree: 0,
   minAvgScore: 0,
   reviewed: "both", // both | reviewed | unreviewed
@@ -618,7 +618,7 @@ function _serialize(f, meta = {}) {
     lists.interaction_type = f.interactionType;
   if (listNarrows(f.tissue, meta.tissues)) {
     lists.tissue = f.tissue;
-    if (f.minRpkm > 0) scalars.min_rpkm = f.minRpkm;
+    if (f.minTpm > 0) scalars.min_tpm = f.minTpm;
   }
   if (f.minDegree > 0) scalars.min_degree = f.minDegree;
   if (f.minAvgScore > 0) scalars.min_avg_score = f.minAvgScore;
@@ -690,10 +690,10 @@ const INTERACTION_TYPE_HELP = DL([
 ]);
 const TISSUE_HELP = DL([
   ["Tissue expression", "Keep proteins expressed in any selected tissue (multiple selections = OR)."],
-  ["Data source", `Median gene-level expression from GTEx${gtexVersionSuffix()}. Only genes reaching a median of 1.0 RPKM in at least one tissue were imported, so a threshold below 1.0 has no additional effect.`],
+  ["Data source", `Median gene-level expression from GTEx${gtexVersionSuffix()}. Only genes reaching a median of 1.0 TPM in at least one tissue were imported, so a threshold below 1.0 has no additional effect.`],
   ["Grouping", "Tissues are grouped by body system, then by organ; groups and the tissues inside them are listed alphabetically."],
   TISSUE_COUNTS,
-  ["Min. median RPKM ≥", "Minimum median expression (RPKM) required in the selected tissue(s). Appears once the tissue list is narrowed."],
+  ["Min. median TPM ≥", "Minimum median expression (TPM) required in the selected tissue(s). Appears once the tissue list is narrowed."],
   NOTHING_TICKED,
 ]);
 const PROTEIN_FILTERS_HELP = DL([
@@ -860,15 +860,15 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
             />
             {listNarrows(f.tissue, meta.tissues) && (
               <>
-                <label className="form-label mt-2">Min. median RPKM ≥</label>
+                <label className="form-label mt-2">Min. median TPM ≥</label>
                 <input
                   type="number"
                   className="form-control"
                   min="0"
                   step="1"
                   placeholder="0"
-                  value={f.minRpkm || ""}
-                  onChange={(e) => set({ minRpkm: parseFloat(e.target.value) || 0 })}
+                  value={f.minTpm || ""}
+                  onChange={(e) => set({ minTpm: parseFloat(e.target.value) || 0 })}
                 />
               </>
             )}
@@ -966,7 +966,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 
 const ML_PROTEIN_HELP = DL([
   ["Expressed in any selected tissue", `Keep only proteins expressed in any of the selected tissues. Median gene-level expression from GTEx${gtexVersionSuffix()}.`],
-  ["Min. median RPKM ≥", "Minimum median expression (RPKM) required in the selected tissue(s). Appears once the tissue list is narrowed. Only genes reaching 1.0 RPKM in at least one tissue were imported, so a lower threshold has no additional effect."],
+  ["Min. median TPM ≥", "Minimum median expression (TPM) required in the selected tissue(s). Appears once the tissue list is narrowed. Only genes reaching 1.0 TPM in at least one tissue were imported, so a lower threshold has no additional effect."],
   ["Min. degree in all of HIPPIE ≥", "Minimum number of interaction partners a protein has across the whole database. Counted over every HIPPIE interaction, ignoring the interaction filters on the right — so the median degree reported in the statistics box, which counts only surviving edges, is often much lower than this threshold."],
   ["Min. avg score ≥", "Minimum mean confidence score across a protein's interactions, again over all of HIPPIE."],
   ["Isoforms", "General = canonical entries (plus any isoform you queried); Isoforms = only isoform entries; Both = no isoform filter."],
@@ -1005,15 +1005,15 @@ export function MLProteinFilterPanel({ meta, filters, onChange }) {
       />
       {listNarrows(filters.tissue, meta.tissues) && (
         <>
-          <label className="form-label mt-2">Min. median RPKM ≥</label>
+          <label className="form-label mt-2">Min. median TPM ≥</label>
           <input
             type="number"
             className="form-control"
             min="0"
             step="1"
             placeholder="0"
-            value={filters.minRpkm || ""}
-            onChange={(e) => set({ minRpkm: parseFloat(e.target.value) || 0 })}
+            value={filters.minTpm || ""}
+            onChange={(e) => set({ minTpm: parseFloat(e.target.value) || 0 })}
           />
         </>
       )}

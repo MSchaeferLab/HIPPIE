@@ -6,7 +6,7 @@ from django.core.management.base import BaseCommand, CommandError
 from hippie_website.models import Gene, GeneTissue, Tissue
 from ._sources import data_path
 
-MIN_MEDIAN_RPKM = 1.0
+MIN_MEDIAN_TPM = 1.0
 
 
 def recompute_tissue_gene_counts() -> None:
@@ -126,13 +126,13 @@ class Command(BaseCommand):
 
                 if header_found:
                     values = line.split("\t")
-                    rpkms = np.array(values[2:], dtype=float)
+                    tpms = np.array(values[2:], dtype=float)
                     read_name = values[0]
                     if "." in read_name:
                         read_name = read_name.split(".")[0]  # drop version
                     for tissue in tissue_dict:
                         idx = tissue_dict[tissue]["idx"]
-                        tissue_dict[tissue][read_name] = np.median(rpkms[idx])
+                        tissue_dict[tissue][read_name] = np.median(tpms[idx])
                     genes_read += 1
                     if genes_read % 5000 == 0:
                         self.stdout.write(
@@ -195,7 +195,7 @@ class Command(BaseCommand):
                 for gt in GeneTissue.objects.filter(tissue=tissue_cache[tissue_name])
             }
             for rid, median in gene_medians.items():
-                if rid == "idx" or rid not in map_dict or median < MIN_MEDIAN_RPKM:
+                if rid == "idx" or rid not in map_dict or median < MIN_MEDIAN_TPM:
                     continue
                 eid, _ = map_dict[rid]
                 gene = gene_cache.get(eid)
@@ -207,16 +207,16 @@ class Command(BaseCommand):
                         GeneTissue(
                             gene=gene,
                             tissue=tissue_cache[tissue_name],
-                            median_rpkm=median,
+                            median_tpm=median,
                         )
                     )
                     continue
-                if existing_gene_tissue.median_rpkm != median:
-                    existing_gene_tissue.median_rpkm = median
+                if existing_gene_tissue.median_tpm != median:
+                    existing_gene_tissue.median_tpm = median
                     gene_tissues_to_update.append(existing_gene_tissue)
 
             GeneTissue.objects.bulk_create(gene_tissues_to_create)
-            GeneTissue.objects.bulk_update(gene_tissues_to_update, ["median_rpkm"])
+            GeneTissue.objects.bulk_update(gene_tissues_to_update, ["median_tpm"])
             created += len(gene_tissues_to_create)
             updated += len(gene_tissues_to_update)
             bar = "#" * i + "-" * (total_tissues - i)

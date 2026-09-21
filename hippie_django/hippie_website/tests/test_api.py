@@ -254,7 +254,7 @@ class BrowseProteinsApiTest(HippieTestCase):
         super().setUpTestData()
         cls.tissue = Tissue.objects.create(name="Brain")
         GeneTissue.objects.create(
-            gene=cls.brca1.gene, tissue=cls.tissue, median_rpkm=1.0
+            gene=cls.brca1.gene, tissue=cls.tissue, median_tpm=1.0
         )
 
     def _get(self, **params):
@@ -285,12 +285,12 @@ class BrowseProteinsApiTest(HippieTestCase):
         self.assertLess(filt_data["total"], all_data["total"])
         self.assertEqual(filt_data["total"], 1)
 
-    def test_min_rpkm_filter(self):
-        # brca1 has median_rpkm=1.0; threshold below → included
-        data_low = self._get(tissue=self.tissue.pk, min_rpkm=0.5)
+    def test_min_tpm_filter(self):
+        # brca1 has median_tpm=1.0; threshold below → included
+        data_low = self._get(tissue=self.tissue.pk, min_tpm=0.5)
         self.assertEqual(data_low["total"], 1)
         # threshold above → excluded
-        data_high = self._get(tissue=self.tissue.pk, min_rpkm=2.0)
+        data_high = self._get(tissue=self.tissue.pk, min_tpm=2.0)
         self.assertEqual(data_high["total"], 0)
 
     def test_source_filter(self):
@@ -364,11 +364,9 @@ class NetworkQueryTest(HippieTestCase):
         super().setUpTestData()
         cls.tissue = Tissue.objects.create(name="NetworkTestTissue")
         GeneTissue.objects.create(
-            gene=cls.brca1.gene, tissue=cls.tissue, median_rpkm=1.0
+            gene=cls.brca1.gene, tissue=cls.tissue, median_tpm=1.0
         )
-        GeneTissue.objects.create(
-            gene=cls.tp53.gene, tissue=cls.tissue, median_rpkm=1.0
-        )
+        GeneTissue.objects.create(gene=cls.tp53.gene, tissue=cls.tissue, median_tpm=1.0)
 
     def _api(self, **body):
         return self.client.post(
@@ -398,12 +396,12 @@ class NetworkQueryTest(HippieTestCase):
         self.assertTrue(brca1_tp53)
         self.assertTrue(all(e["seed_interaction"] for e in brca1_tp53))
 
-    def test_min_rpkm_filter_on_partner(self):
+    def test_min_tpm_filter_on_partner(self):
         # Seed BRCA1 only; TP53 is the (non-seed) partner and must be expressed.
         base = dict(proteins="BRCA1", tissue=[self.tissue.pk])
-        low = self._api(**base, min_rpkm=0.5).json()
+        low = self._api(**base, min_tpm=0.5).json()
         self.assertGreater(low["edge_count"], 0)
-        high = self._api(**base, min_rpkm=2.0).json()
+        high = self._api(**base, min_tpm=2.0).json()
         self.assertEqual(high["edge_count"], 0)
 
     def test_unknown_seed_returns_error(self):
@@ -907,15 +905,15 @@ class InteractionQuerySetMethodsTest(HippieTestCase):
 
     def test_in_tissues_includes_when_both_expressed(self):
         tissue = Tissue.objects.create(name="Lung_test")
-        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_rpkm=1.0)
-        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_tpm=1.0)
+        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_tpm=1.0)
         qs = Interaction.objects.for_protein(self.brca1.pk).in_tissues([tissue.pk])
         self.assertEqual(qs.count(), 1)
 
     def test_in_tissues_excludes_when_one_side_not_expressed(self):
         tissue = Tissue.objects.create(name="Heart_test")
         # Only BRCA1 expressed; TP53 not
-        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_tpm=1.0)
         qs = Interaction.objects.for_protein(self.brca1.pk).in_tissues([tissue.pk])
         self.assertEqual(qs.count(), 0)
 
@@ -1299,9 +1297,9 @@ class Batch3ProteinQueryFilterTest(HippieTestCase):
 
     def test_tissue_filter(self):
         tissue = Tissue.objects.create(name="Brain")
-        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_tpm=1.0)
         make_interaction(self.brca1, self.egfr, score=0.9)
-        rows = self._query("BRCA1", tissue=tissue.pk, min_rpkm=0.5)["interactions"]
+        rows = self._query("BRCA1", tissue=tissue.pk, min_tpm=0.5)["interactions"]
         partners = {i["partner"]["symbol"] for i in rows}
         self.assertEqual(partners, {"TP53"})
 
@@ -1467,12 +1465,12 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
         # expressed in the tissue, unlike the partner-only check used by
         # protein_query_api.
         tissue = Tissue.objects.create(name="Brain")
-        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_rpkm=1.0)
-        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_rpkm=1.0)
+        GeneTissue.objects.create(gene=self.brca1.gene, tissue=tissue, median_tpm=1.0)
+        GeneTissue.objects.create(gene=self.tp53.gene, tissue=tissue, median_tpm=1.0)
         hit = self._post(
             [{"a": "BRCA1", "b": "TP53", "input_order": 0}],
             tissue=[tissue.pk],
-            min_rpkm=0.5,
+            min_tpm=0.5,
         )
         self.assertGreater(hit[0]["score"], 0)
         # egfr's gene has no tissue expression recorded → fails the filter.
@@ -1480,7 +1478,7 @@ class Batch3InteractionQueryFilterTest(HippieTestCase):
         miss = self._post(
             [{"a": "BRCA1", "b": "EGFR", "input_order": 0}],
             tissue=[tissue.pk],
-            min_rpkm=0.5,
+            min_tpm=0.5,
         )
         self.assertEqual(miss[0]["score"], -1.0)
 

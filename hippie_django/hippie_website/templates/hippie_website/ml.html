@@ -124,7 +124,7 @@
       GTEx{% if current_release.gtex_version %} {{ current_release.gtex_version }}{% endif %}),
       you can use the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool. It applies the same
       filters as <a href="{% url 'hippie_website:browse' %}">Browse</a> (confidence score, source,
-      experiment type, interaction type, tissue / RPKM, node degree across all of HIPPIE) and then builds a labeled
+      experiment type, interaction type, tissue / TPM, node degree across all of HIPPIE) and then builds a labeled
       train/validation/test dataset with two negative sampling options for you. <br>
       For this tutorial we will download the split of the whole database. LEFT OFF HERE
     </p>

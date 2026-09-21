@@ -88,7 +88,7 @@ def apply_protein_level_filters(
     qs,
     *,
     tissue_ids=(),
-    min_rpkm=0.0,
+    min_tpm=0.0,
     min_degree=0,
     min_avg_score=0.0,
 ):
@@ -102,7 +102,7 @@ def apply_protein_level_filters(
     if tissue_ids:
         qs = qs.expressed_in(
             list(tissue_ids),
-            min_rpkm=min_rpkm if min_rpkm and min_rpkm > 0 else None,
+            min_tpm=min_tpm if min_tpm and min_tpm > 0 else None,
         )
     if min_degree and min_degree > 0:
         qs = qs.filter(degree__gte=min_degree)

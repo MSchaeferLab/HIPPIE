@@ -8,6 +8,7 @@
 <script>
   window.SPLITS_CONFIG = {
     createUrl:  "{% url 'hippie_website:browse_splits_create' %}",
+    rawDataUrl: "{% url 'hippie_website:browse_splits_raw_data' %}",
     statsUrl:   "{% url 'hippie_website:browse_splits_stats' %}",
     statusBase: "{% url 'hippie_website:browse_splits_status' job_id='00000000-0000-0000-0000-000000000000' %}".replace("/00000000-0000-0000-0000-000000000000/", "/"),
     mlGuideUrl: "{% url 'hippie_website:machine_learning' %}",
