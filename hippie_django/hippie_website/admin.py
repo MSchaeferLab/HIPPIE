@@ -102,7 +102,7 @@ class TissueAdmin(admin.ModelAdmin):
 
 @admin.register(GeneTissue)
 class GeneTissueAdmin(admin.ModelAdmin):
-    list_display = ("id", "gene", "tissue", "median_rpkm")
+    list_display = ("id", "gene", "tissue", "median_tpm")
     search_fields = ("gene__entrez_name", "tissue__name")
     list_filter = ("tissue",)
     list_select_related = ("gene", "tissue")

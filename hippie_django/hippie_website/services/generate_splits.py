@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from hippie_website.query_filters import (
     apply_interaction_level_filters,
     apply_protein_level_filters,
+    isoform_only_q,
 )
 
 
@@ -33,7 +34,7 @@ class SplitParams:
     # ── Protein-level filters (gate which nodes are allowed) ──────────────
     # An interaction survives only if BOTH endpoints pass these.
     tissue_ids: tuple = ()
-    min_rpkm: float = 0.0
+    min_tpm: float = 0.0
     # Gates the GLOBAL Protein.degree column — degree across all of HIPPIE, not
     # degree within the subgraph left by the interaction-level filters above.
     # Named for that distinction because the two diverge sharply under a narrow
@@ -96,7 +97,7 @@ def allowed_protein_id_qs(params: SplitParams):
     qs = apply_protein_level_filters(
         Protein.objects.all(),
         tissue_ids=params.tissue_ids,
-        min_rpkm=params.min_rpkm,
+        min_tpm=params.min_tpm,
         min_degree=params.min_degree_global,
         min_avg_score=params.min_avg_score,
     )
@@ -134,6 +135,42 @@ def build_interaction_queryset(params: SplitParams):
         qs = qs.filter(involves_isoform=True)
 
     # ── Protein-level node gating ────────────────────────────────────────
+    pid_qs = allowed_protein_id_qs(params)
+    if pid_qs is not None:
+        qs = qs.filter(protein_1_id__in=pid_qs, protein_2_id__in=pid_qs)
+
+    return qs
+
+
+def build_noninteraction_queryset(params: SplitParams):
+    """
+    The curated-negatives counterpart to ``build_interaction_queryset``, for the
+    "Download raw data" package (see services/raw_export.py). Returns ``None``
+    when a source/experiment/type filter is active — a ``NonInteraction`` carries
+    none of that evidence, so restricting by it can never mean anything (same
+    convention as ``CommonFilters.has_source_like`` / ``noninteraction_edge_qs``
+    in services/queries.py).
+
+    Otherwise: the same score bounds and protein-level node gating as the
+    positives, plus an isoform-mode gate computed inline — unlike Interaction,
+    NonInteraction has no denormalised ``involves_isoform`` column.
+    """
+    from hippie_website.models import NonInteraction
+
+    if params.source_ids or params.experiment_ids or params.type_ids:
+        return None
+
+    qs = NonInteraction.objects.all()
+    if params.min_score > 0:
+        qs = qs.filter(score__gte=params.min_score)
+    if params.max_score < 1.0:
+        qs = qs.filter(score__lte=params.max_score)
+
+    if params.isoform_mode == "general":
+        qs = qs.filter(protein_1__isoform__isnull=True, protein_2__isoform__isnull=True)
+    elif params.isoform_mode == "isoforms":
+        qs = qs.filter(isoform_only_q())
+
     pid_qs = allowed_protein_id_qs(params)
     if pid_qs is not None:
         qs = qs.filter(protein_1_id__in=pid_qs, protein_2_id__in=pid_qs)

@@ -54,6 +54,11 @@ urlpatterns = [
     # -- ML split API
     path("api/browse/splits/", views.browse_splits_create, name="browse_splits_create"),
     path(
+        "api/browse/splits/raw/",
+        views.browse_splits_raw_data,
+        name="browse_splits_raw_data",
+    ),
+    path(
         "api/browse/splits/stats/",
         views.browse_splits_stats,
         name="browse_splits_stats",

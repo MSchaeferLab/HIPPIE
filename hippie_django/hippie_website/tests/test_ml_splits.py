@@ -316,6 +316,188 @@ class MLSplitExportTest(TestCase):
         self.assertEqual(mapping[iso.pk], "ACC000-2")
 
 
+class MLSplitCandidateNegativesTest(TestCase):
+    """build_noninteraction_queryset / write_candidate_negatives_csv — the
+    "Download raw data" package's candidate_network input (see
+    services/raw_export.py). A NonInteraction has no source/experiment/type
+    evidence, so a filter along those lines must disable the whole leg rather
+    than silently return nothing meaningful."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from .factories import make_noninteraction
+
+        cls.proteins = [
+            make_protein(f"N{i}", accession=f"NEG{i:03d}") for i in range(4)
+        ]
+        cls.ni_low = make_noninteraction(cls.proteins[0], cls.proteins[1], score=0.2)
+        cls.ni_high = make_noninteraction(cls.proteins[2], cls.proteins[3], score=0.9)
+
+    def test_none_when_a_source_like_filter_is_active(self):
+        from ..services.generate_splits import (
+            SplitParams,
+            build_noninteraction_queryset,
+        )
+
+        self.assertIsNone(build_noninteraction_queryset(SplitParams(source_ids=(1,))))
+        self.assertIsNone(
+            build_noninteraction_queryset(SplitParams(experiment_ids=(1,)))
+        )
+        self.assertIsNone(build_noninteraction_queryset(SplitParams(type_ids=(1,))))
+
+    def test_score_bounds_apply_like_the_positives(self):
+        from ..services.generate_splits import (
+            SplitParams,
+            build_noninteraction_queryset,
+        )
+
+        qs = build_noninteraction_queryset(SplitParams(min_score=0.5))
+        self.assertEqual(list(qs.values_list("pk", flat=True)), [self.ni_high.pk])
+
+    def test_write_candidate_negatives_csv_uses_score_as_w(self):
+        from ..services.export_ppis import write_candidate_negatives_csv
+        from ..services.generate_splits import SplitParams
+
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "candidate_negatives.csv"
+            result = write_candidate_negatives_csv(SplitParams(max_score=0.5), dest)
+
+            self.assertEqual(result.n_written, 1)
+            lines = dest.read_text().splitlines()
+            self.assertEqual(lines[0], "protein1,protein2,w")
+            a, b, w = lines[1].split(",")
+            self.assertEqual(float(w), 0.2)
+            self.assertIn(
+                a,
+                {
+                    self.proteins[0].uniprot_accession,
+                    self.proteins[1].uniprot_accession,
+                },
+            )
+            self.assertIn(
+                b,
+                {
+                    self.proteins[0].uniprot_accession,
+                    self.proteins[1].uniprot_accession,
+                },
+            )
+
+    def test_write_candidate_negatives_csv_writes_nothing_when_none_match(self):
+        from ..services.export_ppis import write_candidate_negatives_csv
+        from ..services.generate_splits import SplitParams
+
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "candidate_negatives.csv"
+            result = write_candidate_negatives_csv(SplitParams(min_score=0.99), dest)
+            self.assertEqual(result.n_written, 0)
+            self.assertFalse(dest.exists())
+
+    def test_write_candidate_negatives_csv_writes_nothing_when_source_filter_active(
+        self,
+    ):
+        from ..services.export_ppis import write_candidate_negatives_csv
+        from ..services.generate_splits import SplitParams
+
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "candidate_negatives.csv"
+            result = write_candidate_negatives_csv(SplitParams(source_ids=(1,)), dest)
+            self.assertEqual(result.n_written, 0)
+            self.assertFalse(dest.exists())
+
+
+class MLSplitRawDataViewTest(TestCase):
+    """browse_splits_raw_data: the "Download raw data" fast path — synchronous,
+    no Celery, packages the pipeline's *standard*-mode inputs rather than the
+    server's own --split_only shortcut."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.proteins = [
+            make_protein(f"R{i}", accession=f"RAW{i:03d}") for i in range(6)
+        ]
+        for i in range(5):
+            make_interaction(cls.proteins[i], cls.proteins[i + 1], score=0.8)
+
+    def _post(self, payload):
+        return self.client.post(
+            reverse("hippie_website:browse_splits_raw_data"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_happy_path_without_curated_negatives(self):
+        import csv as _csv
+        import io
+        import zipfile
+
+        from ..models import SplitJob
+
+        resp = self._post({})
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertEqual(payload["status"], "DONE")
+
+        job = SplitJob.objects.get(pk=payload["job_id"])
+        self.assertEqual(job.job_type, "RAW_DATA")
+        self.assertEqual(job.summary["negatives_exported"], 0)
+        self.assertIn(
+            "nextflow run ../ppi-splitting-pipeline/main.nf",
+            job.summary["pipeline_command"],
+        )
+        self.assertTrue(os.path.isfile(job.zip_path))
+
+        with zipfile.ZipFile(job.zip_path) as zf:
+            names = zf.namelist()
+            self.assertIn("ppis.csv", names)
+            self.assertIn("samplesheet.csv", names)
+            self.assertIn("README.txt", names)
+            self.assertNotIn("candidate_negatives.csv", names)
+            rows = list(_csv.DictReader(io.TextIOWrapper(zf.open("samplesheet.csv"))))
+            self.assertEqual(rows[0]["candidate_network"], "")
+
+    def test_happy_path_with_curated_negatives_wires_candidate_network(self):
+        import csv as _csv
+        import io
+        import zipfile
+
+        from ..models import SplitJob
+        from .factories import make_noninteraction
+
+        make_noninteraction(self.proteins[0], self.proteins[2], score=0.2)
+        resp = self._post({})
+        job = SplitJob.objects.get(pk=resp.json()["job_id"])
+        self.assertEqual(job.summary["negatives_exported"], 1)
+
+        with zipfile.ZipFile(job.zip_path) as zf:
+            self.assertIn("candidate_negatives.csv", zf.namelist())
+            rows = list(_csv.DictReader(io.TextIOWrapper(zf.open("samplesheet.csv"))))
+            self.assertEqual(rows[0]["candidate_network"], "candidate_negatives.csv")
+
+    def test_zero_interactions_fails_the_job_not_the_request(self):
+        from ..models import SplitJob
+
+        resp = self._post({"min_score": 0.99})
+        self.assertEqual(resp.status_code, 201)
+        job = SplitJob.objects.get(pk=resp.json()["job_id"])
+        self.assertEqual(job.status, "FAILED")
+        self.assertIn("no interactions", job.error)
+
+    def test_never_touches_the_celery_queue(self):
+        from unittest.mock import patch
+
+        with patch("hippie_website.views.run_split_job.apply_async") as mock_send:
+            resp = self._post({})
+        mock_send.assert_not_called()
+        self.assertEqual(resp.status_code, 201)
+
+    def test_job_type_round_trips_through_status_endpoint(self):
+        job_id = self._post({}).json()["job_id"]
+        status = self.client.get(
+            reverse("hippie_website:browse_splits_status", args=[job_id])
+        ).json()
+        self.assertEqual(status["job_type"], "RAW_DATA")
+
+
 # ---------------------------------------------------------------------------
 # Batch 3 — shared full-parity filters on the two query APIs
 # ---------------------------------------------------------------------------
@@ -341,8 +523,8 @@ class MLSplitFilteredOutTest(TestCase):
 
         cls.blood = Tissue.objects.create(name="Blood")
         # Only A and B are expressed in Blood → C and D are filtered out.
-        GeneTissue.objects.create(gene=cls.a.gene, tissue=cls.blood, median_rpkm=5.0)
-        GeneTissue.objects.create(gene=cls.b.gene, tissue=cls.blood, median_rpkm=5.0)
+        GeneTissue.objects.create(gene=cls.a.gene, tissue=cls.blood, median_tpm=5.0)
+        GeneTissue.objects.create(gene=cls.b.gene, tissue=cls.blood, median_tpm=5.0)
 
     def test_filtered_out_counts_protein_level_removals(self):
         from ..services.generate_splits import SplitParams, build_interaction_queryset

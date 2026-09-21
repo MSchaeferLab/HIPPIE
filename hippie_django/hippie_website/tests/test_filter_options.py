@@ -106,7 +106,7 @@ class TissueGroupingTest(TestCase):
         gene = Gene.objects.create(entrez_id=1, entrez_name="A1BG")
         for name in cls.names:
             tissue = Tissue.objects.create(name=name)
-            GeneTissue.objects.create(gene=gene, tissue=tissue, median_rpkm=5.0)
+            GeneTissue.objects.create(gene=gene, tissue=tissue, median_tpm=5.0)
         recompute_tissue_gene_counts()
 
     def _tissues(self):

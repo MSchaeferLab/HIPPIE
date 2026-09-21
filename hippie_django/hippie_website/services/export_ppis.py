@@ -18,7 +18,11 @@ from typing import Iterable
 
 from django.conf import settings
 
-from .generate_splits import SplitParams, build_interaction_queryset
+from .generate_splits import (
+    SplitParams,
+    build_interaction_queryset,
+    build_noninteraction_queryset,
+)
 
 # The five files a `--split_only` run needs, keyed by the samplesheet column
 # that points at each. Built out-of-band once per HIPPIE release (BLAST wants
@@ -185,6 +189,64 @@ def write_ppis_csv(
         path=dest,
         n_written=n_written,
         n_dropped_unknown=n_unknown,
+        n_dropped_blank=n_blank,
+        n_proteins=len(seen),
+    )
+
+
+def write_candidate_negatives_csv(params: SplitParams, dest: Path) -> ExportResult:
+    """Stream curated ``NonInteraction`` rows to ``dest`` as ``protein1,protein2,w``.
+
+    For the "Download raw data" package (services/raw_export.py): this is the
+    file wired into the standard pipeline's ``candidate_network`` samplesheet
+    column, which *restricts* the ILP negative sampler's candidate pool to
+    exactly these pairs (see ``bin/sample_negatives_ilp.py:load_candidate_network``
+    in the ppi-splitting-pipeline). ``w`` is the schema's documented column name
+    for the pair weight; only ``protein1``/``protein2`` are actually read by the
+    sampler today, but the extra column costs nothing and matches the spec.
+
+    Writes and leaves nothing behind when ``build_noninteraction_queryset``
+    returns ``None`` (a source/experiment/type filter is active — a
+    NonInteraction can never satisfy one) or when it matches zero rows: the
+    caller uses ``n_written == 0`` to omit both the file and the
+    ``candidate_network`` samplesheet cell, never to fail the job.
+    """
+    qs = build_noninteraction_queryset(params)
+    if qs is None:
+        return ExportResult(
+            path=dest, n_written=0, n_dropped_unknown=0, n_dropped_blank=0, n_proteins=0
+        )
+
+    n_written = 0
+    n_blank = 0
+    seen: set[str] = set()
+
+    rows = qs.values_list(
+        "protein_1__uniprot_accession",
+        "protein_2__uniprot_accession",
+        "score",
+    )
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["protein1", "protein2", "w"])
+        for acc1, acc2, score in rows.iterator(chunk_size=5000):
+            if not acc1 or not acc2:
+                n_blank += 1
+                continue
+            writer.writerow([acc1, acc2, score])
+            n_written += 1
+            seen.add(acc1)
+            seen.add(acc2)
+
+    if n_written == 0:
+        dest.unlink(missing_ok=True)
+
+    return ExportResult(
+        path=dest,
+        n_written=n_written,
+        n_dropped_unknown=0,
         n_dropped_blank=n_blank,
         n_proteins=len(seen),
     )
