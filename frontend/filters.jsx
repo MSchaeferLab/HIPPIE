@@ -645,8 +645,8 @@ export function filtersToBody(f, meta = {}) {
 // ── Filter help text (definition lists shown in section-header pop-ups) ──────
 const RESULT_TYPE_HELP = DL([
   ["Interactions", "Positive, experimentally supported protein pairs."],
-  ["Non-interactions", "Sampled negative pairs (no known interaction), rows are shown with a grey background."],
-  ["Both", "Show positives and sampled negatives together."],
+  ["Non-interactions", "Protein pairs experimentally reported not to interact; rows are shown with a grey background. Hidden as soon as a source, experiment or interaction-type filter is set, since non-interactions carry none of those."],
+  ["Both", "Show interactions and non-interactions together."],
 ]);
 const CONFIDENCE_HELP = DL([
   ["Min. score ≥", "Keep interactions with confidence ≥ this value (0–1)."],
@@ -706,9 +706,9 @@ const REVIEWED_HELP = DL([
   ["Both", "No curation-status filter."],
 ]);
 const ISOFORMS_HELP = DL([
-  ["General", "Proteins without any isoform-level information."],
-  ["Isoforms", "Only pairs where an endpoint is an isoform."],
-  ["Both", "Showing everything connected to your keyword, whether it contains isoforms or not."],
+  ["General", "General protein entries only; an isoform still appears when you query it explicitly."],
+  ["Isoforms", "Only interactions in which at least one partner is a non-canonical isoform."],
+  ["Both", "No isoform filter: general proteins and isoforms together."],
 ]);
 
 export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS, layout = "collapsible" }) {
@@ -725,7 +725,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           <div className={colCls}>
             <div className="filter-section-label">
               Result type
-              <InfoPopover title="Result type" html={RESULT_TYPE_HELP} />
+              <InfoPopover title="Result type" html={RESULT_TYPE_HELP} moreAnchor="result-type" />
             </div>
             <div className="mode-toggle">
               {[
@@ -746,7 +746,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           <div className={colCls}>
             <div className="filter-section-label">
               Confidence score
-              <InfoPopover title="Confidence score" html={CONFIDENCE_HELP} />
+              <InfoPopover title="Confidence score" html={CONFIDENCE_HELP} moreAnchor="confidence" />
             </div>
             <label className="form-label">
               Min. score ≥ <span className="mono">{f.minScore.toFixed(2)}</span>
@@ -801,7 +801,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           <div className={colCls}>
             <div className="filter-section-label">
               Source database
-              <InfoPopover title="Source database" html={SOURCE_HELP} />
+              <InfoPopover title="Source database" html={SOURCE_HELP} moreAnchor="sources" />
             </div>
             <label className="form-label">In any selected source</label>
             <CheckboxList
@@ -817,7 +817,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           <div className={colCls}>
             <div className="filter-section-label">
               Experiment type
-              <InfoPopover title="Experiment type" html={EXPERIMENT_HELP} />
+              <InfoPopover title="Experiment type" html={EXPERIMENT_HELP} moreAnchor="experiments" />
             </div>
             <label className="form-label">Detected by any selected method</label>
             <CheckboxList
@@ -833,7 +833,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           <div className={colCls}>
             <div className="filter-section-label">
               Interaction type
-              <InfoPopover title="Interaction type" html={INTERACTION_TYPE_HELP} />
+              <InfoPopover title="Interaction type" html={INTERACTION_TYPE_HELP} moreAnchor="interaction-types" />
             </div>
             <label className="form-label">Classified as any selected type</label>
             <CheckboxList
@@ -849,7 +849,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           <div className={colCls}>
             <div className="filter-section-label">
               Tissue expression (GTEx)
-              <InfoPopover title="Tissue expression (GTEx)" html={TISSUE_HELP} />
+              <InfoPopover title="Tissue expression (GTEx)" html={TISSUE_HELP} moreAnchor="tissues" />
             </div>
             <label className="form-label">Expressed in any selected tissue</label>
             <CheckboxList
@@ -879,7 +879,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           <div className={colCls}>
             <div className="filter-section-label">
               Protein filters
-              <InfoPopover title="Protein filters" html={PROTEIN_FILTERS_HELP} />
+              <InfoPopover title="Protein filters" html={PROTEIN_FILTERS_HELP} moreAnchor="protein-filters" />
             </div>
             <label className="form-label">
               Min. degree in all of HIPPIE ≥{" "}
@@ -913,7 +913,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           <div className={colCls}>
             <div className="filter-section-label">
               Protein review status
-              <InfoPopover title="Protein review status" html={REVIEWED_HELP} />
+              <InfoPopover title="Protein review status" html={REVIEWED_HELP} moreAnchor="reviewed" />
             </div>
             <div className="mode-toggle">
               {[
@@ -933,7 +933,7 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
           <div className={colCls}>
             <div className="filter-section-label">
               Isoforms
-              <InfoPopover title="Isoforms" html={ISOFORMS_HELP} />
+              <InfoPopover title="Isoforms" html={ISOFORMS_HELP} moreAnchor="isoforms" />
             </div>
             <div className="mode-toggle">
               {[
@@ -967,9 +967,9 @@ export function FilterBox({ value, onChange, meta = {}, controls = ALL_CONTROLS,
 const ML_PROTEIN_HELP = DL([
   ["Expressed in any selected tissue", `Keep only proteins expressed in any of the selected tissues. Median gene-level expression from GTEx${gtexVersionSuffix()}.`],
   ["Min. median TPM ≥", "Minimum median expression (TPM) required in the selected tissue(s). Appears once the tissue list is narrowed. Only genes reaching 1.0 TPM in at least one tissue were imported, so a lower threshold has no additional effect."],
-  ["Min. degree in all of HIPPIE ≥", "Minimum number of interaction partners a protein has across the whole database. Counted over every HIPPIE interaction, ignoring the interaction filters on the right — so the median degree reported in the statistics box, which counts only surviving edges, is often much lower than this threshold."],
-  ["Min. avg score ≥", "Minimum mean confidence score across a protein's interactions, again over all of HIPPIE."],
-  ["Isoforms", "General = canonical entries (plus any isoform you queried); Isoforms = only isoform entries; Both = no isoform filter."],
+  ["Min. degree in all of HIPPIE ≥", "Minimum number of interaction partners a protein has across the whole database. Counted over every HIPPIE interaction, ignoring the interaction filters below — so the median degree reported in the statistics box, which counts only surviving edges, is often much lower than this threshold."],
+  ["Min. avg. score ≥", "Minimum mean confidence score across a protein's interactions, again over all of HIPPIE."],
+  ["Isoforms", "General = general protein entries only (plus any isoform you queried); Isoforms = only interactions with at least one non-canonical isoform partner; Both = no isoform filter."],
   TISSUE_COUNTS,
   NOTHING_TICKED,
 ]);
@@ -992,7 +992,7 @@ export function MLProteinFilterPanel({ meta, filters, onChange }) {
     <div className="hippie-card mb-0" style={{ height: "100%" }}>
       <div className="filter-section-label">
         Protein Filters
-        <InfoPopover title="Protein Filters" html={ML_PROTEIN_HELP} />
+        <InfoPopover title="Protein Filters" html={ML_PROTEIN_HELP} moreAnchor="ml-splits" />
       </div>
       <label className="form-label">
         Expressed in any selected tissue <span className="text-muted-sm">(GTEx)</span>
@@ -1031,7 +1031,7 @@ export function MLProteinFilterPanel({ meta, filters, onChange }) {
         onChange={(e) => set({ minDegree: parseInt(e.target.value) })}
       />
       <label className="form-label">
-        Min. avg score ≥{" "}
+        Min. avg. score ≥{" "}
         <span className="mono">{(filters.minAvgScore || 0).toFixed(2)}</span>
       </label>
       <input
@@ -1072,7 +1072,7 @@ export function MLInteractionFilterPanel({ meta, filters, onChange }) {
     <div className="hippie-card mb-0" style={{ height: "100%" }}>
       <div className="filter-section-label">
         Interaction Filters
-        <InfoPopover title="Interaction Filters" html={ML_INTERACTION_HELP} />
+        <InfoPopover title="Interaction Filters" html={ML_INTERACTION_HELP} moreAnchor="ml-splits" />
       </div>
       <label className="form-label">
         Min. score ≥ <span className="mono">{(filters.minScore || 0).toFixed(2)}</span>

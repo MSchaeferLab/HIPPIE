@@ -1,0 +1,317 @@
+{% extends "hippie_website/base.html" %}
+{% block title %}Filter guide{% endblock %}
+{% block react_cdn %}{% endblock %}
+
+{% block content %}
+
+<style>
+  .toc-list { columns: 2; font-size: .875rem; line-height: 1.9; padding-left: 1.1rem; }
+  .toc-list li { break-inside: avoid; }
+  #top { scroll-margin-top: 80px; }
+  .info-section h4[id], .info-section h5[id] { scroll-margin-top: 80px; }
+  .back-to-top { font-size: .8rem; }
+  .vocab-group { margin-bottom: .4rem; }
+  .vocab-group summary { cursor: pointer; font-size: .9rem; font-weight: 500; }
+  .vocab-group summary .text-muted-sm { font-weight: 400; }
+  .vocab-terms { columns: 2; font-size: .82rem; line-height: 1.7; padding-left: 1.1rem; margin: .4rem 0 .6rem; }
+  .vocab-terms li { break-inside: avoid; }
+  .vocab-count { color: var(--hippie-ink-muted); font-family: var(--font-mono); font-size: .75rem; }
+  @media (max-width: 767px) { .toc-list, .vocab-terms { columns: 1; } }
+</style>
+
+<div class="hippie-hero" id="top">
+  <h1>Filter<br /><em style="color: var(--hippie-teal)">Guide</em></h1>
+  <p class="page-subtitle">
+    What every filter in the HIPPIE filter panel does, and what each source database,
+    experiment type, interaction type and tissue in the lists stands for.
+  </p>
+</div>
+
+{# ── Table of contents ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <span class="section-label">Contents</span>
+    <ul class="toc-list mt-2 mb-0">
+      <li><a href="#how-filters-combine">How filters combine</a></li>
+      <li><a href="#result-type">Result type</a></li>
+      <li><a href="#confidence">Confidence score</a></li>
+      <li><a href="#sources">Source database</a></li>
+      <li><a href="#experiments">Experiment type</a></li>
+      <li><a href="#interaction-types">Interaction type</a></li>
+      <li><a href="#tissues">Tissue expression</a></li>
+      <li><a href="#protein-filters">Protein filters (degree, average score)</a></li>
+      <li><a href="#reviewed">Review status</a></li>
+      <li><a href="#isoforms">Isoforms</a></li>
+      <li><a href="#ml-splits">Filters on the ML Splits page</a></li>
+    </ul>
+  </div>
+</div>
+
+{# ── How filters combine ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="how-filters-combine" class="section-label">How filters combine</h4>
+    <p>
+      The protein query, interaction query, network and browse pages share one filter panel; each
+      page shows the subset of controls relevant to it. Hover the
+      <i class="bi bi-info-circle"></i> icon next to a filter for a short summary, and follow its
+      <em>More details</em> link to the matching section of this page.
+    </p>
+    <ul>
+      <li>Filters take effect only when you run or re-apply the search.</li>
+      <li>Different filters combine with logical <strong>AND</strong> — a result must pass every
+        active filter to be shown.</li>
+      <li>Ticks within one list (sources, experiment types, interaction types, tissues) combine with
+        <strong>OR</strong> — a result needs to match only one ticked option.</li>
+      <li>The lists start with every option ticked. <strong>Clearing a list removes that filter</strong>
+        rather than excluding everything, so an unticked list and a fully ticked one return the
+        same results.</li>
+      <li>The number beside each option is counted across all of HIPPIE. It is not recomputed for
+        the subset your other filters leave, so it does not change as you narrow the query. Options
+        that no interaction uses are not listed at all.</li>
+      <li>Protein-level filters (<a href="#tissues">tissue</a>, <a href="#protein-filters">degree,
+        average score</a>, <a href="#reviewed">review status</a>) are checked on the proteins of each
+        interaction. The proteins you query on the protein query page and the seeds on the network
+        page are never removed by them — they apply to the partners that HIPPIE adds.</li>
+    </ul>
+    <p class="mb-0">
+      The same filters are available programmatically; see the
+      <a href="{% url 'hippie_website:api_docs' %}#shared-filters">REST API</a>.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Result type ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="result-type" class="section-label">Result type</h4>
+    <ul>
+      <li><strong>Interactions</strong> — experimentally supported protein pairs, each with a
+        confidence score.</li>
+      <li><strong>Non-interactions</strong> — protein pairs experimentally reported <em>not</em> to
+        interact. Their rows are drawn on a grey background.</li>
+      <li><strong>Both</strong> — interactions and non-interactions together.</li>
+    </ul>
+    <p class="mb-0">
+      Non-interactions carry no source database, experiment type or interaction type. As soon as
+      one of those three lists is narrowed, non-interactions can no longer match and are left out
+      of the result.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Confidence ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="confidence" class="section-label">Confidence score</h4>
+    <p>
+      Keeps results whose score lies between a minimum and a maximum bound (0–1); the sliders
+      clamp so that the minimum never exceeds the maximum. How the score is computed is explained
+      under <a href="{% url 'hippie_website:information' %}#scoring">confidence scoring</a>.
+    </p>
+    <p class="mb-0">
+      The <em>Medium conf.</em> and <em>High conf.</em> presets set the minimum to the current
+      release's median (Q2) and upper-quartile (Q3) score for the selected result type{% if current_release %}
+      — for interactions currently
+      ≥&nbsp;{{ current_release.int_median|floatformat:2 }} and
+      ≥&nbsp;{{ current_release.int_q3|floatformat:2 }}{% endif %}.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Sources ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="sources" class="section-label">Source database</h4>
+    <p>
+      Keeps interactions reported by any of the ticked source databases. Many interactions are
+      reported by several sources. Besides the primary interaction databases, the list contains
+      curation teams that deposit their work into IntAct under their own name, and annotation or
+      structure resources that some records name as their origin.
+    </p>
+    {% for group in source_groups %}
+    <h5 class="mt-3" style="font-size:1rem;">{{ group.category }}</h5>
+    <div style="overflow-x:auto;">
+      <table class="format-table">
+        <thead>
+          <tr><th>Source</th><th>Full name</th><th>What it is</th><th>Interactions</th></tr>
+        </thead>
+        <tbody>
+          {% for src in group.options %}
+          <tr>
+            <td><code>{{ src.name }}</code></td>
+            <td>{{ src.full_name|default:"—" }}</td>
+            <td>{{ src.description|default:"—" }}</td>
+            <td>{{ src.count|default:"—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% empty %}
+    <p class="text-muted-sm">No source databases are loaded.</p>
+    {% endfor %}
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Experiment types ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="experiments" class="section-label">Experiment type</h4>
+    <p>
+      Keeps interactions detected by any of the ticked experimental methods. Methods are PSI-MI
+      terms grouped into method families; each method links to its definition in the PSI-MI
+      ontology. Every method also carries a quality score that enters the
+      <a href="{% url 'hippie_website:information' %}#scoring">confidence score</a>.
+    </p>
+    {% for group in experiment_groups %}
+    <details class="vocab-group">
+      <summary>{{ group.category }} <span class="text-muted-sm">({{ group.options|length }})</span></summary>
+      <ul class="vocab-terms">
+        {% for exp in group.options %}
+        <li>
+          {% if exp.psi_mi_code %}<a href="https://www.ebi.ac.uk/ols4/ontologies/mi/classes?obo_id={{ exp.psi_mi_code }}" target="_blank" rel="noopener">{{ exp.name }}</a>{% else %}{{ exp.name }}{% endif %}
+          {% if exp.count %}<span class="vocab-count">{{ exp.count }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% empty %}
+    <p class="text-muted-sm">No experiment types are loaded.</p>
+    {% endfor %}
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Interaction types ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="interaction-types" class="section-label">Interaction type</h4>
+    <p>
+      Keeps interactions classified as any of the ticked interaction types — for example whether
+      two proteins were shown to bind directly, or only to belong to the same complex.
+    </p>
+    {% for group in interaction_type_groups %}
+    <details class="vocab-group">
+      <summary>{{ group.category }} <span class="text-muted-sm">({{ group.options|length }})</span></summary>
+      <ul class="vocab-terms">
+        {% for t in group.options %}
+        <li>{{ t.name }} {% if t.count %}<span class="vocab-count">{{ t.count }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% empty %}
+    <p class="text-muted-sm">No interaction types are loaded.</p>
+    {% endfor %}
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Tissues ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="tissues" class="section-label">Tissue expression</h4>
+    <p>
+      Keeps interactions whose proteins are expressed in any of the ticked tissues. Expression is
+      the median gene-level RNA-seq expression from
+      GTEx{% if current_release.gtex_version %} {{ current_release.gtex_version }}{% endif %}.
+      Once the tissue list is narrowed, an optional <em>Min. median TPM</em> raises the required
+      expression level. Only genes reaching a median of 1.0&nbsp;TPM in at least one tissue were
+      imported, so a threshold below 1.0 has no additional effect.
+    </p>
+    <p>
+      Tissues are grouped by body system and then by organ. The number beside each tissue is how
+      many genes GTEx measures as expressed there — genes, not interactions.
+    </p>
+    {% for group in tissue_groups %}
+    <details class="vocab-group">
+      <summary>{{ group.category }} <span class="text-muted-sm">({{ group.options|length }})</span></summary>
+      <ul class="vocab-terms">
+        {% for t in group.options %}
+        <li>{{ t.name }} {% if t.count %}<span class="vocab-count">{{ t.count }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% empty %}
+    <p class="text-muted-sm">No tissues are loaded.</p>
+    {% endfor %}
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Protein filters ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="protein-filters" class="section-label">Protein filters</h4>
+    <ul>
+      <li><strong>Min. degree in all of HIPPIE ≥</strong> — the minimum number of interaction
+        partners a protein has across the whole database.</li>
+      <li><strong>Min. avg. score ≥</strong> — the minimum mean confidence score across a
+        protein's interactions.</li>
+    </ul>
+    <p class="mb-0">
+      Both are measured across all of HIPPIE, independently of the source, score and type filters.
+      A protein can therefore pass a high degree threshold and still contribute only a handful of
+      interactions to a narrowly filtered result. For the same reason the median degree in the
+      statistics box of the ML Splits page, which counts only the interactions that survive the
+      filters, is often much lower than the threshold.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Review status ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="reviewed" class="section-label">Review status</h4>
+    <ul class="mb-0">
+      <li><strong>Reviewed</strong> — manually curated UniProtKB/Swiss-Prot entries.</li>
+      <li><strong>Unreviewed</strong> — automatically annotated UniProtKB/TrEMBL entries.</li>
+      <li><strong>Both</strong> — no review-status filter.</li>
+    </ul>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Isoforms ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="isoforms" class="section-label">Isoforms</h4>
+    <p>
+      HIPPIE stores interactions both for general protein entries (e.g. <code>P37163</code>) and for
+      individual isoforms (e.g. <code>P37163-2</code>); see
+      <a href="{% url 'hippie_website:information' %}#isoforms">Isoforms</a> for background. The
+      three-way filter decides which of them are shown:
+    </p>
+    <ul class="mb-0">
+      <li><strong>General</strong> — general protein entries only. An isoform still appears when you
+        query it explicitly.</li>
+      <li><strong>Isoforms</strong> — only interactions in which at least one partner is a
+        non-canonical isoform.</li>
+      <li><strong>Both</strong> — no isoform filter: general proteins and isoforms together.</li>
+    </ul>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── ML splits page ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="ml-splits" class="section-label">Filters on the ML Splits page</h4>
+    <p class="mb-0">
+      The <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page uses the same filters,
+      arranged in two rows: protein filters (tissue expression, degree, average score, isoforms) on
+      top and interaction filters (confidence, experiment type, interaction type, source database)
+      below. A protein that fails the protein filters removes every interaction it takes part in.
+      How the filtered set is turned into train / validation / test data is described in the
+      <a href="{% url 'hippie_website:machine_learning' %}">Machine Learning guide</a>.
+    </p>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{% endblock %}

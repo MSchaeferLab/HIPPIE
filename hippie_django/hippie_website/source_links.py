@@ -104,6 +104,177 @@ def _key(name: str) -> str:
     return _ALIASES.get(k, k)
 
 
+# Full name + one-line description per source, for the filter guide. Many
+# source labels are acronyms or curation-team names that mean nothing to a
+# visitor (bhf-ucl, mbinfo, ntnu); this spells them out. Keyed like
+# SOURCE_LINKS.
+SOURCE_INFO: dict[str, dict[str, str]] = {
+    "intact": {
+        "full_name": "IntAct Molecular Interaction Database",
+        "description": "Open, literature-curated molecular interaction database "
+        "hosted at EMBL-EBI; the shared curation platform of the IMEx consortium.",
+    },
+    "biogrid": {
+        "full_name": "Biological General Repository for Interaction Datasets",
+        "description": "Literature-curated protein and genetic interactions "
+        "across major model organisms and human.",
+    },
+    "mint": {
+        "full_name": "Molecular INTeraction database",
+        "description": "Literature-curated protein interactions from the "
+        "University of Rome Tor Vergata; curated within IntAct (IMEx member).",
+    },
+    "homomint": {
+        "full_name": "HomoMINT",
+        "description": "Human interactions inferred from orthologous "
+        "interactions in model organisms, derived from MINT.",
+    },
+    "dip": {
+        "full_name": "Database of Interacting Proteins",
+        "description": "Experimentally determined protein interactions "
+        "curated at UCLA (IMEx member).",
+    },
+    "imex": {
+        "full_name": "International Molecular Exchange Consortium",
+        "description": "Consortium of interaction databases (IntAct, MINT, DIP, "
+        "…) sharing one curation standard; records curated to IMEx rules.",
+    },
+    "mpidb": {
+        "full_name": "Microbial Protein Interaction Database",
+        "description": "Curated microbial protein interactions; the original "
+        "site is offline and its data lives on in IntAct.",
+    },
+    "matrixdb": {
+        "full_name": "MatrixDB",
+        "description": "Interactions involving extracellular-matrix proteins, "
+        "proteoglycans and polysaccharides (University of Lyon).",
+    },
+    "innatedb": {
+        "full_name": "InnateDB",
+        "description": "Curated interactions and pathways of the innate immune "
+        "response.",
+    },
+    "hpidb": {
+        "full_name": "Host–Pathogen Interaction Database",
+        "description": "Curated interactions between host and pathogen proteins "
+        "(Mississippi State University).",
+    },
+    "uniprot": {
+        "full_name": "UniProt Knowledgebase",
+        "description": "Interactions annotated by UniProtKB/Swiss-Prot curators "
+        "and deposited via IntAct.",
+    },
+    "bhf-ucl": {
+        "full_name": "British Heart Foundation – University College London",
+        "description": "Cardiovascular gene-annotation team at UCL that curates "
+        "interactions of cardiovascular-relevant proteins into IntAct.",
+    },
+    "i2d": {
+        "full_name": "Interologous Interaction Database",
+        "description": "Known and predicted protein interactions collected by "
+        "the Jurisica lab, University of Toronto.",
+    },
+    "hprd": {
+        "full_name": "Human Protein Reference Database",
+        "description": "Manually curated human protein interactions; no longer "
+        "updated.",
+    },
+    "molecular connections": {
+        "full_name": "Molecular Connections",
+        "description": "Commercial curation team (Bangalore, India) that curates "
+        "interaction data into IntAct.",
+    },
+    "mbinfo": {
+        "full_name": "MechanoBiology Institute (MBInfo)",
+        "description": "Curation team of the MechanoBiology Institute, National "
+        "University of Singapore, contributing mechanobiology-related "
+        "interactions to IntAct.",
+    },
+    "ntnu": {
+        "full_name": "Norwegian University of Science and Technology",
+        "description": "Curation team at NTNU (Trondheim) contributing "
+        "interactions to IntAct.",
+    },
+    "flybase": {
+        "full_name": "FlyBase",
+        "description": "Drosophila genetics and genomics database; contributes "
+        "curated interaction records via IntAct.",
+    },
+    "interpro": {
+        "full_name": "InterPro",
+        "description": "Protein families, domains and functional sites (EMBL-EBI).",
+    },
+    "omim": {
+        "full_name": "Online Mendelian Inheritance in Man",
+        "description": "Catalogue of human genes and genetic disorders.",
+    },
+    "go": {
+        "full_name": "Gene Ontology",
+        "description": "Gene-function annotation resource; interaction records "
+        "originating from GO curation.",
+    },
+    "brenda": {
+        "full_name": "BRENDA",
+        "description": "Comprehensive enzyme information system.",
+    },
+    "efo": {
+        "full_name": "Experimental Factor Ontology",
+        "description": "EMBL-EBI ontology of experimental variables.",
+    },
+    "tissue list": {
+        "full_name": "UniProt tissue list",
+        "description": "UniProt's controlled vocabulary of tissues.",
+    },
+    "pmc": {
+        "full_name": "PubMed Central",
+        "description": "Free full-text archive of biomedical literature.",
+    },
+    "pdbe": {
+        "full_name": "Protein Data Bank in Europe",
+        "description": "European archive of macromolecular structures.",
+    },
+    "rcsb pdb": {
+        "full_name": "RCSB Protein Data Bank",
+        "description": "US archive of macromolecular structures.",
+    },
+    "wwpdb": {
+        "full_name": "Worldwide Protein Data Bank",
+        "description": "Consortium maintaining the single global PDB archive.",
+    },
+    "emdb": {
+        "full_name": "Electron Microscopy Data Bank",
+        "description": "Archive of cryo-EM density maps.",
+    },
+    "empiar": {
+        "full_name": "Electron Microscopy Public Image Archive",
+        "description": "Archive of raw electron-microscopy image data.",
+    },
+    "bmrb": {
+        "full_name": "Biological Magnetic Resonance Data Bank",
+        "description": "Archive of NMR spectroscopy data on biomolecules.",
+    },
+    "pride": {
+        "full_name": "PRIDE",
+        "description": "Proteomics identifications database (mass-spectrometry "
+        "data, EMBL-EBI).",
+    },
+    "proteomexchange": {
+        "full_name": "ProteomeXchange",
+        "description": "Consortium coordinating public mass-spectrometry "
+        "proteomics repositories.",
+    },
+}
+
+
+def source_info(name: str) -> dict[str, str]:
+    """Full name + description for a source name, or empty strings if unknown."""
+    info = SOURCE_INFO.get(_key(name), {})
+    return {
+        "full_name": info.get("full_name", ""),
+        "description": info.get("description", ""),
+    }
+
+
 def homepage_url(name: str) -> str:
     """Return the known homepage URL for a source name, or "" if unknown."""
     return SOURCE_LINKS.get(_key(name), {}).get("home", "")

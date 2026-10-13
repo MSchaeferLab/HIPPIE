@@ -35,7 +35,7 @@
 
 {# ── Resources / papers ── #}
 <div class="info-section">
-  <div class="hippie-card">
+  <div class="hippie-card" id="key-reading" style="scroll-margin-top:80px;">
     <span class="section-label">Key Reading</span>
     <p class="text-muted-sm mb-3">
       Before training a PPI predictor, read these. They explain why most reported PPI-prediction
@@ -80,9 +80,12 @@
   <div class="hippie-card">
     <span class="section-label">A PPI-Prediction Workflow</span>
     <p class="text-muted-sm mb-0">
-      Here we show a typical end-to-end example: choose data, train two contrasting models
-      (a classic feature-based baseline and a sequence-based model), and evaluate honestly. Take this both as a
-      tutorial if you want to start with PPI prediction and as a resource showing the pitfalls of data leakage.
+      Here we show a typical end-to-end example: choose data, export it from HIPPIE, build a
+      leakage-aware train/validation/test split with the
+      <a href="https://github.com/bionetslab/ppi-splitting-pipeline" target="_blank" rel="noopener">ppi-splitting-pipeline</a>,
+      train two contrasting models (a classic feature-based baseline and a sequence-based model),
+      and evaluate honestly. Take this both as a tutorial if you want to start with PPI prediction
+      and as a resource showing the pitfalls of data leakage.
     </p>
   </div>
 </div>
@@ -93,15 +96,18 @@
     <div class="ml-step-head"><span class="ml-step-num">1</span><h3>How do I choose my data?</h3></div>
     <p>
       A PPI classifier needs <strong>positive</strong> examples (interacting pairs) and
-      <strong>negative</strong> examples (non-interacting pairs). HIPPIE gives you scored positives and scored
-      negatives, but the difficult part is splitting it in a way that reduces biases and data leakage.
+      <strong>negative</strong> examples (non-interacting pairs). HIPPIE gives you scored positives and
+      experimentally reported non-interactions, but the difficult part is splitting the data in a way
+      that reduces biases and data leakage.
     </p>
     <ul style="font-size:.9rem; line-height:1.8;">
-      <li><strong>Positives</strong> — Set of interacting proteins. Higher confidence thresholds
-        (≥ {{ current_release.int_q3|default:0.00|floatformat:2 }}, high confidence) trade quantity for reliability.</li>
-      <li><strong>Negatives</strong> — there is no gold-standard "these never interact" set. Common
-        choices: random non-edges, or curated non-interactions as provided by HIPPIE. Random negatives are biased by node
-        degree, which a model can exploit instead of learning biology.</li>
+      <li><strong>Positives</strong> — the interacting protein pairs. Higher confidence thresholds
+        (≥ {{ current_release.int_q3|default:0.00|floatformat:2 }}, high confidence) trade quantity for
+        reliability.</li>
+      <li><strong>Negatives</strong> — there is no gold-standard "these never interact" set. HIPPIE
+        provides curated non-interactions, but far fewer of them than positives, so most negatives
+        have to be sampled from pairs with no known interaction. Naively sampled negatives are biased
+        by node degree, which a model can exploit instead of learning biology.</li>
     </ul>
     <div class="hippie-note hippie-note--warn">
       <strong>Leakage trap:</strong> If the same protein appears in both train and test —
@@ -115,26 +121,109 @@
 {# ── Step 2 ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <div class="ml-step-head"><span class="ml-step-num">2</span><h3>How do I pick that in HIPPIE?</h3></div>
+    <div class="ml-step-head"><span class="ml-step-num">2</span><h3>How do I get the data out of HIPPIE?</h3></div>
+    <p>There are three routes, from least to most effort:</p>
+    <ul style="font-size:.9rem; line-height:1.8;">
+      <li><strong>Pre-computed splits</strong> — the
+        <a href="{% url 'hippie_website:download' %}#ml-splits">Download page</a> offers finished splits
+        of the high-confidence interactions, the high-and-medium-confidence ones, and the whole
+        database. If one of these fits, you can skip to <a href="#step-4">step 4</a>.</li>
+      <li><strong>Raw data + your own pipeline run</strong> (this tutorial) — filter HIPPIE the way you
+        need on the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page, download the
+        filtered data, and build the split yourself on your own machine or cluster.</li>
+      <li><strong>Splits generated on the server</strong> — the ML Splits page can also run the
+        pipeline for you. This is convenient, but jobs are queued and run one at a time, each run
+        takes a long time, and because of our computational constraints the server gives the
+        optimisation steps a much smaller time and memory budget than a local run (30 minutes
+        instead of 2 hours per ILP, on 2 CPUs). The resulting splits are valid but usually less
+        well optimised than what you get locally.</li>
+    </ul>
     <p>
-      The <a href="{% url 'hippie_website:download' %}#ml-splits">Download page</a> provides three pre-computed splits:
-      one for the high-confidence interactions, one for the high-and-medium-confidence ones, and one for the whole
-      database. If you need your dataset filtered in a different way, e.g. just choosing proteins that have a min.
-      expression in a specific tissue (median gene-level RNA-seq from
-      GTEx{% if current_release.gtex_version %} {{ current_release.gtex_version }}{% endif %}),
-      you can use the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool. It applies the same
-      filters as <a href="{% url 'hippie_website:browse' %}">Browse</a> (confidence score, source,
-      experiment type, interaction type, tissue / TPM, node degree across all of HIPPIE) and then builds a labeled
-      train/validation/test dataset with two negative sampling options for you. <br>
-      For this tutorial we will download the split of the whole database. LEFT OFF HERE
+      For this tutorial we use the whole database. On the
+      <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page, leave every filter at its
+      default (or narrow it — e.g. to proteins with a minimum expression in a specific tissue, from
+      median gene-level RNA-seq of
+      GTEx{% if current_release.gtex_version %} {{ current_release.gtex_version }}{% endif %}; see the
+      <a href="{% url 'hippie_website:filter_guide' %}">filter guide</a>), click
+      <strong>Calculate statistics</strong>, then <strong>Download Raw Data</strong>. The ZIP contains:
     </p>
+    <ul style="font-size:.9rem; line-height:1.8;">
+      <li><code class="mono">ppis.csv</code> — the filtered interactions:
+        <code class="mono">protein1,protein2,score</code> (UniProt accessions, isoforms included).</li>
+      <li><code class="mono">candidate_negatives.csv</code> — only when curated HIPPIE non-interactions
+        match your filters: <code class="mono">protein1,protein2,w</code>. Negative sampling is then
+        restricted to this pool.</li>
+      <li><code class="mono">samplesheet.csv</code> — a ready-made one-row samplesheet for the pipeline.</li>
+      <li><code class="mono">README.txt</code> — the filters you applied, the counts, and the exact
+        command to run.</li>
+    </ul>
   </div>
 </div>
 
 {# ── Step 3 ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <div class="ml-step-head"><span class="ml-step-num">3</span><h3>How do I create a model with the data?</h3></div>
+    <div class="ml-step-head"><span class="ml-step-num">3</span><h3>How do I build the split?</h3></div>
+    <p>
+      The <a href="https://github.com/bionetslab/ppi-splitting-pipeline" target="_blank" rel="noopener">ppi-splitting-pipeline</a>
+      is a Nextflow pipeline. You need:
+    </p>
+    <ul style="font-size:.9rem; line-height:1.8;">
+      <li><a href="https://www.nextflow.io/" target="_blank" rel="noopener">Nextflow</a> and one of
+        Docker, Singularity, Apptainer or Conda (the pipeline ships a profile for each).</li>
+      <li>Internet access — protein sequences and annotations are fetched from UniProt.</li>
+      <li>Enough compute. The all-vs-all sequence comparison (BLAST) is the heaviest step; for the
+        whole database a cluster is advisable (add the <code class="mono">slurm</code> profile).</li>
+      <li>Optionally a <a href="https://www.gurobi.com/" target="_blank" rel="noopener">Gurobi</a>
+        license (free for academics). Without one, the pipeline falls back to open-source solvers.</li>
+    </ul>
+<pre class="code-block"><span class="c"># 1. get the pipeline next to the unzipped raw data (sibling folders)</span>
+git clone https://github.com/bionetslab/ppi-splitting-pipeline
+unzip hippie_splits_&lt;job-id&gt;.zip -d hippie_raw_data   <span class="c"># the file you downloaded</span>
+cd hippie_raw_data
+
+<span class="c"># 2. run it (pick the profile matching what you have installed)</span>
+nextflow run ../ppi-splitting-pipeline/main.nf \
+    --samplesheet samplesheet.csv --outdir results -profile docker
+
+<span class="c"># no Gurobi license? append:</span>
+<span class="c">#   --ilp_solver '' --gurobi_license ''</span></pre>
+    <p>What the pipeline does with your data:</p>
+    <ol style="font-size:.9rem; line-height:1.8;">
+      <li>Fetches the sequences and compares every protein against every other (BLAST) to build a
+        sequence-similarity graph, which is then partitioned into clusters of similar proteins.</li>
+      <li>Splits the positives into train / validation / test with an ILP that keeps similar proteins
+        on the same side, then removes remaining homologous train/test pairs with CD-HIT-2D.
+        Expect noticeably fewer pairs than you exported.</li>
+      <li>Samples negatives with a second ILP that matches the positives' degree, taxon-pair,
+        self-loop and GO-similarity profile (1:1), plus a separate <em>realistic</em> test set with
+        uniformly sampled negatives at 1:10.</li>
+      <li>Trains a small baseline classifier and writes a MultiQC report
+        (<code class="mono">results/multiqc/multiqc_report.html</code>) with split sizes, bias
+        diagnostics and similarity heatmaps.</li>
+    </ol>
+    <p class="mb-1">The splits you need land in <code class="mono">results/hippie/</code>:</p>
+    <ul style="font-size:.9rem; line-height:1.8;">
+      <li><code class="mono">train.csv</code>, <code class="mono">val.csv</code>,
+        <code class="mono">test_balanced.csv</code> — 1:1 positives to bias-matched negatives.</li>
+      <li><code class="mono">test_realistic.csv</code> — 1:10 with uniform negatives, simulating an
+        uncontrolled screen.</li>
+      <li>Each has the columns <code class="mono">protein1,protein2,label,score</code>
+        (<code class="mono">label</code> 1 = interacts, 0 = negative); the sequences are in
+        <code class="mono">results/hippie/data/sequences.fasta</code>.</li>
+    </ul>
+    <div class="hippie-note hippie-note--ok">
+      <strong>Reproducibility.</strong> The split is fixed by the pipeline's seed (a pipeline
+      parameter, 42 by default) and its version. Note both, and publish the split files with your
+      results.
+    </div>
+  </div>
+</div>
+
+{# ── Step 4 ── #}
+<div class="info-section">
+  <div class="hippie-card" id="step-4" style="scroll-margin-top:80px;">
+    <div class="ml-step-head"><span class="ml-step-num">4</span><h3>How do I create a model with the data?</h3></div>
     <p>
       We build two models side by side: a <strong>classic feature-based baseline</strong> and a
       <strong>sequence-based</strong> model. Both share the same split so the comparison is fair.
@@ -143,100 +232,107 @@
     <span class="section-label section-label--inline">Load the data</span>
 <pre class="code-block">import pandas as pd
 
-df = pd.read_csv("hippie_ppi.tsv", sep="\t")
-<span class="c"># columns: protein_a, protein_b, label (1 = interacts, 0 = negative)</span>
-print(df["label"].value_counts())</pre>
+splits = {name: pd.read_csv(f"results/hippie/{name}.csv")
+          for name in ["train", "val", "test_balanced", "test_realistic"]}
+train = splits["train"]
+<span class="c"># columns: protein1, protein2, label (1 = interacts, 0 = negative), score</span>
+print(train["label"].value_counts())</pre>
 
     <span class="section-label section-label--inline mt-3">A — Classic baseline (scikit-learn)</span>
     <p class="text-muted-sm mt-2">
-      Cheap topological features straight from the HIPPIE network. Per paper 1, this kind of baseline
-      is surprisingly hard to beat — always report against it.
+      Cheap topological features straight from the interaction network. Per the first paper under
+      <a href="#key-reading">Key Reading</a>, this kind of baseline is surprisingly hard to beat —
+      always report against it.
     </p>
 <pre class="code-block"><span class="c"># pip install scikit-learn networkx</span>
 import networkx as nx
 from sklearn.ensemble import RandomForestClassifier
 
 <span class="c"># build the graph from POSITIVE training edges only (no test leakage!)</span>
-train = df[df.split == "train"]
 G = nx.Graph()
-G.add_edges_from(train[train.label == 1][["protein_a", "protein_b"]].itertuples(index=False))
+G.add_edges_from(train[train.label == 1][["protein1", "protein2"]].itertuples(index=False))
 
 def features(a, b):
-    deg_a = G.degree(a) if a in G else 0
-    deg_b = G.degree(b) if b in G else 0
+    own = int(G.has_edge(a, b))   <span class="c"># don't let a training pair count its own edge</span>
+    deg_a = G.degree(a) - own if a in G else 0
+    deg_b = G.degree(b) - own if b in G else 0
     common = len(list(nx.common_neighbors(G, a, b))) if a in G and b in G else 0
     return [deg_a, deg_b, deg_a * deg_b, common]
 
-X_train = [features(a, b) for a, b in train[["protein_a", "protein_b"]].itertuples(index=False)]
+def X_base(df):
+    return [features(a, b) for a, b in df[["protein1", "protein2"]].itertuples(index=False)]
+
 clf = RandomForestClassifier(n_estimators=300, n_jobs=-1, random_state=0)
-clf.fit(X_train, train["label"])</pre>
+clf.fit(X_base(train), train["label"])</pre>
 
     <span class="section-label section-label--inline mt-3">B — Sequence-based model</span>
     <p class="text-muted-sm mt-2">
       Embed each protein sequence with a protein language model (e.g. ESM-2), concatenate the pair,
       and train a small classifier. More expressive — and far more prone to leakage.
     </p>
-<pre class="code-block"><span class="c"># pip install torch fair-esm scikit-learn</span>
-import torch, esm
+<pre class="code-block"><span class="c"># pip install torch fair-esm scikit-learn biopython</span>
+import numpy as np, torch, esm
+from Bio import SeqIO
 from sklearn.linear_model import LogisticRegression
+
+<span class="c"># the pipeline already fetched the sequences (FASTA headers are UniProt accessions)</span>
+seqs = {r.id: str(r.seq) for r in SeqIO.parse("results/hippie/data/sequences.fasta", "fasta")}
 
 model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
 batch_converter = alphabet.get_batch_converter()
 model.eval()
 
 def embed(seq):
-    _, _, toks = batch_converter([("p", seq)])
+    _, _, toks = batch_converter([("p", seq[:1022])])   <span class="c"># ESM-2 context limit</span>
     with torch.no_grad():
         out = model(toks, repr_layers=[12])["representations"][12]
-    return out[0, 1:len(seq) + 1].mean(0).numpy()   <span class="c"># mean-pooled residue embeddings</span>
+    return out[0, 1:toks.shape[1] - 1].mean(0).numpy()   <span class="c"># mean-pooled residue embeddings</span>
 
-<span class="c"># seqs: dict protein_id -&gt; amino-acid sequence (fetch from UniProt)</span>
-emb = {p: embed(seqs[p]) for p in set(df.protein_a) | set(df.protein_b)}
+proteins = set().union(*(set(df.protein1) | set(df.protein2) for df in splits.values()))
+emb = {p: embed(seqs[p]) for p in proteins}
 
-import numpy as np
-def pair_vec(a, b):
-    return np.concatenate([emb[a], emb[b]])
+def X_seq(df):
+    return np.array([np.concatenate([emb[a], emb[b]])
+                     for a, b in df[["protein1", "protein2"]].itertuples(index=False)])
 
-Xtr = np.array([pair_vec(a, b) for a, b in train[["protein_a", "protein_b"]].itertuples(index=False)])
-seq_clf = LogisticRegression(max_iter=1000).fit(Xtr, train["label"])</pre>
+seq_clf = LogisticRegression(max_iter=1000).fit(X_seq(train), train["label"])</pre>
 
     <div class="hippie-note hippie-note--warn">
-      <strong>Where leakage creeps in (paper 2, Q on data splitting).</strong> A <em>random</em> pair
-      split lets the <em>same protein</em> sit in both train and test. The sequence model then just
-      recognises proteins it has already seen — not interactions. A naive random split can push AUROC
-      from ~0.6 to &gt;0.9 of pure illusion.
+      <strong>Where leakage creeps in (second paper under Key Reading, question on data
+      splitting).</strong> A <em>random</em> pair split lets the <em>same protein</em> sit in both
+      train and test. The sequence model then just recognises proteins it has already seen — not
+      interactions. A naive random split can push AUROC from ~0.6 to &gt;0.9 of pure illusion.
     </div>
     <div class="hippie-note hippie-note--ok">
-      <strong>Fix.</strong> Split on <em>proteins</em>, not pairs: assign each protein to train or
-      test, and cluster by sequence similarity (e.g. MMseqs2 / DataSAIL) so near-identical proteins
-      never straddle the split. The <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> tool's
-      <code class="mono">seed</code> keeps this reproducible; re-cluster if you change the protein set.
+      <strong>Already handled.</strong> The pipeline split by sequence-similarity clusters, so
+      near-identical proteins do not straddle train and test. Do not re-shuffle or re-split the
+      files — tune hyperparameters on <code class="mono">val.csv</code> only, and touch the test sets
+      once, at the end.
     </div>
   </div>
 </div>
 
-{# ── Step 4 ── #}
+{# ── Step 5 ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <div class="ml-step-head"><span class="ml-step-num">4</span><h3>How do I evaluate this?</h3></div>
+    <div class="ml-step-head"><span class="ml-step-num">5</span><h3>How do I evaluate this?</h3></div>
     <p>
-      Score both models on the held-out test split and always compare against the baseline. Because
-      negatives usually outnumber positives, report <strong>AUPRC</strong> alongside AUROC.
+      Score both models on both held-out test sets and always compare against the baseline.
+      <code class="mono">test_balanced</code> (1:1) is comparable to most published numbers;
+      <code class="mono">test_realistic</code> (1:10) is closer to how a predictor is actually used,
+      and there <strong>AUPRC</strong> matters far more than AUROC.
     </p>
 <pre class="code-block">from sklearn.metrics import roc_auc_score, average_precision_score
 
-test = df[df.split == "test"]
-y = test["label"].to_numpy()
-
-Xte_base = [features(a, b) for a, b in test[["protein_a", "protein_b"]].itertuples(index=False)]
-Xte_seq  = np.array([pair_vec(a, b) for a, b in test[["protein_a", "protein_b"]].itertuples(index=False)])
-
-for name, proba in [
-    ("baseline", clf.predict_proba(Xte_base)[:, 1]),
-    ("sequence", seq_clf.predict_proba(Xte_seq)[:, 1]),
-]:
-    print(f"{name:9s}  AUROC={roc_auc_score(y, proba):.3f}  "
-          f"AUPRC={average_precision_score(y, proba):.3f}")</pre>
+for test_name in ["test_balanced", "test_realistic"]:
+    test = splits[test_name]
+    y = test["label"].to_numpy()
+    for name, proba in [
+        ("baseline", clf.predict_proba(X_base(test))[:, 1]),
+        ("sequence", seq_clf.predict_proba(X_seq(test))[:, 1]),
+    ]:
+        print(f"{test_name:15s} {name:9s}  AUROC={roc_auc_score(y, proba):.3f}  "
+              f"AUPRC={average_precision_score(y, proba):.3f}")</pre>
     <ul style="font-size:.9rem; line-height:1.8;">
       <li><strong>Beat the baseline, or report why not.</strong> If the sequence model only wins under
         a random split but ties the baseline under a similarity-aware split, the "win" was leakage.</li>
@@ -245,8 +341,8 @@ for name, proba in [
       <li><strong>Fix the seed and publish the split.</strong> Reproducibility is part of the result.</li>
     </ul>
     <p class="text-muted-sm mb-0">
-      For the full reasoning behind each of these checks, see the two papers under
-      <a href="#top">Key Reading</a> above.
+      For the full reasoning behind each of these checks, see the papers under
+      <a href="#key-reading">Key Reading</a> above.
     </p>
   </div>
 </div>
