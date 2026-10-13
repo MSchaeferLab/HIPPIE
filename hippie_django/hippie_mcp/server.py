@@ -249,12 +249,12 @@ def get_interactions(
     experiments: FilterValues = None,
     interaction_types: FilterValues = None,
     tissues: FilterValues = None,
-    min_rpkm: Annotated[
+    min_tpm: Annotated[
         float | None,
         Field(
             default=None,
             ge=0.0,
-            description="Minimum median RPKM in the selected tissues.",
+            description="Minimum median TPM in the selected tissues.",
         ),
     ] = None,
     min_degree: Annotated[
@@ -349,7 +349,7 @@ def get_interactions(
             "isoform_mode": isoform_mode,
             "min_score": min_score,
             "max_score": max_score,
-            "min_rpkm": min_rpkm,
+            "min_tpm": min_tpm,
             "min_degree": min_degree,
             "min_avg_score": min_avg_score,
             "reviewed": reviewed,

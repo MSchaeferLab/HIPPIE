@@ -159,7 +159,7 @@ def _build_common_filters(get_scalar, get_list) -> CommonFilters:
         experiment_ids=_int_id_list(get_list("experiment")),
         interaction_type_ids=_int_id_list(get_list("interaction_type")),
         tissue_ids=_int_id_list(get_list("tissue")),
-        min_rpkm=_safe_float(get_scalar("min_rpkm")),
+        min_tpm=_safe_float(get_scalar("min_tpm")),
         min_degree=_safe_int(get_scalar("min_degree")),
         min_avg_score=_safe_float(get_scalar("min_avg_score")),
         reviewed=reviewed,
@@ -381,7 +381,7 @@ def network_query_api(request):
         {
             "proteins": "<newline/space-separated seed identifiers>",
             ...shared FilterBox params (show, min_score, max_score, source[],
-               experiment[], interaction_type[], tissue[], min_rpkm,
+               experiment[], interaction_type[], tissue[], min_tpm,
                min_degree, min_avg_score, reviewed, isoform_mode)
         }
 
@@ -629,7 +629,7 @@ def _filtered_protein_qs(request):
         base_qs = base_qs.filter(isoform__isnull=False)
 
     if f.tissue_ids:
-        base_qs = base_qs.expressed_in(f.tissue_ids, min_rpkm=f.min_rpkm)
+        base_qs = base_qs.expressed_in(f.tissue_ids, min_tpm=f.min_tpm)
 
     if f.source_ids:
         through = Interaction.sources.through.objects.filter(source_id__in=f.source_ids)
@@ -877,7 +877,7 @@ def browse_proteins_api(request):
     GET /api/browse/proteins/?offset=<int>&limit=<int>&q=<text>
                     &sort=<key>&dir=<asc|desc>
                     &tissue=<id>&tissue=<id>&source=<id>&source=<id>
-                    &min_degree=<int>&min_score=<float>&min_rpkm=<float>
+                    &min_degree=<int>&min_score=<float>&min_tpm=<float>
 
     Returns a single page of proteins (server-side pagination):
     {"total": <int>, "proteins": [ {id, symbol, uniprot_id, entrez_id,
@@ -1261,7 +1261,7 @@ def _validate_split_params(body: dict) -> tuple[dict | None, str | None]:
             "type_ids": [int(x) for x in body.get("type_ids") or []],
             # protein-level
             "tissue_ids": [int(x) for x in body.get("tissue_ids") or []],
-            "min_rpkm": float(body.get("min_rpkm", 0.0)),
+            "min_tpm": float(body.get("min_tpm", 0.0)),
             "min_degree_global": int(min_degree or 0),
             "min_avg_score": float(body.get("min_avg_score", 0.0)),
             "isoform_mode": parse_isoform_mode(body.get("isoform_mode")),
@@ -1284,8 +1284,8 @@ def _validate_split_params(body: dict) -> tuple[dict | None, str | None]:
         return None, "min_avg_score must be between 0.0 and 1.0"
     if params["min_degree_global"] < 0:
         return None, "min_degree_global must be >= 0"
-    if params["min_rpkm"] < 0:
-        return None, "min_rpkm must be >= 0"
+    if params["min_tpm"] < 0:
+        return None, "min_tpm must be >= 0"
     return params, None
 
 
@@ -1313,7 +1313,7 @@ def ml_splits_view(request):
         "type_ids": [int(t) for t in request.GET.getlist("type") if t.isdigit()],
         # protein-level
         "tissue_ids": [int(t) for t in request.GET.getlist("tissue") if t.isdigit()],
-        "min_rpkm": _float("min_rpkm"),
+        "min_tpm": _float("min_tpm"),
         # Accept the pre-rename key too — Browse links and bookmarks may carry it.
         "min_degree_global": request.GET.get(
             "min_degree_global", request.GET.get("min_degree", "")
@@ -1348,6 +1348,66 @@ def browse_splits_create(request):
     return JsonResponse({"job_id": str(job.id), "status": job.status}, status=202)
 
 
+@require_POST
+def browse_splits_raw_data(request):
+    """ "Download raw data": package the filtered interaction set for the
+    standalone public pipeline, without running Nextflow.
+
+    Deliberately synchronous — no Celery. The export is a streaming DB read
+    and a CSV write, nothing like the two-hour pipeline run `run_split_job`
+    supervises, so this must never queue behind one on the single-worker
+    queue (see services/split_queue.py). The job still gets a real SplitJob
+    row so it shows up in the same shareable/downloadable run-history UI a
+    real split uses; `job_type` is how the frontend and `browse_splits_status`
+    tell the two apart.
+    """
+    from .services import raw_export
+    from .services.generate_splits import SplitParams
+
+    body, err = _parse_json_body(request)
+    if err:
+        return err
+    params_dict, invalid = _validate_split_params(body)
+    if invalid:
+        return JsonResponse({"error": invalid}, status=400)
+
+    now = timezone.now()
+    job = SplitJob.objects.create(
+        params=params_dict,
+        job_type="RAW_DATA",
+        status="RUNNING",
+        started_at=now,
+    )
+    params = SplitParams.from_payload(params_dict)
+    zip_path, summary = raw_export.package_raw_data(params, job.id)
+
+    if summary["interactions_exported"] == 0:
+        job.status = "FAILED"
+        job.step = "failed"
+        job.error = "The selected filters leave no interactions to export."
+        job.finished_at = timezone.now()
+        job.save(update_fields=["status", "step", "error", "finished_at"])
+        return JsonResponse({"job_id": str(job.id), "status": job.status}, status=201)
+
+    job.status = "DONE"
+    job.step = "done"
+    job.progress = 1.0
+    job.zip_path = zip_path
+    job.summary = summary
+    job.finished_at = timezone.now()
+    job.save(
+        update_fields=[
+            "status",
+            "step",
+            "progress",
+            "zip_path",
+            "summary",
+            "finished_at",
+        ]
+    )
+    return JsonResponse({"job_id": str(job.id), "status": job.status}, status=201)
+
+
 def _protein_filtered_qs(params):
     """Protein queryset after the protein-level filters (for the stats box)."""
     pqs = Protein.objects.all()
@@ -1358,7 +1418,7 @@ def _protein_filtered_qs(params):
     return apply_protein_level_filters(
         pqs,
         tissue_ids=params.tissue_ids,
-        min_rpkm=params.min_rpkm,
+        min_tpm=params.min_tpm,
         min_degree=params.min_degree_global,
         min_avg_score=params.min_avg_score,
     )
@@ -1561,6 +1621,7 @@ def browse_splits_status(request, job_id):
     return JsonResponse(
         {
             "status": job.status,
+            "job_type": job.job_type,
             "step": job.step,
             "progress": job.progress,
             "params": job.params,

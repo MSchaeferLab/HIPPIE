@@ -33,7 +33,7 @@ class UpdateTissueDataCommandTest(TestCase):
         gene = Gene.objects.create(entrez_id=101, entrez_name="GENE1")
         tissue = Tissue.objects.create(name="Liver")
         gene_tissue = GeneTissue.objects.create(
-            gene=gene, tissue=tissue, median_rpkm=2.0
+            gene=gene, tissue=tissue, median_tpm=2.0
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -81,7 +81,7 @@ class UpdateTissueDataCommandTest(TestCase):
             )
 
         gene_tissue.refresh_from_db()
-        self.assertEqual(gene_tissue.median_rpkm, 5.0)
+        self.assertEqual(gene_tissue.median_tpm, 5.0)
 
 
 # ---------------------------------------------------------------------------

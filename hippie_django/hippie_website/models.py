@@ -190,7 +190,7 @@ class GeneTissue(models.Model):
     """
     Quantitative gene-tissue expression record from GTEx.
 
-    Stores the median RPKM measured for one gene in one tissue.
+    Stores the median TPM measured for one gene in one tissue.
     """
 
     gene = models.ForeignKey(
@@ -199,7 +199,7 @@ class GeneTissue(models.Model):
     tissue = models.ForeignKey(
         Tissue, on_delete=models.CASCADE, related_name="expressed_genes"
     )
-    median_rpkm = models.FloatField(verbose_name="rpkm")
+    median_tpm = models.FloatField(verbose_name="tpm")
 
     class Meta:
         db_table = "gene2tissue"
@@ -599,8 +599,17 @@ class SplitJob(models.Model):
         ("FAILED", "FAILED"),
         ("CANCELLED", "CANCELLED"),
     ]
+    JOB_TYPE = [
+        ("RUN", "RUN"),
+        ("RAW_DATA", "RAW_DATA"),
+    ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     status = models.CharField(max_length=10, choices=STATUS, default="PENDING")
+    # RUN = the full Nextflow pipeline (queued, one at a time, tens of
+    # minutes to two hours). RAW_DATA = the "Download raw data" fast path:
+    # built synchronously in the request, never touches the Celery queue, so
+    # it can never sit behind a RUN job. See services/raw_export.py.
+    job_type = models.CharField(max_length=10, choices=JOB_TYPE, default="RUN")
     params = models.JSONField()
     progress = models.FloatField(default=0.0)
     step = models.CharField(max_length=40, blank=True)

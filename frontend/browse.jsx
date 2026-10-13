@@ -204,7 +204,7 @@ function App() {
       passList("source", f.source, meta.sources);
       if (f.minDegree > 0) p.set("min_degree_global", f.minDegree);
       if (f.minAvgScore > 0) p.set("min_avg_score", f.minAvgScore);
-      if (tissueNarrows && f.minRpkm > 0) p.set("min_rpkm", f.minRpkm);
+      if (tissueNarrows && f.minTpm > 0) p.set("min_tpm", f.minTpm);
       if (f.isoformMode !== "general") p.set("isoform_mode", f.isoformMode);
     } else {
       if (f.minScore > 0) p.set("min_score", f.minScore);

@@ -448,7 +448,7 @@ def write_readme(dest: Path, params: SplitParams, summary: RunSummary) -> Path:
         _listing("experiment types", experiments),
         _listing("interaction types", types),
         _listing("tissues", tissues),
-        f"  min RPKM: {params.min_rpkm}\n",
+        f"  min TPM: {params.min_tpm}\n",
         f"  min global degree: {params.min_degree_global}\n",
         f"  min average score: {params.min_avg_score}\n",
         f"  isoform mode: {params.isoform_mode}\n\n",

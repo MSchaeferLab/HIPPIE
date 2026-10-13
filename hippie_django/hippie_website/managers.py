@@ -103,13 +103,13 @@ class ProteinQuerySet(models.QuerySet):
     # ------------------------------------------------------------------
 
     def expressed_in(
-        self, tissue_ids: list[int], min_rpkm: float | None = None
+        self, tissue_ids: list[int], min_tpm: float | None = None
     ) -> "ProteinQuerySet":
         """Filter to proteins expressed in *any* of the given tissues."""
-        if min_rpkm is not None:
+        if min_tpm is not None:
             return self.filter(
                 gene__tissue_expression__tissue_id__in=tissue_ids,
-                gene__tissue_expression__median_rpkm__gte=min_rpkm,
+                gene__tissue_expression__median_tpm__gte=min_tpm,
             ).distinct()
         return self.filter(gene__tissue_expression__tissue_id__in=tissue_ids).distinct()
 
@@ -121,8 +121,8 @@ class ProteinManager(models.Manager):
     def resolve(self, identifier: str):
         return self.get_queryset().resolve(identifier)
 
-    def expressed_in(self, tissue_ids, min_rpkm=None):
-        return self.get_queryset().expressed_in(tissue_ids, min_rpkm)
+    def expressed_in(self, tissue_ids, min_tpm=None):
+        return self.get_queryset().expressed_in(tissue_ids, min_tpm)
 
 
 # ============================================================================
@@ -206,7 +206,7 @@ class InteractionQuerySet(models.QuerySet):
     # ------------------------------------------------------------------
 
     def in_tissues(
-        self, tissue_ids: list[int], min_rpkm: float | None = None
+        self, tissue_ids: list[int], min_tpm: float | None = None
     ) -> "InteractionQuerySet":
         """
         Keep interactions where *both* proteins are expressed in at least
@@ -215,8 +215,8 @@ class InteractionQuerySet(models.QuerySet):
         from . import models as m
 
         gt_qs = m.GeneTissue.objects.filter(tissue_id__in=tissue_ids)
-        if min_rpkm is not None:
-            gt_qs = gt_qs.filter(median_rpkm__gte=min_rpkm)
+        if min_tpm is not None:
+            gt_qs = gt_qs.filter(median_tpm__gte=min_tpm)
         expressed = gt_qs.values_list("gene__proteins__id", flat=True)
 
         return self.filter(

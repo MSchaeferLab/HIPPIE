@@ -61,6 +61,8 @@ const TEAL  = "var(--hippie-teal)";
 const RED   = "var(--hippie-accent, #e8590c)";
 const GREY  = "var(--hippie-ink-muted)";
 
+const PIPELINE_WIKI_URL = "https://github.com/bionetslab/ppi-splitting-pipeline/wiki";
+
 function toNum(v, fallback) {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : fallback;
@@ -75,7 +77,7 @@ const seedList = (handoff, options) =>
 
 const PROTEIN_INIT = {
   tissue:          seedList(initial.tissue_ids, meta.tissues),
-  minRpkm:         toNum(initial.min_rpkm, 0),
+  minTpm:          toNum(initial.min_tpm, 0),
   // Renamed from min_degree — it gates the global Protein.degree, not the degree
   // inside the filtered subgraph. The old key still arrives from older links.
   minDegree:       parseInt(initial.min_degree_global ?? initial.min_degree) || 0,
@@ -105,8 +107,8 @@ const PROTEIN_STATS_HELP = DL([
   ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when the isoform mode is “Isoforms” or “Both”."],
   ["Median degree (filtered set)", "Median number of surviving interactions per protein, counted only over edges that pass the current filter. This is a different quantity from the “Min. degree in all of HIPPIE” filter on the left, which is measured across the whole database — under a narrow source or score filter this number is usually far lower than that threshold."],
   ["Median avg score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
-  ["Proteins filtered out", "Proteins removed by the protein-level filter (tissue, RPKM, min-degree, min-avg-score, isoform exclusion) relative to the full protein table. Separate from “Orphaned by filter”, which counts proteins that pass the protein filter but lose all edges."],
-  ["Orphaned by filter", "Proteins that pass the protein-level filter (tissue, RPKM, …) but lost every interaction to the score/type/source filter, leaving degree 0. Excluded from the medians above."],
+  ["Proteins filtered out", "Proteins removed by the protein-level filter (tissue, TPM, min-degree, min-avg-score, isoform exclusion) relative to the full protein table. Separate from “Orphaned by filter”, which counts proteins that pass the protein filter but lose all edges."],
+  ["Orphaned by filter", "Proteins that pass the protein-level filter (tissue, TPM, …) but lost every interaction to the score/type/source filter, leaving degree 0. Excluded from the medians above."],
   ["Node degree distribution", "Histogram of per-protein interaction counts (degree) under the current filter."],
 ]);
 
@@ -276,7 +278,7 @@ function paramSummary(p) {
   if (p.experiment_ids?.length) parts.push(`${p.experiment_ids.length} exp`);
   if (p.type_ids?.length)       parts.push(`${p.type_ids.length} type`);
   if (p.tissue_ids?.length)     parts.push(`${p.tissue_ids?.length} tissue`);
-  if (p.min_rpkm > 0)           parts.push(`min rpkm≥${p.min_rpkm}`);
+  if (p.min_tpm > 0)            parts.push(`min tpm≥${p.min_tpm}`);
   const minDeg = p.min_degree_global ?? p.min_degree;   // pre-rename jobs
   if (minDeg > 0)               parts.push(`min global deg≥${minDeg}`);
   if (p.min_avg_score > 0)      parts.push(`min avg≥${toNum(p.min_avg_score, 0).toFixed(2)}`);
@@ -455,7 +457,17 @@ function RunCard({ jobId }) {
         <span className="mono" style={{fontSize:".72rem", color:GREY, wordBreak:"break-all"}}>
           Job ID: {jobId}
         </span>
-        <StatusPill status={status} />
+        <span className="d-flex align-items-center gap-2">
+          {data?.job_type === "RAW_DATA" && (
+            <span style={{
+              background:"transparent", color:GREY, border:`1px solid var(--hippie-border)`,
+              borderRadius:"100px", padding:".12rem .6rem", fontSize:".62rem",
+              fontFamily:"var(--font-mono)", fontWeight:700, textTransform:"uppercase",
+              letterSpacing:".08em", whiteSpace:"nowrap",
+            }}>Raw data</span>
+          )}
+          <StatusPill status={status} />
+        </span>
       </div>
       {recap && (
         <p className="mb-2 mono" style={{fontSize:".72rem", color:GREY}}>{recap}</p>
@@ -518,7 +530,65 @@ function RunCard({ jobId }) {
         <p className="mb-0 text-muted-sm">Cancelled before it finished — nothing to download.</p>
       )}
 
-      {data && status === "DONE" && (
+      {data && status === "DONE" && data.job_type === "RAW_DATA" && (
+        <>
+          <div className="d-flex gap-2 flex-wrap align-items-center">
+            <a href={data.download_url} style={{
+              display:"inline-block", background:TEAL, color:"#fff", border:"none",
+              borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
+              fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", textDecoration:"none",
+            }}>
+              <i className="bi bi-download me-1"></i> Download ZIP
+            </a>
+            <button type="button" onClick={shareLink} title="Copy a shareable link to this run" style={{
+              display:"inline-block", background:"transparent", color:TEAL,
+              border:`1px solid ${TEAL}`, borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
+              fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", cursor:"pointer",
+            }}>
+              <i className={`bi ${copied ? "bi-check2" : "bi-share"} me-1`}></i>
+              {copied ? "Copied!" : "Share Link"}
+            </button>
+            <a href={PIPELINE_WIKI_URL} target="_blank" rel="noopener" style={{
+              display:"inline-block", background:"transparent", color:GREY,
+              border:`1px solid var(--hippie-border)`, borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
+              fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", textDecoration:"none",
+            }}>
+              <i className="bi bi-box-arrow-up-right me-1"></i> Pipeline Wiki
+            </a>
+          </div>
+          {data.summary?.pipeline_command && (
+            <>
+              <p className="mb-1 mt-3 text-muted-sm" style={{fontSize:".72rem"}}>
+                Unzip the download so it sits next to your own ppi-splitting-pipeline
+                checkout — both folders as siblings under the same parent directory,
+                not one inside the other. Then, from inside the unzipped folder:
+              </p>
+              <pre className="mono mb-0" style={{
+                background:"var(--hippie-bg)", border:"1px solid var(--hippie-border)",
+                borderRadius:"var(--radius-md)", padding:".6rem .8rem", fontSize:".78rem",
+                whiteSpace:"pre-wrap", wordBreak:"break-all",
+              }}>{data.summary.pipeline_command}</pre>
+            </>
+          )}
+          {data.summary && (
+            <p className="mono mt-2 mb-0" style={{fontSize:".72rem", color:GREY}}>
+              {(data.summary.interactions_exported ?? 0).toLocaleString()} positive interactions exported
+              {data.summary.negatives_exported > 0 ? (
+                <>
+                  {" · "}{data.summary.negatives_exported.toLocaleString()} curated negatives exported
+                  as candidates — negative sampling is restricted to them; see README.txt to sample
+                  randomly instead
+                </>
+              ) : (
+                <> · no curated non-interactions matched your filters — the pipeline will sample
+                  negatives from the full pair space</>
+              )}
+            </p>
+          )}
+        </>
+      )}
+
+      {data && status === "DONE" && data.job_type !== "RAW_DATA" && (
         <>
           <div className="d-flex gap-2 flex-wrap align-items-center">
             <a href={data.download_url} style={{
@@ -591,6 +661,8 @@ function App() {
   const [runIds,      setRunIds]      = useState([]);
   const [submitting,  setSubmitting]  = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  const [rawSubmitting,  setRawSubmitting]  = useState(false);
+  const [rawSubmitError, setRawSubmitError] = useState(null);
   // Mirrors localStorage exactly — deep-linked (?jobs=) ids are shown via
   // runIds but never enter storedIds, so visiting a shared link never
   // persists someone else's run ids into this browser's history.
@@ -641,7 +713,7 @@ function App() {
       type_ids:   listNarrows(interactionFilters.type, meta.interaction_types) ? interactionFilters.type : [],
       // protein-level
       tissue_ids: listNarrows(proteinFilters.tissue, meta.tissues) ? proteinFilters.tissue : [],
-      min_rpkm:   proteinFilters.minRpkm,
+      min_tpm:    proteinFilters.minTpm,
       min_degree_global: proteinFilters.minDegree,
       min_avg_score: proteinFilters.minAvgScore,
       isoform_mode: proteinFilters.isoformMode,
@@ -691,9 +763,30 @@ function App() {
     }
   }
 
-  // A run can only be generated once statistics are fresh (Generate stays grey +
-  // disabled until then), and never while a create request is in flight.
+  async function handleDownloadRawData() {
+    setRawSubmitting(true);
+    setRawSubmitError(null);
+    try {
+      const r = await fetch(cfg.rawDataUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
+        body: JSON.stringify(buildPayload()),
+      });
+      if (!r.ok) throw await r.json().catch(() => ({ detail: `Server error ${r.status}` }));
+      const data = await r.json();
+      addRun(data.job_id);  // prepends a self-polling RunCard — already DONE/FAILED on arrival
+    } catch (err) {
+      setRawSubmitError(err.detail || JSON.stringify(err));
+    } finally {
+      setRawSubmitting(false);
+    }
+  }
+
+  // A run/raw-data download can only be started once statistics are fresh
+  // (both stay grey + disabled until then), and never while their own
+  // request is in flight.
   const canGenerate = statsFresh && !submitting;
+  const canDownloadRaw = statsFresh && !rawSubmitting;
 
   // Calculate is teal until stats are fresh, then greys out. Generate is greyed
   // out + disabled until stats are fresh, then turns teal (enabled).
@@ -711,6 +804,15 @@ function App() {
     fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem",
     cursor: canGenerate ? "pointer" : "not-allowed", opacity: submitting ? .7 : 1,
   };
+  // Same fill/grey-out treatment as Generate in every state — the two are
+  // parallel actions on the same filter set, so they must read as equals.
+  const rawStyle = {
+    background: statsFresh ? TEAL : "var(--hippie-border)",
+    color: statsFresh ? "#fff" : GREY,
+    border:"none", borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
+    fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem",
+    cursor: canDownloadRaw ? "pointer" : "not-allowed", opacity: rawSubmitting ? .7 : 1,
+  };
 
   return (
     <div>
@@ -726,6 +828,10 @@ function App() {
            <strong> tens of minutes to two hours</strong>. You get four files:
            <code>train.csv</code>, <code>val.csv</code>, <code>test_balanced.csv</code> (all 1:1)
            and <code>test_realistic.csv</code> (1:10, uniform negatives).</p>
+        <p style={{fontSize:".85rem"}}>Rather run the pipeline yourself? <strong>Download Raw
+           Data</strong> exports just the filtered interactions and a ready-made samplesheet —
+           unzip it next to your own ppi-splitting-pipeline checkout (as sibling folders, not
+           nested inside each other) and run the command it gives you.</p>
       </div>
 
       {/* Nothing else on this page links to the ML guide, and a split built
@@ -754,16 +860,19 @@ function App() {
         <div className="col-lg-6"><InteractionStatsBox stats={interStats} loading={statsLoading} error={statsError} /></div>
       </div>
 
-      <div className="d-flex gap-2 align-items-center">
+      <div className="d-flex gap-2 align-items-center flex-wrap">
         <button type="button" onClick={handleCalculateStats} disabled={statsLoading} style={calcStyle}>
           <i className="bi bi-calculator me-1"></i> Calculate Statistics
+        </button>
+        <button type="button" onClick={handleDownloadRawData} disabled={!canDownloadRaw} style={rawStyle}>
+          <i className="bi bi-play-fill me-1"></i> Download Raw Data
         </button>
         <button type="button" onClick={handleGenerate} disabled={!canGenerate} style={genStyle}>
           <i className="bi bi-play-fill me-1"></i> Generate Splits
         </button>
         {!statsFresh && !statsLoading && (
           <span className="text-muted-sm" style={{color:GREY}}>
-            Tip: Calculate statistics before generating your split!
+            Tip: Calculate statistics before generating your split or downloading the raw data!
           </span>
         )}
       </div>
@@ -772,6 +881,27 @@ function App() {
         <div className="hippie-card mb-3 mt-3" style={{borderColor:RED}}>
           <p className="mb-0" style={{color:RED, fontSize:".85rem"}}>
             <i className="bi bi-exclamation-circle me-1"></i>{submitError}
+          </p>
+        </div>
+      )}
+
+      {rawSubmitError && (
+        <div className="hippie-card mb-3 mt-3" style={{borderColor:RED}}>
+          <p className="mb-0" style={{color:RED, fontSize:".85rem"}}>
+            <i className="bi bi-exclamation-circle me-1"></i>{rawSubmitError}
+          </p>
+        </div>
+      )}
+
+      {/* Raw data is built synchronously — no job exists to poll until the
+          request returns, so without this the click looks like nothing
+          happened for however long the export takes. Same spinner + wording
+          as the stats "Calculating…" placeholder above. */}
+      {rawSubmitting && (
+        <div className="hippie-card mb-3 mt-3" style={{borderTop:`3px solid ${TEAL}`}}>
+          <p className="mb-0 text-muted-sm" style={{whiteSpace:"pre-line"}}>
+            <span className="spinner-sm me-1"></span>
+            {"Calculating…\nexporting your filtered interactions — this can take a minute for large filters"}
           </p>
         </div>
       )}
