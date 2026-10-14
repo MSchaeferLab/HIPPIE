@@ -1,4 +1,5 @@
 {% extends "hippie_website/base.html" %}
+{% load static %}
 {% block title %}Information{% endblock %}
 {% block react_cdn %}{% endblock %}
 
@@ -39,7 +40,8 @@
       <li><a href="#network">Network construction</a></li>
       <li><a href="#browsing">Browsing the HIPPIE proteome</a></li>
       <li><a href="#download">Download the repository</a></li>
-      <li><a href="#example">Example of a HIPPIE workflow</a></li>
+      <li><a href="#example1">Example of a disease-centered HIPPIE workflow</a></li>
+      <li><a href="#example2">Example of a custom HIPPIE PPI network</a></li>
       <li><a href="#sources">Sources</a></li>
       <li><a href="#resources">Resource versions</a></li>
       <li><a href="#isoforms">Isoforms</a></li>
@@ -60,11 +62,11 @@
   <div class="hippie-card">
     <h4 id="welcome" class="section-label">Welcome to HIPPIE</h4>
     <p>
-      Welcome to HIPPIE (the Human Integrated Protein Protein Interaction rEference)! We provide
-      confidence scored and functionally annotated human protein-protein interactions (PPIs). This
+      Welcome to HIPPIE (the Human Integrated Protein–Protein Interaction rEference)! We provide
+      confidence-scored and functionally annotated human protein-protein interactions (PPIs). This
       page contains details on the information stored in HIPPIE and the multiple ways to access it.
-      First time users might want to start with the <a href="#example">walk-through example</a> to
-      get an idea what types of analyses can be performed with HIPPIE.
+      First-time users might want to start with the <a href="#example1">walk-through example</a> to
+      get an idea of what types of analyses can be performed with HIPPIE.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
@@ -81,20 +83,20 @@
     </p>
     <ul>
       <li><strong>Study score</strong> ($S_s$): Saturating score based on the number of studies reporting the interaction.</li>
-      <li><strong>Experimental score</strong> ($S_t$): Saturating based on the summed score of different methods detecting the interaction.</li>
-      <li><strong>Orthologous score</strong> ($S_o$): Saturating based on the number of species orthologous interactions have been observed.</li>
+      <li><strong>Experimental score</strong> ($S_t$): Saturating score based on the summed score of different methods detecting the interaction.</li>
+      <li><strong>Orthologous score</strong> ($S_o$): Saturating score based on the number of species in which orthologous interactions have been observed.</li>
     </ul>
     <p>
       The score is calculated as a weighted sum from each component as follows:
       $$
         S = w_sS_s + w_oS_o + w_tS_t
       $$
-      Where $w_i$ is the weight of each components contribution to the final score. Each individual component's saturation score, $S_i$, is calculated as:
+      Where $w_i$ is the weight of each component's contribution to the final score. Each individual component's saturation score, $S_i$, is calculated as:
       $$
         S_i = \frac{2}{1 + e^{-a_i n}} - 1
       $$
       Where $n$ is either the number of studies, the scored sum of unique experimental methods detecting the interaction or the number of species
-      in which an orthologous interaction was detected. While $a_i$ is each components saturation parameter (how fast the score saturates with increasing evidence).
+      in which an orthologous interaction was detected, and $a_i$ is each component's saturation parameter (how fast the score saturates with increasing evidence).
       The values of $a_i$ and $w_i$ were estimated in the <a href="https://doi.org/10.1371/journal.pone.0031826" target="_blank" rel="noopener">HIPPIE 1.0 paper</a>:
       $w_s = 0.6$, $w_t = 0.3$, $w_o = 0.1$ and $a_s = 2.3$, $a_t = 0.2$, $a_o = 1.6$.
       The weights sum to 1, so $S$ lies between 0 and 1. Evidence is pooled per gene pair, so the
@@ -103,7 +105,7 @@
     <p>
       Currently, the mapping of orthologous interactions is based on the <a href="https://www.alliancegenome.org/downloads#orthology" target="_blank" rel="noopener">Alliance of Genome Resources</a>
       (<a href="https://doi.org/10.1093/genetics/iyae049" target="_blank" rel="noopener">DOI</a>),
-      which consists of 7 species. As their resource provides human orthologs as reported by different methods, we consider an agreement of 80% among methods as orthologous.
+      which consists of 7 species. As their resource provides human orthologs as reported by different methods, we consider a pair orthologous if at least 80% of methods agree.
       The non-human interactions are obtained from the <a href="https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/" target="_blank" rel="noopener">IntAct database</a>.
       The scoring of experimental methods can be found under the <a href="{% url 'hippie_website:download' %}">Download</a> section.
     </p>
@@ -195,20 +197,22 @@
   </div>
 </div>
 
-{# ── Example workflow ── #}
+{# ── Example workflow disease ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <h4 id="example" class="section-label">Example of a HIPPIE workflow</h4>
+    <h4 id="example1" class="section-label">Example of a disease-centered HIPPIE workflow</h4>
     <p>
       To demonstrate HIPPIE's functionality, we give a simple example of a typical query.
     </p>
     <p>
-      To investigate the molecular context of Huntington’s Disease (HD), huntingtin (HTT) serves
+      To investigate the molecular context of Huntington’s disease (HD), huntingtin (HTT) serves
       as the primary reference gene. To get an overview of all its interaction partners, open the
       <a href="{% url 'hippie_website:index' %}?q=HTT">protein query for HTT</a> and filter it
       with your own parameters. We observe 1,116 interaction partners, 1,276 if we include
       isoforms.
     </p>
+    {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/protein_query.png" alt="Protein query for HTT showing the number of results and the Filters button" caption="Protein query for HTT. The result count is shown above the table; the Filters button opens the filter panel." %}
+    {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/filters.png" alt="Filter panel with the isoform filter set to Both" caption="Filter panel. The isoform filter selects general proteins, isoforms, or both." %}
     <p>
       The interaction between HTT and HAP1 shows isoform-specific information, and in the
       <a href="{% url 'hippie_website:interaction_query' %}">interaction query</a> we can query
@@ -219,6 +223,8 @@
       information we have on the interaction, with links to, for example, the publications or an
       isoform-specific detail view in DIGGER.
     </p>
+    {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/interaction_query.png" alt="Interaction query with HTT HAP1 entered as a protein pair" caption="Interaction query for the pair HTT–HAP1, entered as free text or uploaded as a TSV/CSV file." %}
+    {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/interaction_detail.png" alt="Interaction results for HTT and HAP1 and the evidence page for HAP1 isoform 2" caption="Results for HTT–HAP1 and the evidence page for HAP1 isoform 2 (P54257-2). The score is per gene pair; publications, experiment types and external links are isoform specific." %}
     <p>
       To expand this view into a broader interaction network around HD-associated proteins, we
       gathered additional seed proteins relevant to HD from the literature: HAP40, HAP1 and HIP1,
@@ -226,6 +232,41 @@
       <a href="{% url 'hippie_website:network_query' %}">network query</a> reveals 2,300
       interactions, seven of which exceed the confidence score of the benchmark HTT–HAP1
       interaction.
+    </p>
+    {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/network_query.png" alt="Network query for HD seed proteins with a Cytoscape graph and interaction table" caption="Network query for the HD seed set. The graph shows the top 300 interactions by score; the table below lists all of them." %}
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+
+{# ── Example workflow custom network ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="example2" class="section-label">Example of a custom HIPPIE PPI network</h4>
+    <p>
+      Custom PPI networks can be extracted from HIPPIE using the Browse mode.
+      For example, to extract a network of yeast two-hybrid (Y2H) interactions between proteins expressed in the brain.
+    </p>
+    <p>
+      First, we go to the <a href="{% url 'hippie_website:browse' %}">Browse mode</a> and
+      select "Proteins", where we filter for proteins expressed in the brain.
+      After applying the filter, we can download the list of proteins as a TSV file called "hippie_browse_proteins.tsv".
+      This file contains the UniProt accessions of all proteins with a median TPM at or above the set threshold in
+      any of the selected brain tissues.
+    </p>
+    {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/browse_proteins.png" alt="Browse page with the Proteins mode and the Filters button highlighted" caption="Browse mode: select Proteins, then open the filters." %}
+    {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/browse_protein_filters.png" alt="Tissue expression filter with all brain tissues selected and a minimum median TPM of 10" caption="Tissue expression filter: deselect all tissues, select all brain tissues and set the minimum median TPM." %}
+
+    <p>
+      Second, to obtain our Y2H interactions we select "Interactions" at the top of the screen.
+      We then open the filter options and deselect all types by pressing "none" at the top of the
+      "Experiment type" filter. Subsequently, we click "all" on the "Two-hybrid &amp; complementation" option.
+      We apply the filter by pressing "search" and download the interactions by pressing the TSV button.
+      This will download a file called "hippie_browse_interactions.tsv" containing all Y2H interactions.
+    </p>
+    {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/browse_interactions.png" alt="Browse interactions with only two-hybrid experiment types selected and the TSV download button" caption="Browse interactions: keep only the two-hybrid &amp; complementation methods, search, and download the TSV." %}
+    <p>
+      Given these two files, we can now extract the Y2H interactions between proteins expressed in the brain, ready for analysis.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
