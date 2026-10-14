@@ -75,35 +75,37 @@
   <div class="hippie-card">
     <h4 id="scoring" class="section-label">Confidence scoring of experimentally measured interactions</h4>
     <p>
-      A core component of HIPPIE is the confidence scoring of interactions based on the amount and
+      A core component of HIPPIE is the confidence scoring ($S$) of interactions based on the amount and
       reliability of evidence supporting them.
+      This score is calculated as a weighted sum of evidence from three sources:
     </p>
-    <p>
-      This score is calculated as a weighted sum of the
-      number of studies in which an interaction was detected, the number and quality of experimental
-      techniques used to measure an interaction and the number of non-human organisms in which an
-      interaction was reproduced:
-    </p>
-    <div class="hippie-card--muted mb-3 score-formula">
-      S = 0.6 · f(n<sub>pub</sub>, 2.3) + 0.3 · f(Σq<sub>exp</sub>, 0.2) + 0.1 · f(n<sub>org</sub>, 1.6)
-      <br>
-      f(x, a) =
-      <span class="frac"><span>2</span><span>1 + e<sup>−a·x</sup></span></span>
-      − 1
-    </div>
     <ul>
-      <li><strong>n<sub>pub</sub></strong> — number of publications (PubMed ids) reporting the interaction.</li>
-      <li><strong>Σq<sub>exp</sub></strong> — sum of the quality scores of the distinct experimental
-        techniques used to detect it (see the technique scores on the
-        <a href="{% url 'hippie_website:download' %}">download page</a>).</li>
-      <li><strong>n<sub>org</sub></strong> — number of non-human organisms in which the interaction
-        was observed between orthologs.</li>
+      <li><strong>Study score</strong> ($S_s$): Saturating score based on the number of studies reporting the interaction.</li>
+      <li><strong>Experimental score</strong> ($S_t$): Saturating based on the summed score of different methods detecting the interaction.</li>
+      <li><strong>Orthologous score</strong> ($S_o$): Saturating based on the number of species orthologous interactions have been observed.</li>
     </ul>
     <p>
-      The saturating function <em>f</em> maps each count from 0 towards 1, with the constant
-      <em>a</em> setting how quickly additional evidence stops adding confidence. The weights sum
-      to 1, so <em>S</em> lies between 0 and 1. Evidence is pooled per gene pair, so the
+      The score is calculated as a weighted sum from each component as follows:
+      $$
+        S = w_sS_s + w_oS_o + w_tS_t
+      $$
+      Where $w_i$ is the weight of each components contribution to the final score. Each individual component's saturation score, $S_i$, is calculated as:
+      $$
+        S_i = \frac{2}{1 + e^{-a_i n}} - 1
+      $$
+      Where $n$ is either the number of studies, the scored sum of unique experimental methods detecting the interaction or the number of species
+      in which an orthologous interaction was detected. While $a_i$ is each components saturation parameter (how fast the score saturates with increasing evidence).
+      The values of $a_i$ and $w_i$ were estimated in the <a href="https://doi.org/10.1371/journal.pone.0031826" target="_blank" rel="noopener">HIPPIE 1.0 paper</a>:
+      $w_s = 0.6$, $w_t = 0.3$, $w_o = 0.1$ and $a_s = 2.3$, $a_t = 0.2$, $a_o = 1.6$.
+      The weights sum to 1, so $S$ lies between 0 and 1. Evidence is pooled per gene pair, so the
       interactions of a gene's isoforms are scored on the evidence of the gene pair.
+    </p>
+    <p>
+      Currently, the mapping of orthologous interactions is based on the <a href="https://www.alliancegenome.org/downloads#orthology" target="_blank" rel="noopener">Alliance of Genome Resources</a>
+      (<a href="https://doi.org/10.1093/genetics/iyae049" target="_blank" rel="noopener">DOI</a>),
+      which consists of 7 species. As their resource provides human orthologs as reported by different methods, we consider an agreement of 80% among methods as orthologous.
+      The non-human interactions are obtained from the <a href="https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/" target="_blank" rel="noopener">IntAct database</a>.
+      The scoring of experimental methods can be found under the <a href="{% url 'hippie_website:download' %}">Download</a> section.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
@@ -364,4 +366,18 @@
   </div>
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.19.0/katex.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.19.0/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.19.0/contrib/auto-render.min.js"></script>
+<script>
+  renderMathInElement(document.body, {
+    delimiters: [
+      {left: '$$', right: '$$', display: true},
+      {left: '$', right: '$', display: false}
+    ]
+  });
+</script>
 {% endblock %}
