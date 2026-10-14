@@ -19,6 +19,11 @@ from django.urls import reverse
 from ..models import Interaction, Isoform, NonInteraction, OrthologInteraction, Protein
 
 
+def alphafold_url(model_id: str | None) -> str | None:
+    """AlphaFold DB entry page for a complex prediction id, or None."""
+    return f"https://alphafold.ebi.ac.uk/entry/{model_id}" if model_id else None
+
+
 def protein_detail_ctx(protein: Protein) -> dict:
     """Interactor context dict for the detail templates (protein_pair_base.html):
     the raw protein plus its display accession, Entrez id, and gene symbol."""
@@ -159,6 +164,7 @@ def interaction_detail_context(pk: int) -> dict:
         "pair_label": "Interaction Evidence",
         "is_noninteraction": False,
         "digger": digger_ctx(p1, p2),
+        "alphafold_url": alphafold_url(interaction.alphafold_model_id),
     }
 
 
@@ -196,6 +202,7 @@ def noninteraction_detail_context(pk: int) -> dict:
         "pair_label": "Non-Interaction Evidence",
         "is_noninteraction": True,
         "digger": digger_ctx(p1, p2),
+        "alphafold_url": None,
     }
 
 
@@ -259,6 +266,8 @@ def interaction_detail_payload(pk: int) -> dict:
         "protein_a": _protein_payload(p1),
         "protein_b": _protein_payload(p2),
         "involves_isoform": interaction.involves_isoform,
+        "alphafold_model_id": interaction.alphafold_model_id,
+        "alphafold_url": alphafold_url(interaction.alphafold_model_id),
         "sources": sources,
         "n_sources": len(sources),
         "experiments": experiments,

@@ -219,6 +219,19 @@ export function SortableTh({ sortKey, currentKey, currentDir, onSort, children, 
 
 // Max distinct identifiers the single-protein search boxes (Protein Query,
 // Browse) accept in one request. Mirrors MAX_QUERY_PROTEINS on the backend.
+// Centered full-viewport spinner shown while a request is in flight.
+export function LoadingOverlay({ show, label = "Loading…" }) {
+  if (!show) return null;
+  return (
+    <div className="loading-overlay" role="status" aria-live="polite">
+      <div className="loading-overlay-card">
+        <span className="spinner"></span>
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 export const MAX_QUERY_PROTEINS = 50;
 
 // Split a raw search string into identifiers on comma, whitespace (space, tab,

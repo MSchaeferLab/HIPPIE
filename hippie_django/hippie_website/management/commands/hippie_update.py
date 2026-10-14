@@ -7,6 +7,7 @@ Usage:
     python manage.py hippie_update --biogrid path/to/biogrid.mitab
     python manage.py hippie_update --intact path/to/intact.txt
     python manage.py hippie_update --biogrid b.mitab --intact i.txt --rescore-all
+    python manage.py hippie_update --alphafold hippie_with_ipSAE_max.tsv --alphafold-only
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from django.core.management.base import BaseCommand, CommandParser
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connection, models, transaction
 from django.db.models.functions import Lower
 
@@ -1657,6 +1658,118 @@ def _sync_ensembl_synonyms(stdout, genes, isoforms) -> None:
 
 
 # ---------------------------------------------------------------------------
+# AlphaFold DB complex predictions
+# ---------------------------------------------------------------------------
+
+# Confidence cutoffs for keeping an AlphaFold complex prediction (both must hold).
+ALPHAFOLD_MIN_IPSAE = 0.6
+ALPHAFOLD_MIN_PDOCKQ2 = 0.23
+
+_ALPHAFOLD_COLUMNS = (
+    "uniprot_accession_A",
+    "uniprot_accession_B",
+    "modelEntityId",
+    "ipSAE_max",
+    "pDockQ2_max",
+)
+
+
+def _parse_alphafold_tsv(path: str) -> tuple[dict[tuple[str, str], str], int]:
+    """Read ``hippie_with_ipSAE_max.tsv`` (written by ``hippie_alphafold``) and
+    keep only confident predictions.
+
+    Returns ``({(accession_A, accession_B): modelEntityId}, rows_read)``. Rows
+    without a prediction carry ``NA`` in the AF columns and are dropped along
+    with everything below the ipSAE / pDockQ2 cutoffs.
+    """
+    import csv
+
+    kept: dict[tuple[str, str], str] = {}
+    rows_read = 0
+    with open(path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        missing = [c for c in _ALPHAFOLD_COLUMNS if c not in (reader.fieldnames or [])]
+        if missing:
+            raise CommandError(
+                f"{path}: missing AlphaFold column(s) {', '.join(missing)}"
+            )
+        for row in reader:
+            rows_read += 1
+            model_id = row["modelEntityId"].strip()
+            if not model_id or model_id == "NA":
+                continue
+            try:
+                ipsae = float(row["ipSAE_max"])
+                pdockq2 = float(row["pDockQ2_max"])
+            except ValueError:
+                continue
+            if ipsae >= ALPHAFOLD_MIN_IPSAE and pdockq2 >= ALPHAFOLD_MIN_PDOCKQ2:
+                kept[(row["uniprot_accession_A"], row["uniprot_accession_B"])] = (
+                    model_id
+                )
+    return kept, rows_read
+
+
+def _import_alphafold(stdout, path: str) -> None:
+    """Set ``Interaction.alphafold_model_id`` from the AlphaFold TSV.
+
+    Full replace: interactions whose pair is absent from the file, or below the
+    confidence cutoffs, are cleared to NULL. Pairs are matched by exact UniProt
+    accession (isoform suffix included) in either orientation, since the file's
+    A/B order need not follow the ``protein_1_id <= protein_2_id`` storage order.
+    """
+    kept, rows_read = _parse_alphafold_tsv(path)
+    stdout.write(
+        f"  {rows_read:,} rows read → {len(kept):,} confident predictions "
+        f"(ipSAE_max >= {ALPHAFOLD_MIN_IPSAE}, pDockQ2_max >= {ALPHAFOLD_MIN_PDOCKQ2})"
+    )
+
+    accessions = {acc for pair in kept for acc in pair}
+    pk_by_acc = dict(
+        Protein.objects.filter(uniprot_accession__in=accessions).values_list(
+            "uniprot_accession", "pk"
+        )
+    )
+    model_by_pks: dict[tuple[int, int], str] = {}
+    unknown_acc = 0
+    for (acc_a, acc_b), model_id in kept.items():
+        pk_a, pk_b = pk_by_acc.get(acc_a), pk_by_acc.get(acc_b)
+        if pk_a is None or pk_b is None:
+            unknown_acc += 1
+            continue
+        model_by_pks[(min(pk_a, pk_b), max(pk_a, pk_b))] = model_id
+
+    p1_ids = {p1 for p1, _ in model_by_pks}
+    p2_ids = {p2 for _, p2 in model_by_pks}
+    model_by_interaction: dict[int, str] = {}
+    for iid, p1, p2 in Interaction.objects.filter(
+        protein_1_id__in=p1_ids, protein_2_id__in=p2_ids
+    ).values_list("pk", "protein_1_id", "protein_2_id"):
+        model_id = model_by_pks.get((p1, p2))
+        if model_id is not None:
+            model_by_interaction[iid] = model_id
+    no_interaction = len(model_by_pks) - len(model_by_interaction)
+
+    with transaction.atomic():
+        cleared = (
+            Interaction.objects.filter(alphafold_model_id__isnull=False)
+            .exclude(pk__in=list(model_by_interaction))
+            .update(alphafold_model_id=None)
+        )
+        objs = [
+            Interaction(pk=iid, alphafold_model_id=model_id)
+            for iid, model_id in model_by_interaction.items()
+        ]
+        Interaction.objects.bulk_update(objs, ["alphafold_model_id"], batch_size=1_000)
+
+    stdout.write(
+        f"  {len(model_by_interaction):,} interactions linked, {cleared:,} stale links "
+        f"cleared; skipped {unknown_acc:,} with an accession not in HIPPIE and "
+        f"{no_interaction:,} with no matching interaction."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Management command
 # ---------------------------------------------------------------------------
 
@@ -1682,12 +1795,34 @@ class Command(BaseCommand):
             help="Populate Ensembl IDs from the local idmapping file only "
             "(skip the Ensembl REST fallback for still-empty rows)",
         )
+        parser.add_argument(
+            "--alphafold",
+            metavar="FILE",
+            help="Path to hippie_with_ipSAE_max.tsv (from hippie_alphafold); "
+            "links interactions to confident AlphaFold DB complex predictions",
+        )
+        parser.add_argument(
+            "--alphafold-only",
+            action="store_true",
+            help="Only import --alphafold FILE, then exit (no parsing, rescoring "
+            "or stats refresh)",
+        )
 
     def handle(self, *_args: object, **options: object) -> None:
         biogrid_path: str | None = options["biogrid"]  # type: ignore[assignment]
         intact_path: str | None = options["intact"]  # type: ignore[assignment]
         rescore_all: bool = options["rescore_all"]  # type: ignore[assignment]
         skip_ensembl_api: bool = options["skip_ensembl_api"]  # type: ignore[assignment]
+        alphafold_path: str | None = options["alphafold"]  # type: ignore[assignment]
+        alphafold_only: bool = options["alphafold_only"]  # type: ignore[assignment]
+
+        if alphafold_only:
+            if not alphafold_path:
+                raise CommandError("--alphafold-only requires --alphafold FILE")
+            self.stdout.write(f"Importing AlphaFold predictions: {alphafold_path}")
+            _import_alphafold(self.stdout, alphafold_path)
+            self.stdout.write("Done.")
+            return
 
         if biogrid_path or intact_path:
             touched_ids: set[int] = set()
@@ -1739,6 +1874,10 @@ class Command(BaseCommand):
                 self.stderr.write(
                     f"WARNING: Ensembl ID population failed ({e}); continuing without it."
                 )
+
+        if alphafold_path:
+            self.stdout.write(f"Importing AlphaFold predictions: {alphafold_path}")
+            _import_alphafold(self.stdout, alphafold_path)
 
         # Rescore (wired up once human_species_ids is available)
         if rescore_all:

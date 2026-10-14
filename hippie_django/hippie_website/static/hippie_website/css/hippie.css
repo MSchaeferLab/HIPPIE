@@ -382,6 +382,40 @@ a:hover { color: var(--hippie-accent); text-decoration: underline; }
   vertical-align: middle;
 }
 
+/* Full-viewport loading overlay (browse pages). The fade-in is delayed so a
+   fast response never flashes it; the card pops in once it does show. */
+@keyframes overlayFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlayPop { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 22, 18, .18);
+  animation: overlayFadeIn .2s ease-out .15s both;
+}
+.loading-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .75rem;
+  padding: 1.5rem 2rem;
+  background: var(--hippie-surface);
+  border: 1px solid var(--hippie-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(26, 22, 18, .15);
+  color: var(--hippie-ink-muted);
+  font-family: var(--font-mono);
+  font-size: .85rem;
+  animation: overlayPop .25s cubic-bezier(.34, 1.56, .64, 1) .15s both;
+}
+.loading-overlay-card .spinner {
+  width: 48px; height: 48px;
+  border-width: 4px;
+}
+
 /* ==========================================================
    Export bar
    ========================================================== */
