@@ -93,15 +93,15 @@
       \qquad S_i = \frac{2}{1 + e^{-a_i n}} - 1 
     $$
     Where $n$ is either the number of studies, the scored sum of unique experimental methods detecting the interaction or the number of species 
-    in which an orthologous interaction were detected. The $a_i$ value is each components saturation parameter (how fast the score saturates with increasing evidence).
+    in which an orthologous interaction were detected and $a_i$ is each components saturation parameter (how fast the score saturates with increasing evidence).
     The values of $a_i$ and $w_i$ were estimated in <a href="https://doi.org/10.1371/journal.pone.0031826" target="_blank" rel="noopener">Hippie 1.0 paper</a>.
 
       <p>
-      Currently, the mapping of orthologous interactions are based on the <a href="https://www.alliancegenome.org/downloads#orthology" target="_blank" rel="noopener"> Alliance of Genome Resources </a>
+      Currently, the mapping of orthologous interactions is based on the <a href="https://www.alliancegenome.org/downloads#orthology" target="_blank" rel="noopener"> Alliance of Genome Resources </a>
        (<a href="https://doi.org/10.1093/genetics/iyae049" target="_blank" rel="noopener">DOI</a>),
       which consists of 7 species. As their resource provides human orthologs as reported by different methods, we considers an agreement of 80% among methods as orthologous.
-      The non-human interactions are obtained from the (<a href="https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/" target="_blank" rel="noopener">full intact database</a>).
-      The current scoring of experimental methods can be found under <a href="{% url 'hippie_website:download' %}">Download</a> section.
+      The non-human interactions are obtained from the <a href="https://ftp.ebi.ac.uk/pub/databases/intact/current/psimitab/" target="_blank" rel="noopener">IntAct database</a>.
+      The scoring of experimental methods can be found under the <a href="{% url 'hippie_website:download' %}">Download</a> section.
       </p> 
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
