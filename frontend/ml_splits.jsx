@@ -106,7 +106,7 @@ const PROTEIN_STATS_HELP = DL([
   ["Proteins", "Filtered proteins that still have at least one surviving interaction under the current interaction filter."],
   ["Isoforms", "Surviving proteins that are UniProt isoform entries. Only counted when the isoform mode is “Isoforms” or “Both”."],
   ["Median degree (filtered set)", "Median number of surviving interactions per protein, counted only over edges that pass the current filter. This is a different quantity from the “Min. degree in all of HIPPIE” filter on the left, which is measured across the whole database — under a narrow source or score filter this number is usually far lower than that threshold."],
-  ["Median avg score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
+  ["Median avg. score", "Median, across proteins, of each protein's own average interaction score over its surviving edges."],
   ["Proteins filtered out", "Proteins removed by the protein-level filter (tissue, TPM, min-degree, min-avg-score, isoform exclusion) relative to the full protein table. Separate from “Orphaned by filter”, which counts proteins that pass the protein filter but lose all edges."],
   ["Orphaned by filter", "Proteins that pass the protein-level filter (tissue, TPM, …) but lost every interaction to the score/type/source filter, leaving degree 0. Excluded from the medians above."],
   ["Node degree distribution", "Histogram of per-protein interaction counts (degree) under the current filter."],
@@ -206,7 +206,7 @@ function ProteinStatsBox({ stats, loading, error }) {
               <Metric label="Proteins" value={stats.n_proteins.toLocaleString()} />
               <Metric label="Isoforms" value={stats.n_isoforms.toLocaleString()} />
               <Metric label="Median degree (filtered set)" value={stats.median_degree} />
-              <Metric label="Median avg score"
+              <Metric label="Median avg. score"
                       value={stats.median_avg_score == null ? "—" : stats.median_avg_score} />
               <Metric label="Proteins filtered out" value={stats.n_filtered_out.toLocaleString()} />
               <Metric label="Orphaned by filter" value={stats.n_orphaned_by_filter.toLocaleString()} />
@@ -378,10 +378,48 @@ function pollDelay(status, ticks) {
   return ticks < 5 ? 3000 : 10000;
 }
 
+// Deep-link back to this page with the job id so a colleague can load + download
+// it. Copying can fail (no clipboard API on plain http, permission denied), so a
+// failure says so and leaves the URL in a pre-selected field to copy by hand.
+function ShareLinkButton({ jobId }) {
+  const [state, setState] = useState("idle"); // idle | copied | failed
+  const url = `${window.location.origin}${window.location.pathname}?jobs=${jobId}`;
+  const share = async () => {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error();
+      await navigator.clipboard.writeText(url);
+      setState("copied");
+      setTimeout(() => setState("idle"), 2000);
+    } catch {
+      setState("failed");
+    }
+  };
+  return (
+    <>
+      <button type="button" onClick={share} title="Copy a shareable link to this run" style={{
+        display:"inline-block", background:"transparent", color:TEAL,
+        border:`1px solid ${TEAL}`, borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
+        fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", cursor:"pointer",
+      }}>
+        <i className={`bi ${state === "copied" ? "bi-check2" : "bi-share"} me-1`}></i>
+        {state === "copied" ? "Link copied" : "Share Link"}
+      </button>
+      {state === "failed" && (
+        <span className="d-inline-flex align-items-center gap-2 text-muted-sm" role="status">
+          Copy failed — copy the link manually:
+          <input type="text" readOnly value={url} className="mono"
+                 onFocus={(e) => e.target.select()} autoFocus
+                 style={{fontSize:".75rem", minWidth:"18rem", border:"1px solid var(--hippie-border)",
+                         borderRadius:"var(--radius-md)", padding:".25rem .4rem"}} />
+        </span>
+      )}
+    </>
+  );
+}
+
 function RunCard({ jobId }) {
   const [data, setData] = useState(null);
   const [notFound, setNotFound] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   // Re-render once a second purely so the elapsed-time string advances between
   // polls; the poll cadence itself stays slow.
@@ -440,15 +478,6 @@ function RunCard({ jobId }) {
       });
     } catch { /* the next poll reports the real state either way */ }
   }
-
-  // Deep-link back to this page with the job id so a colleague can load + download it.
-  const shareLink = () => {
-    const url = `${window.location.origin}${window.location.pathname}?jobs=${jobId}`;
-    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1500); };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(done).catch(() => {});
-    }
-  };
 
   return (
     <div className="hippie-card mb-3" style={{borderColor:border}}>
@@ -540,14 +569,7 @@ function RunCard({ jobId }) {
             }}>
               <i className="bi bi-download me-1"></i> Download ZIP
             </a>
-            <button type="button" onClick={shareLink} title="Copy a shareable link to this run" style={{
-              display:"inline-block", background:"transparent", color:TEAL,
-              border:`1px solid ${TEAL}`, borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
-              fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", cursor:"pointer",
-            }}>
-              <i className={`bi ${copied ? "bi-check2" : "bi-share"} me-1`}></i>
-              {copied ? "Copied!" : "Share Link"}
-            </button>
+            <ShareLinkButton jobId={jobId} />
             <a href={PIPELINE_WIKI_URL} target="_blank" rel="noopener" style={{
               display:"inline-block", background:"transparent", color:GREY,
               border:`1px solid var(--hippie-border)`, borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
@@ -568,6 +590,11 @@ function RunCard({ jobId }) {
                 borderRadius:"var(--radius-md)", padding:".6rem .8rem", fontSize:".78rem",
                 whiteSpace:"pre-wrap", wordBreak:"break-all",
               }}>{data.summary.pipeline_command}</pre>
+              <p className="mb-0 mt-1 text-muted-sm" style={{fontSize:".72rem"}}>
+                No Gurobi license? Append <code>--ilp_solver '' --gurobi_license ''</code> to
+                use an open-source solver instead. Step-by-step walkthrough in the{" "}
+                <a href={cfg.mlGuideUrl}>Machine Learning guide</a>.
+              </p>
             </>
           )}
           {data.summary && (
@@ -577,7 +604,7 @@ function RunCard({ jobId }) {
                 <>
                   {" · "}{data.summary.negatives_exported.toLocaleString()} curated negatives exported
                   as candidates — negative sampling is restricted to them; see README.txt to sample
-                  randomly instead
+                  from the full pair space instead
                 </>
               ) : (
                 <> · no curated non-interactions matched your filters — the pipeline will sample
@@ -598,14 +625,7 @@ function RunCard({ jobId }) {
             }}>
               <i className="bi bi-download me-1"></i> Download ZIP
             </a>
-            <button type="button" onClick={shareLink} title="Copy a shareable link to this run" style={{
-              display:"inline-block", background:"transparent", color:TEAL,
-              border:`1px solid ${TEAL}`, borderRadius:"var(--radius-md)", padding:".6rem 1.5rem",
-              fontWeight:600, fontFamily:"var(--font-body)", fontSize:".95rem", cursor:"pointer",
-            }}>
-              <i className={`bi ${copied ? "bi-check2" : "bi-share"} me-1`}></i>
-              {copied ? "Copied!" : "Share Link"}
-            </button>
+            <ShareLinkButton jobId={jobId} />
           </div>
           <SplitCards summary={data.summary} />
           {data.summary && (
@@ -872,7 +892,7 @@ function App() {
         </button>
         {!statsFresh && !statsLoading && (
           <span className="text-muted-sm" style={{color:GREY}}>
-            Tip: Calculate statistics before generating your split or downloading the raw data!
+            Calculate statistics first — both buttons unlock once the statistics match your current filters.
           </span>
         )}
       </div>

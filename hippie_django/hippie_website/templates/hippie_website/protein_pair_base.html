@@ -95,7 +95,7 @@
   {# ── Page-specific evidence cards ── #}
   {% block detail_content %}{% endblock %}
 
-  {# ── Further information (DIGGER cross-links) ── #}
+  {# ── Further information (DIGGER / AlphaFold DB cross-links) ── #}
   <div class="row g-3 mb-4">
     <div class="col-md-6 col-lg-4">
       <div class="evidence-card">
@@ -123,6 +123,14 @@
               <a href="{{ digger.interaction.url }}" target="_blank" rel="noopener">Interaction in DIGGER</a>
             {% else %}
               <span>Interaction in DIGGER</span> <span class="text-muted-sm">— not available</span>
+            {% endif %}
+          </li>
+          <li>
+            <i class="bi bi-dot" style="color: var(--hippie-teal)"></i>
+            {% if alphafold_url %}
+              <a href="{{ alphafold_url }}" target="_blank" rel="noopener">Interaction in AlphaFold Protein Structure Database</a>
+            {% else %}
+              <span>Interaction in AlphaFold Protein Structure Database</span> <span class="text-muted-sm">— not available</span>
             {% endif %}
           </li>
         </ul>

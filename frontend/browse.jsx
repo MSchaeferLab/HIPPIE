@@ -18,7 +18,7 @@ import {
   filtersEqual,
   useFilterMeta,
 } from "./filters.jsx";
-import { parseIdentifiers, MAX_QUERY_PROTEINS } from "./shared.jsx";
+import { parseIdentifiers, MAX_QUERY_PROTEINS, LoadingOverlay } from "./shared.jsx";
 
 const {
   proteinsApiUrl,
@@ -237,7 +237,7 @@ function App() {
     </button>
   );
 
-  const countLabel = `${total.toLocaleString()} matching${loading ? " — loading…" : ""}`;
+  const countLabel = `${total.toLocaleString()} matching`;
   const serverExport = { url: `${exportApiUrl}?${paramsFor(false)}`, disabled: loading || total === 0 };
 
   // Build only the active mode's row set — `rows` holds proteins XOR
@@ -273,6 +273,7 @@ function App() {
 
   return (
     <div>
+      <LoadingOverlay show={loading} label={`Loading ${mode}…`} />
       <div className="hippie-hero">
         <h1>
           Browse

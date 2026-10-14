@@ -34,6 +34,16 @@ PIPELINE_WIKI_URL = "https://github.com/bionetslab/ppi-splitting-pipeline/wiki"
 # here too so a raw-data run and a server-run split agree on methodology.
 SPLIT_METHOD = "ilp"
 NEGATIVE_SAMPLING_METHOD = "ilp"
+# The pipeline reads a row's ``candidate_network`` only when its
+# negative_sampling_method lists ``ilp_candidates`` (the same ILP sampler,
+# restricted to that pool); with plain ``ilp`` it warns and ignores the file
+# (pipeline/main.nf). So a package that ships curated negatives must ask for it.
+NEGATIVE_SAMPLING_METHOD_WITH_CANDIDATES = "ilp_candidates"
+
+# Without a Gurobi license both overrides are needed: an empty ilp_solver lets
+# the pipeline pick SCIP/HiGHS, and an empty gurobi_license stops it staging
+# its default "gurobi.lic" with checkIfExists, which fails when the file is absent.
+NO_GUROBI_FLAGS = "--ilp_solver '' --gurobi_license ''"
 
 # The dataset id for the one samplesheet row. Matches nextflow_runner.DATASET_ID
 # in spirit (not imported from there — that constant is scoped to the
@@ -79,7 +89,7 @@ def pipeline_run_command() -> str:
     in Groovy) to force that fallback onto everyone by default. That also
     silently downgraded the solve for anyone who *does* have a Gurobi
     license, so it is no longer baked into the command; the README instead
-    tells researchers without a license to add ``--ilp_solver ''``
+    tells researchers without a license to add ``NO_GUROBI_FLAGS``
     themselves.
     """
     return (
@@ -103,6 +113,9 @@ def write_standard_samplesheet(
     ``nextflow_runner.write_samplesheet``, which deliberately uses absolute
     in-container paths for HIPPIE's own internal job, whoever downloads this
     runs it from wherever they extracted the zip.
+
+    With a candidate pool the method is ``ilp_candidates`` — the pipeline
+    ignores ``candidate_network`` under any other method.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("w", newline="") as fh:
@@ -113,7 +126,9 @@ def write_standard_samplesheet(
                 row_id,
                 ppis_name,
                 SPLIT_METHOD,
-                NEGATIVE_SAMPLING_METHOD,
+                NEGATIVE_SAMPLING_METHOD_WITH_CANDIDATES
+                if candidate_name
+                else NEGATIVE_SAMPLING_METHOD,
                 candidate_name or "",
             ]
         )
@@ -174,20 +189,21 @@ def write_raw_readme(
         "  conda/docker/singularity/apptainer you have installed, then run this\n",
         "  from inside this folder:\n\n",
         f"    {pipeline_run_command()}\n\n",
-        "  No Gurobi license? Add --ilp_solver '' to the command above — it\n",
-        "  lets the pipeline auto-select an open-source solver (SCIP/HiGHS)\n",
-        "  for the partitioning step instead.\n\n",
+        f"  No Gurobi license? Add {NO_GUROBI_FLAGS} to the command\n",
+        "  above — it lets the pipeline auto-select an open-source solver\n",
+        "  (SCIP/HiGHS) instead and skips looking for a license file.\n\n",
     ]
     if has_candidates:
         text.append(
             f"  Negative sampling in this run is restricted to the "
             f"{neg_export.n_written:,} curated HIPPIE non-interactions matching\n"
-            "  your filters — wired in as candidate_network in samplesheet.csv.\n"
-            "  If you need more negatives than that provides, remove the\n"
-            "  candidate_network value in samplesheet.csv (the pipeline will then\n"
-            "  sample bias-matched negatives from the full non-interacting pair\n"
-            "  space) or set negative_sampling_method to 'uniform' there for\n"
-            "  unconstrained random sampling.\n\n"
+            "  your filters — wired in as candidate_network in samplesheet.csv,\n"
+            "  with negative_sampling_method 'ilp_candidates'.\n"
+            "  If you need more negatives than that provides, set\n"
+            "  negative_sampling_method to 'ilp' and clear the candidate_network\n"
+            "  value in samplesheet.csv (the pipeline will then sample\n"
+            "  bias-matched negatives from the full non-interacting pair space),\n"
+            "  or set it to 'uniform' for unconstrained random sampling.\n\n"
         )
     else:
         text.append(

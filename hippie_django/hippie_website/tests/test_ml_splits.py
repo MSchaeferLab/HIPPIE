@@ -454,6 +454,11 @@ class MLSplitRawDataViewTest(TestCase):
             self.assertNotIn("candidate_negatives.csv", names)
             rows = list(_csv.DictReader(io.TextIOWrapper(zf.open("samplesheet.csv"))))
             self.assertEqual(rows[0]["candidate_network"], "")
+            self.assertEqual(rows[0]["negative_sampling_method"], "ilp")
+            readme = zf.read("README.txt").decode()
+            # Both overrides are needed without a license; --ilp_solver ''
+            # alone still makes the pipeline stage a missing gurobi.lic.
+            self.assertIn("--ilp_solver '' --gurobi_license ''", readme)
 
     def test_happy_path_with_curated_negatives_wires_candidate_network(self):
         import csv as _csv
@@ -472,6 +477,9 @@ class MLSplitRawDataViewTest(TestCase):
             self.assertIn("candidate_negatives.csv", zf.namelist())
             rows = list(_csv.DictReader(io.TextIOWrapper(zf.open("samplesheet.csv"))))
             self.assertEqual(rows[0]["candidate_network"], "candidate_negatives.csv")
+            # The pipeline ignores candidate_network unless the method lists
+            # ilp_candidates.
+            self.assertEqual(rows[0]["negative_sampling_method"], "ilp_candidates")
 
     def test_zero_interactions_fails_the_job_not_the_request(self):
         from ..models import SplitJob

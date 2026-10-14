@@ -91,6 +91,31 @@ a:hover { color: var(--hippie-accent); text-decoration: underline; }
   transition: color .15s;
 }
 .hippie-topbar .utility-link:hover { color: var(--hippie-teal); }
+.hippie-topbar .utility-link.dropdown-toggle::after { vertical-align: .15em; margin-left: .3em; }
+.hippie-dropdown {
+  font-size: .8rem;
+  border-color: var(--hippie-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .08);
+  min-width: 11rem;
+}
+.hippie-dropdown .dropdown-item { color: var(--hippie-ink); padding: .4rem .9rem; }
+.hippie-dropdown .dropdown-item:hover,
+.hippie-dropdown .dropdown-item:focus { background: var(--hippie-bg); color: var(--hippie-teal); }
+
+/* Shown on every page while no ReleaseMeta row exists (see base.html). */
+.hippie-release-missing {
+  background: #b02a37;
+  color: #fff;
+  padding: .9rem 1rem;
+  text-align: center;
+  font-size: .95rem;
+  border-bottom: 4px solid #6a1a21;
+}
+.hippie-release-missing code { color: #fff; background: rgba(0, 0, 0, .25); padding: .1rem .35rem; border-radius: 3px; }
+
+/* "More details" link appended to filter help pop-ups (InfoPopover). */
+.popover .popover-more { display: block; margin-top: .4rem; font-size: .78rem; font-weight: 600; }
 
 .hippie-navbar { background: var(--nav-bottom-bg); }
 .hippie-navbar .nav-link {
@@ -355,6 +380,40 @@ a:hover { color: var(--hippie-accent); text-decoration: underline; }
   border-radius: 50%;
   animation: spin .7s linear infinite;
   vertical-align: middle;
+}
+
+/* Full-viewport loading overlay (browse pages). The fade-in is delayed so a
+   fast response never flashes it; the card pops in once it does show. */
+@keyframes overlayFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlayPop { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 22, 18, .18);
+  animation: overlayFadeIn .2s ease-out .15s both;
+}
+.loading-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .75rem;
+  padding: 1.5rem 2rem;
+  background: var(--hippie-surface);
+  border: 1px solid var(--hippie-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(26, 22, 18, .15);
+  color: var(--hippie-ink-muted);
+  font-family: var(--font-mono);
+  font-size: .85rem;
+  animation: overlayPop .25s cubic-bezier(.34, 1.56, .64, 1) .15s both;
+}
+.loading-overlay-card .spinner {
+  width: 48px; height: 48px;
+  border-width: 4px;
 }
 
 /* ==========================================================

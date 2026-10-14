@@ -4,20 +4,16 @@
 
 {% block content %}
 
-{# ====================================================================== #}
-{#  NOTE: Section wording below is preserved verbatim from the original   #}
-{#  HIPPIE information page. Only the surrounding markup/styling is new.   #}
-{#  Features not yet present in the Django rewrite are flagged in red as   #}
-{#  "REWORK NEEDED" (heading kept, body replaced).                        #}
-{# ====================================================================== #}
+{# Filters and the REST API have their own pages (filter_guide.html, api.html). #}
 
 <style>
-  .rework-needed {
-    color: #dc3545;
-    font-weight: 700;
-    letter-spacing: .04em;
-    margin: 0;
+  .score-formula {
+    font-family: var(--font-mono), monospace; font-size: .9rem; line-height: 2;
+    overflow-x: auto; white-space: nowrap;
   }
+  .score-formula .frac { display: inline-block; vertical-align: middle; text-align: center; }
+  .score-formula .frac > span { display: block; padding: 0 .2rem; line-height: 1.3; }
+  .score-formula .frac > span + span { border-top: 1px solid currentColor; }
   .toc-list { columns: 2; font-size: .875rem; line-height: 1.9; padding-left: 1.1rem; }
   .toc-list li { break-inside: avoid; }
   #top { scroll-margin-top: 80px; }
@@ -46,13 +42,16 @@
       <li><a href="#example">Example of a HIPPIE workflow</a></li>
       <li><a href="#sources">Sources</a></li>
       <li><a href="#resources">Resource versions</a></li>
-      <li><a href="#api">HIPPIE API</a></li>
-      <li><a href="#filters">Filters</a></li>
       <li><a href="#isoforms">Isoforms</a></li>
       <li><a href="#cite">Citation</a></li>
       <li><a href="#contact">Contact</a></li>
       <li><a href="#privacy">Privacy</a></li>
     </ul>
+    <p class="text-muted-sm mt-2 mb-0">
+      See also: <a href="{% url 'hippie_website:filter_guide' %}">Filter guide</a> (every filter
+      and source database explained) ·
+      <a href="{% url 'hippie_website:api_docs' %}">REST API</a> (programmatic access).
+    </p>
   </div>
 </div>
 
@@ -80,13 +79,31 @@
       reliability of evidence supporting them.
     </p>
     <p>
-      FORMULA
-    </p>
-    <p>
       This score is calculated as a weighted sum of the
       number of studies in which an interaction was detected, the number and quality of experimental
       techniques used to measure an interaction and the number of non-human organisms in which an
-      interaction was reproduced.
+      interaction was reproduced:
+    </p>
+    <div class="hippie-card--muted mb-3 score-formula">
+      S = 0.6 · f(n<sub>pub</sub>, 2.3) + 0.3 · f(Σq<sub>exp</sub>, 0.2) + 0.1 · f(n<sub>org</sub>, 1.6)
+      <br>
+      f(x, a) =
+      <span class="frac"><span>2</span><span>1 + e<sup>−a·x</sup></span></span>
+      − 1
+    </div>
+    <ul>
+      <li><strong>n<sub>pub</sub></strong> — number of publications (PubMed ids) reporting the interaction.</li>
+      <li><strong>Σq<sub>exp</sub></strong> — sum of the quality scores of the distinct experimental
+        techniques used to detect it (see the technique scores on the
+        <a href="{% url 'hippie_website:download' %}">download page</a>).</li>
+      <li><strong>n<sub>org</sub></strong> — number of non-human organisms in which the interaction
+        was observed between orthologs.</li>
+    </ul>
+    <p>
+      The saturating function <em>f</em> maps each count from 0 towards 1, with the constant
+      <em>a</em> setting how quickly additional evidence stops adding confidence. The weights sum
+      to 1, so <em>S</em> lies between 0 and 1. Evidence is pooled per gene pair, so the
+      interactions of a gene's isoforms are scored on the evidence of the gene pair.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
@@ -125,15 +142,18 @@
     <h4 id="network" class="section-label">Network construction</h4>
     <p>
       In the <a href="{% url 'hippie_website:network_query' %}">network construction mode</a>, several
-      proteins can be used as seed proteins to construct a first-order network. The resulting network can be
-      visualized graphically, listed in a tabular format in the browser or downloaded as a tsv file.
+      proteins can be used as seed proteins to construct a first-order network: every HIPPIE
+      interaction that touches a seed is added. The resulting network can be visualized
+      graphically, listed in a tabular format in the browser or downloaded as a TSV file.
     </p>
     <p>
-      Proteins and interactions submitted by the user are highlighted in blue in our graphical output and, in case
-      they are not in HIPPIE, they are highlighted in red. Several filter criteria allow to modify the
-      resulting network (see Filters section). Note, however, that these filters are only applied to
-      interactions added from the HIPPIE repository and do not affect the input proteins or
-      interactions, which will be displayed regardless of whether they pass the filter criteria or not.
+      In the graph, seed proteins and interactions between two seeds are highlighted in red; the
+      remaining edges are shaded by confidence score. Inputs that cannot be matched to a HIPPIE
+      protein are listed separately with the result. Very large networks are drawn with a subset
+      of their edges only (interactions between seeds are always kept), while the table and the
+      download contain every edge. The
+      <a href="{% url 'hippie_website:filter_guide' %}">filters</a> restrict which interactions
+      are pulled in from HIPPIE.
     </p>
     <p>
       HIPPIE offers to display any constructed subnetwork with the light-weight network visualization
@@ -147,7 +167,7 @@
 {# ── Browsing ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <h4 id="browsing" class="section-label">Browsing the HIPPIE proteome.</h4>
+    <h4 id="browsing" class="section-label">Browsing the HIPPIE proteome</h4>
     <p>
       The <a href="{% url 'hippie_website:browse' %}">browsing mode</a> in HIPPIE allows for the
       exploration of the entire set of proteins or interactions in the database. Note that loading
@@ -181,7 +201,29 @@
       To demonstrate HIPPIE's functionality, we give a simple example of a typical query.
     </p>
     <p>
-      COPY HIPPIE USE CASE
+      To investigate the molecular context of Huntington’s Disease (HD), huntingtin (HTT) serves
+      as the primary reference gene. To get an overview of all its interaction partners, open the
+      <a href="{% url 'hippie_website:index' %}?q=HTT">protein query for HTT</a> and filter it
+      with your own parameters. We observe 1,116 interaction partners, 1,276 if we include
+      isoforms.
+    </p>
+    <p>
+      The interaction between HTT and HAP1 shows isoform-specific information, and in the
+      <a href="{% url 'hippie_website:interaction_query' %}">interaction query</a> we can query
+      the database for this interaction. Typing “HTT HAP1” in the search field and setting the
+      <a href="{% url 'hippie_website:filter_guide' %}#isoforms">isoform filter</a> to
+      “both” (general proteins and isoforms) shows two interactions, one of which is with
+      isoform 2 of HAP1, which is not the canonical one. Selecting this entry shows all the
+      information we have on the interaction, with links to, for example, the publications or an
+      isoform-specific detail view in DIGGER.
+    </p>
+    <p>
+      To expand this view into a broader interaction network around HD-associated proteins, we
+      gathered additional seed proteins relevant to HD from the literature: HAP40, HAP1 and HIP1,
+      TCERG1 and MED15, as well as SYT1, YKT6 and SNAP47. Searching for them in the
+      <a href="{% url 'hippie_website:network_query' %}">network query</a> reveals 2,300
+      interactions, seven of which exceed the confidence score of the benchmark HTT–HAP1
+      interaction.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
@@ -192,8 +234,11 @@
   <div class="hippie-card">
     <h4 id="sources" class="section-label">Sources</h4>
     <p>
-      HIPPIE integrates interaction data from 15 data sources. They add up to more than the total number of interaction,
-      as some of the data sources report the same interactions. This is shown on the detail page.
+      HIPPIE integrates interaction data from {{ sources|length }} data sources. Their counts add
+      up to more than the total number of interactions, as several sources often report the same
+      interaction; every source reporting an interaction is listed on its detail page. What each
+      source is — many are curation teams or acronyms — is explained in the
+      <a href="{% url 'hippie_website:filter_guide' %}#sources">filter guide</a>.
     </p>
     <div style="overflow-x:auto;">
       <table class="format-table">
@@ -201,21 +246,14 @@
           <tr><th>Source</th><th>Number of interactions</th></tr>
         </thead>
         <tbody>
-            <tr><td>BioGRID</td><td>934417</td></tr>
-            <tr><td>IntAct</td><td>524211</td></tr>
-            <tr><td>UniProt</td><td>102139</td></tr>
-            <tr><td>MINT</td><td>40712</td></tr>
-            <tr><td>DIP</td><td>7680</td></tr>
-            <tr><td>bhf-ucl</td><td>1720</td></tr>
-            <tr><td>matrixdb</td><td>1496</td></tr>
-            <tr><td>I2D</td><td>392</td></tr>
-            <tr><td>HPIDb</td><td>322</td></tr>
-            <tr><td>Molecular Connections</td><td>242</td></tr>
-            <tr><td>InnateDB</td><td>155</td></tr>
-            <tr><td>mbinfo</td><td>127</td></tr>
-            <tr><td>NTNU</td><td>23</td></tr>
-            <tr><td>FlyBase</td><td>6</td></tr>
-            <tr><td>mpidb</td><td>4</td></tr>
+          {% for src in sources %}
+          <tr>
+            <td>{% if src.url %}<a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.name }}</a>{% else %}{{ src.name }}{% endif %}{% if src.full_name and src.full_name|lower != src.name|lower %} <span class="text-muted-sm">— {{ src.full_name }}</span>{% endif %}</td>
+            <td>{{ src.count }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="2" class="text-muted-sm">No source counts are available for the current release.</td></tr>
+          {% endfor %}
         </tbody>
       </table>
     </div>
@@ -251,232 +289,6 @@
   </div>
 </div>
 
-{# ── HIPPIE API ── #}
-<div class="info-section">
-  <div class="hippie-card">
-    <h4 id="api" class="section-label">HIPPIE REST API</h4>
-    <p>
-      HIPPIE can be queried programmatically through a small set of JSON endpoints, so it can be
-      integrated into any bioinformatics pipeline. All paths below are relative to the HIPPIE base
-      URL and return <code>application/json</code> unless noted otherwise. Parameters marked
-      <em>(repeatable)</em> may be supplied more than once (e.g. <code>&amp;source=1&amp;source=2</code>).
-    </p>
-
-    <p class="mb-1"><strong>Shared filter parameters</strong> (accepted by most endpoints):</p>
-    <ul>
-      <li><code>show</code> = <code>interactions</code>, <code>noninteractions</code> or <code>both</code>.</li>
-      <li><code>min_score</code> / <code>max_score</code> = confidence-score bounds (0–1).</li>
-      <li><code>source</code>, <code>experiment</code>, <code>interaction_type</code>, <code>tissue</code> = numeric ids <em>(repeatable)</em>.
-        Values within one parameter are OR-ed; different parameters are AND-ed.
-        <strong>Omit a parameter to disable that filter</strong> — there is no way to
-        request "none of them", because a result matching no source database does not exist.</li>
-      <li><code>min_tpm</code> = minimum tissue expression (used together with <code>tissue</code>).</li>
-      <li><code>min_degree</code>, <code>min_avg_score</code> = protein-level thresholds, both measured
-        across all of HIPPIE rather than within the filtered result set.</li>
-      <li><code>reviewed</code> = <code>reviewed</code>, <code>unreviewed</code>, or <code>both</code>.</li>
-      <li><code>isoform_mode</code> = <code>general</code>, <code>isoforms</code>, or <code>both</code>.</li>
-    </ul>
-
-    <p class="mt-4 mb-1"><strong>Protein query</strong></p>
-    <div class="hippie-card--muted mb-2">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/query/?<b>q=</b>TP53,MDM2,BRCA1&amp;show=both&amp;min_score=0.63</code>
-    </div>
-    <p>
-      Interactions of one or more proteins. <code>q</code> accepts up to 50 identifiers
-      (separated by comma, space or tab) — each a gene symbol, UniProt accession or entry name,
-      Entrez id, isoform accession, or Ensembl id (ENSG/ENST). Each is resolved independently and
-      the interactions are returned as one combined list; the shared filters apply. Returns
-      <code>{ query_proteins, isoforms_included, expanded_proteins, unresolved, interactions[], error }</code>,
-      where <code>unresolved</code> lists any inputs that matched nothing (the request still
-      succeeds for the rest).
-    </p>
-
-    <p class="mt-4 mb-1"><strong>Batch pairwise lookup</strong></p>
-    <div class="hippie-card--muted mb-2">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>POST</b> /api/interaction/ &nbsp;&nbsp;(JSON body)</code>
-    </div>
-    <p>
-      Looks up the recorded interaction for each supplied pair. Body:
-      <code>{ "pairs": [ { "a": "TP53", "b": "MDM2", "input_order": 0 } ], … filters }</code>
-      (up to 200 pairs per request). Returns <code>{ results: [ … ] }</code>; a row with
-      <code>score = -1.0</code> means that pair was not found.
-    </p>
-
-    <p class="mt-4 mb-1"><strong>Network expansion</strong></p>
-    <div class="hippie-card--muted mb-2">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>POST</b> /api/network/ &nbsp;&nbsp;(JSON body)</code>
-    </div>
-    <p>
-      Builds the first-shell sub-network around a set of seed proteins (every edge touching a seed).
-      Body: <code>{ "proteins": "TP53 BRCA1 ATM", … filters }</code> (identifiers separated by
-      whitespace, commas or semicolons). Returns
-      <code>{ node_count, edge_count, interactions[], seed_ids, unresolved, truncated, total_edges, error }</code>.
-    </p>
-
-    <p class="mt-4 mb-1"><strong>Browse (paginated)</strong></p>
-    <div class="hippie-card--muted mb-2">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/browse/proteins/?offset=0&amp;limit=50&amp;sort=degree&amp;dir=desc<br><b>GET</b> /api/browse/interactions/?offset=0&amp;limit=50&amp;show=both</code>
-    </div>
-    <p>
-      <code>/api/browse/proteins/</code> returns a page of proteins <code>{ total, proteins[] }</code> (each
-      protein carries <code>degree</code>, <code>avg_score</code> and <code>is_reviewed</code>);
-      <code>/api/browse/interactions/</code> returns a page of interactions
-      <code>{ total, interactions[] }</code>. Both accept <code>offset</code>, <code>limit</code>
-      (≤&nbsp;200), a free-text search field <code>q</code> (up to 50 identifiers separated by comma,
-      space or tab — matches are unioned), <code>sort</code>/<code>dir</code>, and the shared filters.
-    </p>
-
-    <p class="mt-4 mb-1"><strong>Bulk export (TSV)</strong></p>
-    <div class="hippie-card--muted mb-2">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>GET</b> /api/browse/export/?<b>mode=</b>interactions&amp;show=both</code>
-    </div>
-    <p>
-      Streams the filtered result set as a tab-separated file (<code>mode=proteins</code> or
-      <code>mode=interactions</code>, using the same filters as the matching browse endpoint).
-      Capped at 50&nbsp;000 rows; the response sets the header <code>X-Export-Truncated: 1</code>
-      when the cap is reached.
-    </p>
-
-    <p class="mt-4 mb-1"><strong>Machine-learning splits</strong></p>
-    <p>
-      Building a split is a background job, so it runs in three steps: POST the parameters to
-      start it, poll the job until it reports <code>DONE</code>, then download the archive.
-      Unlike the endpoints above, these take a JSON request body (<code>Content-Type:
-      application/json</code>) rather than query parameters, and the vocabulary filters are
-      arrays named <code>source_ids</code>, <code>experiment_ids</code>, <code>type_ids</code>
-      and <code>tissue_ids</code> instead of the repeatable singular <code>source</code>,
-      <code>experiment</code>, <code>interaction_type</code> and <code>tissue</code>.
-    </p>
-    <div class="hippie-card--muted mb-2">
-      <code class="mono" style="font-size:.82rem; word-break:break-all;"><b>POST</b> /api/browse/splits/<br><b>POST</b> /api/browse/splits/stats/<br><b>GET</b> &nbsp;/api/browse/splits/&lt;job_id&gt;/<br><b>POST</b> /api/browse/splits/&lt;job_id&gt;/cancel/<br><b>GET</b> &nbsp;/api/browse/splits/&lt;job_id&gt;/download/</code>
-    </div>
-    <p>
-      <code>POST /api/browse/splits/</code> queues a job and answers <code>202</code> with
-      <code>{ job_id, status }</code>.
-      <code>POST /api/browse/splits/stats/</code> takes the same body but runs no job — it
-      returns <code>{ protein, interaction }</code> summary statistics for the filter set, which
-      is what the preview boxes on the
-      <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page show.
-      <code>GET /api/browse/splits/&lt;job_id&gt;/</code> reports
-      <code>{ status, step, progress, params, created_at, started_at, queue_position,
-      estimated_wait_seconds, cancel_requested, summary, error, download_url }</code>;
-      <code>status</code> is
-      <code>PENDING</code>, <code>RUNNING</code>, <code>DONE</code>, <code>FAILED</code> or
-      <code>CANCELLED</code>, and <code>download_url</code> is filled in only once the job is
-      <code>DONE</code>. Splits are generated one at a time and a run takes tens of minutes to
-      two hours, so poll no more than once every few seconds and read elapsed time from
-      <code>started_at</code> rather than <code>created_at</code> — a job can wait in the queue
-      far longer than it runs. The queue is first-come-first-served and neither capped nor
-      deduplicated, so <code>estimated_wait_seconds</code> (seconds until the job is expected
-      to <em>start</em>, <code>null</code> once it has) is the honest cost of submitting during
-      a busy period. It is an estimate: the median duration of recent successful runs times
-      the number of jobs ahead, less whatever is left of the run in progress.
-      Finished jobs are kept for a limited period and then deleted along with their archive,
-      so download a split you care about rather than relying on the job id indefinitely.
-      <code>POST /api/browse/splits/&lt;job_id&gt;/cancel/</code> stops a queued or running job:
-      <code>200</code> when it was <code>PENDING</code> (cancelled outright),
-      <code>202</code> when it was <code>RUNNING</code> (the pipeline is signalled and the job
-      reaches <code>CANCELLED</code> within about ten seconds), and <code>409</code> when it has
-      already finished.
-      <code>GET /api/browse/splits/&lt;job_id&gt;/download/</code> then streams the ZIP archive;
-      it answers <code>404</code> until the job is <code>DONE</code>.
-    </p>
-    <p class="mb-1">The archive holds four labelled CSVs, each
-      <code>protein1,protein2,label[,score]</code> with <code>label</code> 1 for interacting and
-      0 for not:</p>
-    <ul>
-      <li><code>train.csv</code>, <code>val.csv</code>, <code>test_balanced.csv</code> — 1:1
-        positives to negatives, negatives chosen by an ILP that matches degree, taxon-pair,
-        self-loop and GO-Jaccard bias.</li>
-      <li><code>test_realistic.csv</code> — 1:10, with <em>uniform</em> negatives. It simulates
-        an uncontrolled screen, so it is deliberately not bias-matched.</li>
-      <li><code>summary.json</code> and <code>README.txt</code>, naming the filters used, the
-        per-split counts, and the exact pipeline commit the split was cut with.</li>
-    </ul>
-    <p>
-      Splits are leakage-aware by sequence homology and not only by graph cut: the positives are
-      partitioned by an ILP over a precomputed sequence-similarity clustering of the proteome,
-      and CD-HIT-2D then removes train/test pairs that remain homologous. Expect materially
-      fewer pairs than the raw filtered interaction count.
-    </p>
-    <p class="mb-1">Accepted body keys (all optional — every one has a default):</p>
-    <ul>
-      <li><code>min_score</code> / <code>max_score</code> = confidence-score bounds (0–1, default 0 and 1).</li>
-      <li><code>source_ids</code>, <code>experiment_ids</code>, <code>type_ids</code>, <code>tissue_ids</code> = arrays of numeric ids. An empty or omitted array applies no filter.</li>
-      <li><code>min_tpm</code> = minimum tissue expression, used together with <code>tissue_ids</code>.</li>
-      <li><code>min_degree_global</code>, <code>min_avg_score</code> = protein-level thresholds, both evaluated over the whole database rather than the filtered subgraph. The older name <code>min_degree</code> is still accepted.</li>
-      <li><code>isoform_mode</code> = <code>general</code>, <code>isoforms</code> or <code>both</code>.</li>
-    </ul>
-    <p>
-      <code>neg_ratio</code> and <code>seed</code> are no longer accepted. The negative ratio is
-      fixed per split (1:1, and 1:10 for <code>test_realistic.csv</code>) and the seed is a
-      pipeline parameter, so both are properties of the pipeline rather than of a request. Bodies
-      that still carry them are accepted and the keys ignored.
-    </p>
-    <p>
-      Out-of-range values answer <code>400</code> with the failing constraint in the message.
-      Ready-made splits of the current release, if you do not need your own filters, are on the
-      <a href="{% url 'hippie_website:download' %}#ml-splits">download page</a>.
-    </p>
-
-    <a class="back-to-top" href="#top"><i>Back to top</i></a>
-  </div>
-</div>
-
-{# ── Filters ── #}
-<div class="info-section">
-  <div class="hippie-card">
-    <h4 id="filters" class="section-label">Filters</h4>
-    <p>
-      The query, interaction, network and browse pages share one filter panel (each page shows the
-      subset of controls relevant to it). Filters take effect only when you run or re-apply the search,
-      and they combine with logical AND — a result must pass every active filter to be shown. On the
-      network construction page they restrict only the edges pulled from HIPPIE, never your own input
-      proteins or interactions.
-    </p>
-    <ul>
-      <li><strong>Result type</strong> — show <em>interactions</em>, <em>non-interactions</em> (protein
-        pairs experimentally reported <em>not</em> to interact, drawn on a grey background), or
-        <em>both</em>.</li>
-      <li><strong>Confidence score</strong> — keep interactions whose score lies between a minimum and
-        maximum bound (0–1). The <em>medium</em> and <em>high</em> presets raise the minimum to the
-        current release's median (Q2) and upper-quartile (Q3) score for the selected result type.</li>
-      <li><strong>Source database</strong> — keep interactions reported by any of the selected source
-        databases (see the <a href="#sources">Sources</a> section).</li>
-      <li><strong>Experiment type</strong> — keep interactions detected by any of the selected
-        experimental methods.</li>
-      <li><strong>Interaction type</strong> — keep interactions classified as any of the selected
-        interaction types.</li>
-      <li><strong>Tissue expression</strong> — keep interactions whose proteins are expressed in any of
-        the selected tissues; an optional minimum median TPM raises the required expression level.
-        Expression is median gene-level RNA-seq from
-        GTEx{% if current_release.gtex_version %} {{ current_release.gtex_version }}{% endif %}.
-        Only genes reaching a median of 1.0&nbsp;TPM in at least one tissue were imported, so a
-        threshold below 1.0 has no additional effect.</li>
-      <li><strong>Protein filters</strong> — restrict to proteins by <em>degree</em> (the number of
-        interactions touching a protein) and by <em>average score</em> (the mean confidence across those
-        interactions). Both are measured across the whole of HIPPIE, independently of the source,
-        score and type filters above — so a protein can pass a high degree threshold and still
-        contribute only a handful of interactions to a narrowly filtered result set.</li>
-      <li><strong>Review status</strong> — <em>reviewed</em> (manually curated UniProtKB/Swiss-Prot
-        entries), <em>unreviewed</em> (automatically annotated UniProtKB/TrEMBL entries), or
-        <em>both</em>.</li>
-      <li><strong>Isoforms</strong> — <em>general</em> (canonical proteins; an isoform appears only when
-        you query it explicitly), <em>isoforms</em> (interactions with at least one non-canonical
-        isoform partner), or <em>both</em>. See the <a href="#isoforms">Isoforms</a> section below.</li>
-    </ul>
-    <p class="text-muted-sm">
-      The source, experiment type, interaction type and tissue lists start with every option
-      ticked and are grouped by kind, with the number of interactions carrying each piece of
-      evidence shown beside it. Options no interaction uses are not listed at all. Ticks within
-      one list are combined with OR; different lists are combined with AND. Clearing a list
-      <em>removes</em> that filter rather than excluding everything — an unticked list and a fully
-      ticked one return the same results.
-    </p>
-    <a class="back-to-top" href="#top"><i>Back to top</i></a>
-  </div>
-</div>
-
 {# ── Isoforms ── #}
 <div class="info-section">
   <div class="hippie-card">
@@ -487,13 +299,11 @@
       in comparison to the plain accession
       (<code>P37163</code>). On an interaction's detail page the canonical isoform of a gene is marked
       with a <span class="score-badge score-high">canonical</span> chip; canonical status is determined
-      by which isoform is referencec by UniProt to have the same UniParc sequence as the general protein.
+      by which isoform is referenced by UniProt to have the same UniParc sequence as the general protein.
     </p>
     <p>
-      The three-way
-      <strong>Isoforms</strong> filter controls which of these are shown: <em>general</em> keeps only
-      proteins, <em>isoforms</em> keeps only interactions in which at least one partner is an isoform,
-      and <em>both</em> filters both to connected proteins and isoforms.
+      Whether isoform-level interactions appear in a result is controlled by the three-way
+      <a href="{% url 'hippie_website:filter_guide' %}#isoforms">Isoforms filter</a>.
     </p>
     <p>
       To provide isoform- and domain-resolved interaction information, each interaction's detail page cross-links
@@ -529,8 +339,8 @@
 <div class="info-section">
   <div class="hippie-card">
     <h4 id="contact" class="section-label">Contact</h4>
-    <p>Please send questions or comments on HIPPIE to: <a href="mailto:martin.schaefer@crg.eu">martin.schaefer@ieo.it</a></p>
-    <p class="mb-0">HIPPIE is hosted by the <a href="http://cbdm.uni-mainz.de/" target="_blank" rel="noopener">CBDM group</a> at the JGU in Mainz.</p>
+    <p>Please send questions or comments on HIPPIE to: <a href="mailto:martin.schaefer@ieo.it">martin.schaefer@ieo.it</a></p>
+    <p class="mb-0">HIPPIE <a href="https://cbdm.uni-mainz.de/" target="_blank" rel="noopener">is hosted by</a> the CBDM group at the JGU in Mainz.</p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>
@@ -540,11 +350,15 @@
   <div class="hippie-card">
     <h4 id="privacy" class="section-label">Privacy Policy</h4>
     <p>
-        To understand how the HIPPIE database is utilized for scientific research and to support future
-        developments, this website utilizes privacy-respecting web analytics tool Umami. This tool operates
-        entirely without cookies and processes data in a completely anonymous manner. No personal data or
-        IP addresses are collected, tracked, or stored.
-
+      To understand how HIPPIE is used for scientific research and to guide its future
+      development, this website uses the privacy-friendly analytics tool Umami, running on our own
+      server. Umami does not use cookies and records only anonymous, aggregated usage statistics;
+      no personal profiles are created and nothing is shared with third parties for analytics.
+    </p>
+    <p>
+      Like most websites, HIPPIE loads its fonts (Google Fonts) and parts of its user interface
+      (jsDelivr, and cdnjs for the network viewer) from external servers. As with any web request, these services receive your IP
+      address in order to deliver the files.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>

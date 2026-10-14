@@ -26,6 +26,15 @@
 </head>
 
 <body>
+{% if not current_release %}
+{# No ReleaseMeta row: thresholds and versions below fall back to placeholders. #}
+<div class="hippie-release-missing" role="alert">
+  <i class="bi bi-exclamation-octagon-fill me-2"></i>
+  <strong>No current HIPPIE release is loaded.</strong>
+  Confidence thresholds, score presets and resource versions shown on this site are
+  placeholders until a release exists. Run <code>python manage.py hippie_update</code>.
+</div>
+{% endif %}
 
 {# Active-release confidence thresholds — consumed by React via window.HIPPIE_RELEASE. #}
 {% if current_release %}
@@ -46,6 +55,10 @@
   window.HIPPIE_RELEASE = { intMedian: 0.00, intQ3: 0.00, nonintMedian: 0.00, nonintQ3: 0.00, bothMedian: 0.00, bothQ3: 0.00, gtexVersion: "" };
 </script>
 {% endif %}
+{# Documentation targets for the "More details" links in the filter pop-ups. #}
+<script>
+  window.HIPPIE_URLS = { filterGuide: "{% url 'hippie_website:filter_guide' %}" };
+</script>
 
 {#   ===================================================== #}
 {#   Tier 1 — white top bar                                #}
@@ -67,9 +80,20 @@
       <a class="utility-link" href="{% url 'hippie_website:download' %}">
         <i class="bi bi-download me-1"></i>Download
       </a>
-      <a class="utility-link" href="{% url 'hippie_website:information' %}">
-        <i class="bi bi-info-circle me-1"></i>Information
-      </a>
+      <div class="dropdown">
+        <a class="utility-link dropdown-toggle" href="{% url 'hippie_website:information' %}"
+           role="button" data-bs-toggle="dropdown" aria-expanded="false">
+          <i class="bi bi-info-circle me-1"></i>Information
+        </a>
+        <ul class="dropdown-menu dropdown-menu-end hippie-dropdown">
+          <li><a class="dropdown-item" href="{% url 'hippie_website:information' %}">
+            <i class="bi bi-book me-2"></i>How-To</a></li>
+          <li><a class="dropdown-item" href="{% url 'hippie_website:filter_guide' %}">
+            <i class="bi bi-funnel me-2"></i>Filter guide</a></li>
+          <li><a class="dropdown-item" href="{% url 'hippie_website:api_docs' %}">
+            <i class="bi bi-code-slash me-2"></i>REST API</a></li>
+        </ul>
+      </div>
       <a class="utility-link" href="{% url 'hippie_website:machine_learning' %}">
         <i class="bi bi-cpu me-1"></i>Machine Learning
       </a>
@@ -141,8 +165,10 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
         crossorigin="anonymous"></script>
 
-{#   React + Babel — only loaded by pages that use JSX. #}
-{#   Pages that don't need React should override this block with an empty block. #}
+{#   React pages load their Vite-built bundle via django_vite's vite_asset in the #}
+{#   `scripts` block; vite_react_refresh only injects the HMR preamble in dev.     #}
+{#   `react_cdn` holds classic CDN scripts a bundle expects on window first        #}
+{#   (e.g. Cytoscape on the network page); static pages override it empty.        #}
 
 {% vite_react_refresh %}
 {% block react_cdn %}{% endblock %}
