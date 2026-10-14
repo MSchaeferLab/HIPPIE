@@ -31,22 +31,86 @@ export function ExtLink({ href, children }) {
 // ── Info pop-up primitives ──────────────────────────────────────────────────
 // Hover/focus (i) icon; content is an HTML string of definition-list items.
 // Bootstrap (incl. Popper) + bootstrap-icons are loaded globally by base.html.
-export function InfoPopover({ title, html }) {
+//
+// The pop-up is "sticky": it opens on hover/focus but stays open while the
+// pointer is over the pop-up itself, so the optional "More details" link
+// (`moreAnchor` → a section of the filter guide) can actually be clicked.
+// Bootstrap's own "hover" trigger closes the moment the pointer leaves the
+// icon, hence the manual trigger and the short grace period below.
+const HIDE_DELAY_MS = 150;
+
+export function InfoPopover({ title, html, moreAnchor }) {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
     const bs = window.bootstrap;
     if (!el || !bs) return;
+    const guide = window.HIPPIE_URLS && window.HIPPIE_URLS.filterGuide;
+    const more = moreAnchor && guide
+      ? `<a class="popover-more" href="${guide}#${moreAnchor}">More details →</a>`
+      : "";
     const popover = new bs.Popover(el, {
-      trigger: "hover focus",
+      trigger: "manual",
       placement: "bottom",
       html: true,
       sanitize: false,
       title,
-      content: html,
+      content: html + more,
     });
-    return () => popover.dispose();
-  }, [title, html]);
+
+    let hideTimer = null;
+    let tip = null;
+    const cancelHide = () => { clearTimeout(hideTimer); hideTimer = null; };
+    const hide = () => { cancelHide(); popover.hide(); };
+    const scheduleHide = () => {
+      cancelHide();
+      hideTimer = setTimeout(() => {
+        // Keep it open while the pointer or keyboard focus is inside the pop-up.
+        if (tip && (tip.matches(":hover") || tip.contains(document.activeElement))) return;
+        if (el.matches(":hover")) return;
+        popover.hide();
+      }, HIDE_DELAY_MS);
+    };
+    const show = () => { cancelHide(); popover.show(); };
+    const onKey = (e) => { if (e.key === "Escape") { hide(); el.focus(); } };
+    // The pop-up element is created on show; wire its own enter/leave then.
+    const onShown = () => {
+      tip = popover.tip || document.getElementById(el.getAttribute("aria-describedby"));
+      if (!tip) return;
+      tip.addEventListener("mouseenter", cancelHide);
+      tip.addEventListener("mouseleave", scheduleHide);
+      tip.addEventListener("focusout", scheduleHide);
+      tip.addEventListener("keydown", onKey);
+    };
+    const onHidden = () => {
+      if (!tip) return;
+      tip.removeEventListener("mouseenter", cancelHide);
+      tip.removeEventListener("mouseleave", scheduleHide);
+      tip.removeEventListener("focusout", scheduleHide);
+      tip.removeEventListener("keydown", onKey);
+      tip = null;
+    };
+
+    el.addEventListener("mouseenter", show);
+    el.addEventListener("mouseleave", scheduleHide);
+    el.addEventListener("focus", show);
+    el.addEventListener("blur", scheduleHide);
+    el.addEventListener("keydown", onKey);
+    el.addEventListener("shown.bs.popover", onShown);
+    el.addEventListener("hidden.bs.popover", onHidden);
+    return () => {
+      cancelHide();
+      onHidden();
+      el.removeEventListener("mouseenter", show);
+      el.removeEventListener("mouseleave", scheduleHide);
+      el.removeEventListener("focus", show);
+      el.removeEventListener("blur", scheduleHide);
+      el.removeEventListener("keydown", onKey);
+      el.removeEventListener("shown.bs.popover", onShown);
+      el.removeEventListener("hidden.bs.popover", onHidden);
+      popover.dispose();
+    };
+  }, [title, html, moreAnchor]);
   return (
     <button type="button" ref={ref} className="btn btn-link p-0 ms-1 align-baseline"
             style={{color: "var(--hippie-ink-muted)", fontSize: ".68rem", lineHeight: 1, border: "none"}}
@@ -155,6 +219,19 @@ export function SortableTh({ sortKey, currentKey, currentDir, onSort, children, 
 
 // Max distinct identifiers the single-protein search boxes (Protein Query,
 // Browse) accept in one request. Mirrors MAX_QUERY_PROTEINS on the backend.
+// Centered full-viewport spinner shown while a request is in flight.
+export function LoadingOverlay({ show, label = "Loading…" }) {
+  if (!show) return null;
+  return (
+    <div className="loading-overlay" role="status" aria-live="polite">
+      <div className="loading-overlay-card">
+        <span className="spinner"></span>
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 export const MAX_QUERY_PROTEINS = 50;
 
 // Split a raw search string into identifiers on comma, whitespace (space, tab,

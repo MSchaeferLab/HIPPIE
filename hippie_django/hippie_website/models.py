@@ -373,6 +373,12 @@ class Interaction(models.Model):
     n_sources = models.PositiveIntegerField(default=0)
     n_experiments = models.PositiveIntegerField(default=0)
 
+    # AlphaFold DB complex prediction for this pair (e.g. "AF-0000000210970416"),
+    # set only when the prediction is confident (ipSAE_max >= 0.6 and
+    # pDockQ2_max >= 0.23). NULL = no confident prediction. Refreshed as a full
+    # replace by `hippie_update --alphafold`.
+    alphafold_model_id = models.CharField(max_length=32, null=True, blank=True)
+
     sources = models.ManyToManyField(
         Source, related_name="interactions", db_table="interaction2source"
     )

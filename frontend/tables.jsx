@@ -31,7 +31,20 @@ export function defaultSortDir(key) {
 // ── Export bars ─────────────────────────────────────────────────────────────
 function ClientExportBar({ header, lines, filename }) {
   const tsv = () => [header.join("\t"), ...lines.map((c) => c.join("\t"))].join("\n");
-  const copy = () => navigator.clipboard.writeText(tsv());
+  const [msg, setMsg] = useState("");
+  const flash = (m) => {
+    setMsg(m);
+    setTimeout(() => setMsg(""), 4000);
+  };
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error();
+      await navigator.clipboard.writeText(tsv());
+      flash("Copied");
+    } catch {
+      flash("Copy failed — use TSV instead");
+    }
+  };
   const download = () => {
     const a = Object.assign(document.createElement("a"), {
       href: URL.createObjectURL(new Blob([tsv()], { type: "text/tab-separated-values" })),
@@ -41,13 +54,14 @@ function ClientExportBar({ header, lines, filename }) {
     URL.revokeObjectURL(a.href);
   };
   return (
-    <div className="export-bar">
+    <div className="export-bar d-inline-flex align-items-center gap-2">
       <button onClick={copy}>
         <i className="bi bi-clipboard me-1"></i>Copy
       </button>
       <button onClick={download}>
         <i className="bi bi-download me-1"></i>TSV
       </button>
+      {msg && <span className="text-muted-sm" role="status">{msg}</span>}
     </div>
   );
 }
@@ -198,7 +212,7 @@ const INT_TSV_HEADER = [
 
 function intRowType(r) {
   if (r.score < 0) return "Not found";
-  return r.isNoninteraction ? "Non-Interaction" : "Interaction";
+  return r.isNoninteraction ? "Non-interaction" : "Interaction";
 }
 
 function intTsvRow(r) {

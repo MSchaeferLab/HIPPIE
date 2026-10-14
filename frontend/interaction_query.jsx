@@ -203,7 +203,7 @@ function App() {
           <em style={{ color: "var(--hippie-teal)" }}>Query</em>
         </h1>
         <p>
-          Look up specific protein pairs by any combination of gene symbol, UniProt ID, UniProt accession, or Entrez ID.
+          Look up specific protein pairs by any combination of gene symbol, UniProt ID, UniProt accession, Entrez ID, or Ensembl ID (ENSG/ENST).
           Pairs not found in HIPPIE are reported with a score of −1.
         </p>
       </div>

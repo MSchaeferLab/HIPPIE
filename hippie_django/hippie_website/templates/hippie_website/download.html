@@ -157,7 +157,7 @@
     <div class="tab-pane fade" id="mitab-pane" role="tabpanel" aria-labelledby="mitab-tab">
       <p class="text-muted-sm mb-3">
         <code>HIPPIE-current.mitab.txt</code> — PSI-MI TAB 2.5: 15 mandatory
-        columns plus 3 HIPPIE extension columns (15–18). Within a column, multiple
+        columns plus 3 HIPPIE extension columns (16–18). Within a column, multiple
         values are joined with <code>|</code>; controlled-vocabulary terms use
         <code>psi-mi:"MI:xxxx"(name)</code>; parts containing reserved characters
         (<code>| ( ) :</code> or tab) are double-quoted.
@@ -413,7 +413,7 @@
           <td>2.3</td><td>04/29/22</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v2_3.txt.gz' %}">HIPPIE v2.3 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-2.3.mitab.txt.gz' %}">HIPPIE v2.3 MITAB</a></td>
-          <td>390,000 new interactions</td>
+          <td>390,000 new interactions; tissue expression data from GTEx v8</td>
         </tr>
         <tr>
           <td>2.2</td><td>02/14/19</td>
@@ -497,7 +497,7 @@
     source database, experiment type, interaction type, tissue expression, isoforms). The
     ML split jobs above can be built and fetched the same way. No key or registration is
     needed. See the
-    <a href="{% url 'hippie_website:information' %}#api">REST API reference</a>
+    <a href="{% url 'hippie_website:api_docs' %}">REST API reference</a>
     for the endpoint list and parameters.
   </p>
 </div>
@@ -536,7 +536,7 @@
     <li><a href="{% url 'hippie_website:download_dataset' 'techniques_scoring_2.3.tsv' %}">Technique scores v2.3</a> (TSV)</li>
   </ul>
   <p class="text-muted-sm mt-2 mb-0">
-    Current download file of HIPPIE with AlphaFold DB identifiers and scores in accordance to this
+    Current download file of HIPPIE with AlphaFold DB identifiers and scores in accordance with this
     <a href="https://www.biorxiv.org/content/10.64898/2026.03.27.714458v1" target="_blank" rel="noopener">BioRxiv preprint</a> from
     <a href="https://research.nvidia.com/labs/dbr/assets/data/manuscripts/afdb.html" target="_blank" rel="noopener">NVIDIA</a>.
   </p>
@@ -552,8 +552,8 @@
   <div class="mt-2" style="font-size:.875rem; color:var(--hippie-ink-muted); line-height:1.8;">
     <div><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v3.0</strong> — Current release. Expanded to ~1.1 million interactions total; added 71,000 isoform-specific interactions.</div>
     <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.4</strong> — Updated source integration with BioGRID 4.4, IntAct, MINT. Added 275,000 new interactions.</div>
-    <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.3</strong> — Added tissue expression data from GTEx v8.</div>
-    <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.2</strong> — Revised confidence scoring formula. See <a href="{% url 'hippie_website:information' %}">documentation</a>.</div>
+    <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.3</strong> — Added 390,000 new interactions and tissue expression data from GTEx v8.</div>
+    <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.2</strong> — Revised confidence scoring formula. See <a href="{% url 'hippie_website:information' %}#scoring">documentation</a>.</div>
   </div>
 </div>
 

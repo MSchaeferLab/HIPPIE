@@ -192,7 +192,7 @@ function App() {
           <i className="bi bi-exclamation-circle fs-3 d-block mb-2"></i>
           <strong>{error}</strong>
           <p className="text-muted-sm mt-2 mb-0">
-            Supported formats: gene symbol, UniProt ID, UniProt accession, Entrez gene ID.
+            Supported formats: gene symbol, UniProt ID, UniProt accession, Entrez gene ID, Ensembl ID (ENSG/ENST).
           </p>
         </div>
       )}
