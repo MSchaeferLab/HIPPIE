@@ -229,7 +229,7 @@ class Command(BaseCommand):
 
                 if interaction is not None:
                     target_kwargs: dict[str, object] = {"interaction": interaction}
-                elif n_observed == 0 and n_tested > min_tests:
+                elif n_observed == 0 and n_tested >= min_tests:
                     ni = existing_noninteractions.get((p1_id, p2_id))
                     if ni is None:
                         ni, created_ni = NonInteraction.objects.get_or_create(
