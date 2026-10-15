@@ -218,7 +218,7 @@ def _mitab_row(
         _cv_list(inter.interaction_types.all()),
         sources,
         xrefs,
-        _field("hippie", f"{inter.score:.2f}"),
+        _field("hippie", f"{inter.score:.4f}"),
         species,
         a.gene.entrez_name or NULL,
         b.gene.entrez_name or NULL,
