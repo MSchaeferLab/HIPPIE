@@ -243,7 +243,7 @@ def _txt_row(inter: Interaction) -> list[str]:
         b.uniprot_accession,
         b.uniprot_name,
         str(b.gene.entrez_id),
-        f"{inter.score:.2f}",
+        f"{inter.score:.4f}",
         info,
     ]
 
