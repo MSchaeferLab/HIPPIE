@@ -102,7 +102,6 @@ class Command(BaseCommand):
 
         import pyarrow.parquet as pq
         from django.db import transaction
-        from django.db.models import F
 
         from hippie_website.models import (
             BaitPreyAssociation,
@@ -260,8 +259,8 @@ class Command(BaseCommand):
                     assocs_created += 1
                 else:
                     BaitPreyAssociation.objects.filter(pk=assoc.pk).update(
-                        number_of_tests=F("number_of_tests") + n_tested,
-                        number_of_observed=F("number_of_observed") + n_observed,
+                        number_of_tests=n_tested,
+                        number_of_observed=n_observed,
                     )
                     assocs_updated += 1
 
