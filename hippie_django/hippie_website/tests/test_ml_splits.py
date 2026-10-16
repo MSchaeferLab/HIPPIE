@@ -1228,6 +1228,67 @@ class RunSplitJobTaskTest(TestCase):
         self.assertEqual(job.status, "CANCELLED")
         self.assertIsNotNone(job.finished_at)
 
+    def test_run_past_the_max_run_time_is_killed_and_points_at_raw_data(self):
+        from unittest.mock import patch
+
+        from django.test import override_settings
+
+        from ..models import SplitJob
+        from ..services import nextflow_runner as nf
+        from ..services.export_ppis import ExportResult
+        from ..tasks import run_split_job
+
+        job = SplitJob.objects.create(params={}, status="PENDING")
+
+        with tempfile.TemporaryDirectory() as td:
+            layout = nf.job_layout(str(job.id), root=Path(td))
+            layout.work.mkdir(parents=True)
+            export = ExportResult(
+                path=layout.ppis,
+                n_written=5,
+                n_dropped_unknown=0,
+                n_dropped_blank=0,
+                n_proteins=4,
+            )
+            # Never exits on its own: only the deadline can end this run.
+            proc = _FakeProc(returncode=None, exits_after=None)
+
+            with (
+                override_settings(SPLIT_JOB_MAX_RUN_SECONDS=0),
+                patch("hippie_website.tasks.nf.preflight"),
+                patch("hippie_website.tasks.nf.job_layout", return_value=layout),
+                patch(
+                    "hippie_website.tasks.nf.prepare_job_dir",
+                    return_value=(export, "fp0123456789abcd"),
+                ),
+                patch("subprocess.Popen", return_value=proc),
+                patch("hippie_website.tasks.POLL_SECONDS", 0),
+                patch("hippie_website.tasks.os.killpg") as killpg,
+            ):
+                run_split_job(str(job.id))
+
+            killpg.assert_called_once()
+            self.assertFalse(layout.root.exists(), "job dir must be removed on timeout")
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, "FAILED")
+        self.assertEqual(job.step, "timed_out")
+        self.assertIn("maximum run time", job.error)
+        self.assertIn("raw data", job.error)
+        self.assertIsNotNone(job.finished_at)
+
+    def test_max_run_label_follows_the_setting(self):
+        from django.test import override_settings
+
+        from ..tasks import max_run_label
+
+        with override_settings(SPLIT_JOB_MAX_RUN_SECONDS=3 * 3600):
+            self.assertEqual(max_run_label(), "3 hours")
+        with override_settings(SPLIT_JOB_MAX_RUN_SECONDS=3600):
+            self.assertEqual(max_run_label(), "1 hour")
+        with override_settings(SPLIT_JOB_MAX_RUN_SECONDS=90 * 60):
+            self.assertEqual(max_run_label(), "90 minutes")
+
 
 class _FakeProc:
     """Minimal subprocess.Popen stand-in for the task's poll loop."""

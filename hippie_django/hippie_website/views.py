@@ -48,7 +48,7 @@ from .models import (
     GeneSynonym,
 )
 
-from .tasks import run_split_job
+from .tasks import max_run_label, run_split_job
 from .query_filters import (
     apply_protein_level_filters,
     group_by_side,
@@ -1236,7 +1236,7 @@ def api_docs_view(request):
 
 @require_GET
 def machine_learning_view(request):
-    return render(request, "hippie_website/ml.html", {})
+    return render(request, "hippie_website/ml.html", {"split_max_run": max_run_label()})
 
 
 # ---------------------------------------------------------------------------
@@ -1340,6 +1340,7 @@ def ml_splits_view(request):
         {
             "meta_json": json.dumps(_ml_filter_meta()),
             "initial_json": json.dumps(initial),
+            "split_max_run": max_run_label(),
         },
     )
 

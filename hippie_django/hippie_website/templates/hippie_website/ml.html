@@ -132,8 +132,10 @@
         need on the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page, download the
         filtered data, and build the split yourself on your own machine or cluster.</li>
       <li><strong>Splits generated on the server</strong> — the ML Splits page can also run the
-        pipeline for you. This is convenient, but jobs are queued and run one at a time, each run
-        takes a long time, and because of our computational constraints the server gives the
+        pipeline for you. This is convenient, but jobs are queued and run one at a time. A run
+        usually takes about 35 minutes and is stopped after {{ split_max_run }} at the latest; a
+        filter set too large or complex for that has to go through the raw-data route instead.
+        Because of our computational constraints the server also gives the
         optimisation steps a much smaller time and memory budget than a local run (30 minutes
         instead of 2 hours per ILP, on 2 CPUs). The resulting splits are valid but usually less
         well optimised than what you get locally.</li>

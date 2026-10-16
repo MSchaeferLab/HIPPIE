@@ -78,6 +78,12 @@ python manage.py update_tissue_data \
 
 # Refresh Protein.is_reviewed from UniProt's reviewed (Swiss-Prot) accession list
 python manage.py update_review_status
+
+# Link interactions to AlphaFold DB complex predictions (see "AlphaFold DB links" below)
+python manage.py hippie_alphafold \
+    data/homodimer_metadata.csv data/heterodimer_metadata.csv --out data/user_downloads
+python manage.py hippie_update \
+    --alphafold data/user_downloads/hippie_with_ipSAE_max.tsv --alphafold-only
 ```
 
 ## Running the server
@@ -255,9 +261,45 @@ docker compose exec web python manage.py update_tissue_data \
 # 8. Refresh Protein.is_reviewed from UniProt's reviewed (Swiss-Prot) accession list
 docker compose exec web python manage.py update_review_status
 
-# 9. Regenerate the public download files (see below)
+# 9. Link interactions to AlphaFold DB complex predictions (see "AlphaFold DB links" below)
+docker compose exec web python manage.py hippie_alphafold \
+    data/homodimer_metadata.csv data/heterodimer_metadata.csv --out data/user_downloads
+docker compose exec web python manage.py hippie_update \
+    --alphafold data/user_downloads/hippie_with_ipSAE_max.tsv --alphafold-only
+
+# 10. Regenerate the public download files (see below)
 docker compose exec web python manage.py export_downloads data/user_downloads
 ```
+
+### AlphaFold DB links
+
+Interaction detail pages link to the AlphaFold Protein Structure Database
+(`https://alphafold.ebi.ac.uk/entry/<modelEntityId>`) when a confident complex
+prediction exists for the pair. Without one, the "Further information" tile shows
+the link as "not available", like the DIGGER links. Getting there takes two steps:
+
+1. **`hippie_alphafold`** matches every HIPPIE interaction against the AlphaFold
+   dimer metadata (`homodimer_metadata.csv`, `heterodimer_metadata.csv` from
+   <https://ftp.ebi.ac.uk/pub/databases/alphafold/>) and writes
+   `hippie_with_ipSAE_max.tsv` and `hippie_alphafold_full.tsv`, which are also
+   offered on the download page. It reads the interactions from the database, so run it
+   **after** the BioGRID/IntAct import.
+2. **`hippie_update --alphafold FILE`** reads `hippie_with_ipSAE_max.tsv` and
+   stores `modelEntityId` in `Interaction.alphafold_model_id` for every row with
+   `ipSAE_max >= 0.6` **and** `pDockQ2_max >= 0.23`.
+
+`hippie_update --alphafold` details:
+
+* Pairs are matched by exact UniProt accession (isoform suffix included) in
+  either A/B order.
+* Each run is a full replace. An interaction that is missing from the file or
+  falls below the cutoffs has its link cleared.
+* `--alphafold` can run alongside `--biogrid`/`--intact` in a normal update.
+  With `--alphafold-only`, the command runs this step only and skips parsing,
+  rescoring and the stats refresh. It takes a few seconds.
+* The command prints how many interactions it linked, how many stale links it
+  cleared, and how many pairs it skipped because an accession or interaction is
+  unknown.
 
 ### ML splits (Nextflow)
 
@@ -281,14 +323,35 @@ Output: `train.csv`, `val.csv`, `test_balanced.csv` (1:1) and
 `test_realistic.csv` (1:10, uniform negatives), plus a generated `summary.json`
 and `README.txt` naming the filters and the pipeline commit.
 
-**Runs take tens of minutes to two hours** and concurrency is pinned to 1
+**Runs usually take about 35 minutes, and never more than 3 hours**, and
+concurrency is pinned to 1
 (`--concurrency=1` on the Celery worker, `process.resourceLimits = [cpus: 2,
 memory: '8.GB', time: '4.h']` in the config, so the pipeline's own much larger
 `withName:` requests get clamped rather than deadlocking). `SOLVE_ILP` alone
 spends its full 1800 s budget on essentially any input — the assignment problem
 is hard to prove optimal even though it is small — so that cost is a floor, not
 something a narrow filter avoids. Each run card has a **Cancel** button, which
-is what makes a mis-clicked two-hour run recoverable.
+is what makes a mis-clicked run recoverable.
+
+The 3 h ceiling is `SPLIT_JOB_MAX_RUN_SECONDS` (default `10800`), enforced by
+`run_split_job` itself, measured from the moment the worker claims the job. A
+run still going then has its whole Nextflow process group killed and is marked
+`FAILED` with step `timed_out`; the run card tells the user the filters are too
+large or complex for the server and points them at **Download Raw Data** to run
+the pipeline locally. Without that cap nothing bounds a run: each task is
+clamped to 4 h, but `SOLVE_ILP` and `SAMPLE_NEGATIVES_ILP` carry `error_retry`
+(up to 4 attempts) and tasks run one at a time, so the sum of per-task ceilings
+is days. Where the ~35 minutes goes:
+
+| Step | Budget | Typical |
+|---|---|---|
+| `SORT_PPIS` | — | seconds |
+| `SOLVE_ILP` | `ilp_max_sec = 1800` | the full 30 min, always |
+| `CDHIT2D` (×2) + `REMOVE_REDUNDANT` | — | a few minutes |
+| `SAMPLE_NEGATIVES_ILP` (×3, one at a time) | `neg_ilp_time_limit = 1800` each | minutes; scales with how many interactions the filters leave |
+
+A large filter set can push each negative sampler towards its own 30 min, which
+is what takes a run past 2 h and, with a retry, into the cap.
 
 The resource caps are the pipeline's alone: the `worker` container itself is
 deliberately **not** given a cgroup limit, so Django, Celery and the management
@@ -298,7 +361,8 @@ what bounds Nextflow, and it has to be the executor pool rather than
 per-task caps alone let two 8 GB tasks run side by side on 8 GB.
 
 **The queue is uncapped and undeduplicated.** Jobs run first-come-first-served,
-one at a time; ten simultaneous requests are twenty hours of queue, and ten
+one at a time; ten simultaneous requests are six hours of queue (thirty at
+worst), and ten
 identical requests are ten identical runs. Nothing throttles that by design —
 instead each run card quotes its position and a live wait estimate (median of
 recent finished runs × queue depth, minus what is left of the run in progress),

@@ -206,10 +206,11 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # acks_late on the Redis transport needs this raised. Redis has no real ack:
 # the broker re-delivers any message still unacked after visibility_timeout,
 # which for a task that legitimately runs for hours means running it a second
-# time. Ceiling for one run is SOLVE_ILP (4 h cap) followed by the negative
-# samplers in two waves (maxForks = 2, 4 h cap each) = 12 h; 14 h clears that.
-# run_split_job also refuses to start on top of a live run, so a redelivery
-# that does slip through is a no-op rather than a duplicate.
+# time. run_split_job kills any run past SPLIT_JOB_MAX_RUN_SECONDS (3 h), so
+# 14 h is far more headroom than one run can use — it stays generous so that
+# raising that cap does not silently start duplicating runs. run_split_job also
+# refuses to start on top of a live run, so a redelivery that does slip through
+# is a no-op rather than a duplicate.
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     "visibility_timeout": int(os.environ.get("CELERY_VISIBILITY_TIMEOUT", 14 * 3600)),
 }
@@ -232,11 +233,21 @@ SPLIT_JOB_HEARTBEAT_TIMEOUT = int(
     os.environ.get("SPLIT_JOB_HEARTBEAT_TIMEOUT", 15 * 60)
 )
 
+# Wall-clock cap on one run, measured from the moment the worker claims it. Past
+# this the whole Nextflow process group is killed and the job FAILS with a
+# message pointing at the raw-data download. Without it nothing bounds a run:
+# every task is clamped to 4 h by conf/hippie.config's resourceLimits, but
+# SOLVE_ILP and SAMPLE_NEGATIVES_ILP each retry up to 3 times, and the tasks run
+# one at a time, so the sum of per-task ceilings is days. A normal run is ~35
+# minutes (SOLVE_ILP always spends its full 1800 s solver budget); one that
+# needs more than 3 h is a filter set too large for this box.
+SPLIT_JOB_MAX_RUN_SECONDS = int(os.environ.get("SPLIT_JOB_MAX_RUN_SECONDS", 3 * 3600))
+
 # Wait quoted for a queued job before any run has finished on this deployment
 # (and after a prune has taken the history with it). Once there are finished
 # runs the estimate is their median — see services/split_queue.py.
 SPLIT_JOB_DEFAULT_RUN_SECONDS = int(
-    os.environ.get("SPLIT_JOB_DEFAULT_RUN_SECONDS", 90 * 60)
+    os.environ.get("SPLIT_JOB_DEFAULT_RUN_SECONDS", 35 * 60)
 )
 
 # ── Cache ──────────────────────────────────────────────────────────────────

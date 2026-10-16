@@ -11,6 +11,8 @@ import {
 
 const cfg = window.SPLITS_CONFIG;
 const meta = cfg.meta || EMPTY_META;
+// Server-side wall-clock cap (SPLIT_JOB_MAX_RUN_SECONDS), pre-formatted.
+const MAX_RUN = cfg.maxRun || "3 hours";
 const initial = cfg.initial || {};
 
 // Coarse pipeline steps, in execution order. Derived server-side from the
@@ -29,6 +31,7 @@ const STEP_LABELS = {
   done:                    "Done",
   cancelled:               "Cancelled",
   failed:                  "Failed",
+  timed_out:               "Stopped — exceeded the maximum run time",
 };
 
 // "running for 3m 07s" / "1h 12m". Seconds are dropped past the hour mark —
@@ -537,9 +540,9 @@ function RunCard({ jobId }) {
             )}
           </div>
           <p className="text-muted-sm mb-2" style={{fontSize:".72rem"}}>
-            Splits are generated one at a time, first come first served, and a run
-            can take up to two hours — so a busy queue means a long wait rather than
-            a slower run. You can close this page: the run continues, and the share
+            Splits are generated one at a time, first come first served. A run
+            usually takes about 35 minutes and is stopped after {MAX_RUN} at the
+            latest — so a busy queue means a long wait rather than a slower run. You can close this page: the run continues, and the share
             link brings it back.
           </p>
           <button type="button" onClick={handleCancel} disabled={cancelPending} style={{
@@ -844,8 +847,10 @@ function App() {
            precomputed sequence-similarity partition, removes homologous train/test pairs with
            CD-HIT-2D, and samples negatives with a second ILP that matches degree, taxon-pair,
            self-loop and GO-Jaccard bias.</p>
-        <p style={{fontSize:".85rem"}}>Runs are queued one at a time and typically take
-           <strong> tens of minutes to two hours</strong>. You get four files:
+        <p style={{fontSize:".85rem"}}>Runs are queued one at a time and usually take
+           <strong> about 35 minutes</strong> (a maximum of {MAX_RUN}: a run still going
+           then is stopped, and its filters are better served by Download Raw Data below).
+           You get four files:
            <code>train.csv</code>, <code>val.csv</code>, <code>test_balanced.csv</code> (all 1:1)
            and <code>test_realistic.csv</code> (1:10, uniform negatives).</p>
         <p style={{fontSize:".85rem"}}>Rather run the pipeline yourself? <strong>Download Raw
