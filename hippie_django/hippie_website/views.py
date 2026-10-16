@@ -95,7 +95,11 @@ from .services.vocab import (  # noqa: F401
     vocab_options as _vocab_options,
 )
 from .services import split_queue
-from .services.guide import filter_guide_context, source_table
+from .services.guide import (
+    filter_guide_context,
+    source_category_summary,
+    source_table,
+)
 from .services.detail import (  # noqa: F401
     digger_ctx as _digger_ctx,
     interaction_detail_context as _interaction_detail_context,
@@ -1219,8 +1223,14 @@ def download_dataset(request, filename: str):
 
 @require_GET
 def information_view(request):
+    sources = source_table()
     return render(
-        request, "hippie_website/information.html", {"sources": source_table()}
+        request,
+        "hippie_website/information.html",
+        {
+            "sources": sources,
+            "source_summary": source_category_summary(str(s["name"]) for s in sources),
+        },
     )
 
 

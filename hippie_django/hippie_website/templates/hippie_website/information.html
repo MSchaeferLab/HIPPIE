@@ -277,7 +277,7 @@
   <div class="hippie-card">
     <h4 id="sources" class="section-label">Sources</h4>
     <p>
-      HIPPIE integrates interaction data from {{ sources|length }} data sources. Their counts add
+      HIPPIE integrates interaction data from {{ sources|length }} data sources{% if source_summary %} ({{ source_summary }}){% endif %}. Their counts add
       up to more than the total number of interactions, as several sources often report the same
       interaction; every source reporting an interaction is listed on its detail page. What each
       source is — many are curation teams or acronyms — is explained in the
@@ -291,7 +291,7 @@
         <tbody>
           {% for src in sources %}
           <tr>
-            <td>{% if src.url %}<a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.name }}</a>{% else %}{{ src.name }}{% endif %}{% if src.full_name and src.full_name|lower != src.name|lower %} <span class="text-muted-sm">— {{ src.full_name }}</span>{% endif %}</td>
+            <td>{% if src.url %}<a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.name }}</a>{% else %}{{ src.name }}{% endif %}{% if src.full_name %} <span class="text-muted-sm">— {{ src.full_name }}</span>{% endif %}</td>
             <td>{{ src.count }}</td>
           </tr>
           {% empty %}

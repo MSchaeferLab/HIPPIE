@@ -237,6 +237,9 @@ class Source(models.Model):
 
     name = models.CharField(max_length=100, unique=True)
     url = models.URLField(blank=True, default="")
+    # Short expansion shown next to the name ("NAME — description"); editable in
+    # the admin. Backfilled by hippie_update for rows that are still blank.
+    description = models.CharField(max_length=255, blank=True, default="")
     n_connected_interactions = models.PositiveIntegerField(default=0)
 
     class Meta:

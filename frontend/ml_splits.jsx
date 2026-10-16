@@ -841,19 +841,16 @@ function App() {
     <div>
       <div className="hippie-hero">
         <h1>Generate<br /><em style={{color:TEAL}}>ML Splits</em></h1>
-        <p>Configure the protein- and interaction-level filters, preview how restrictive they are
-           with “Calculate Statistics”, then hand the resulting interaction set to the
-           ppi-splitting pipeline. It cuts train / validation / test splits with an ILP over a
+        <p style={{maxWidth:"none"}}>Configure the protein- and interaction-level filters, preview how restrictive they are
+           with “Calculate Statistics”, then hand the resulting interaction set to the{" "}
+           <a href="https://github.com/bionetslab/ppi-splitting-pipeline" target="_blank"
+              rel="noopener noreferrer">ppi-splitting pipeline</a>. It cuts train / validation / test splits with an ILP over a
            precomputed sequence-similarity partition, removes homologous train/test pairs with
            CD-HIT-2D, and samples negatives with a second ILP that matches degree, taxon-pair,
            self-loop and GO-Jaccard bias.</p>
-        <p style={{fontSize:".85rem"}}>Runs are queued one at a time and usually take
-           <strong> about 35 minutes</strong> (a maximum of {MAX_RUN}: a run still going
-           then is stopped, and its filters are better served by Download Raw Data below).
-           You get four files:
-           <code>train.csv</code>, <code>val.csv</code>, <code>test_balanced.csv</code> (all 1:1)
-           and <code>test_realistic.csv</code> (1:10, uniform negatives).</p>
-        <p style={{fontSize:".85rem"}}>Rather run the pipeline yourself? <strong>Download Raw
+        <p style={{maxWidth:"none", fontSize:".85rem"}}>Runs are queued one at a time and usually take
+           <strong> about 35 minutes</strong> (max. {MAX_RUN}).</p>
+        <p style={{maxWidth:"none", fontSize:".85rem"}}>Rather run the pipeline yourself? <strong>Download Raw
            Data</strong> exports just the filtered interactions and a ready-made samplesheet —
            unzip it next to your own ppi-splitting-pipeline checkout (as sibling folders, not
            nested inside each other) and run the command it gives you.</p>

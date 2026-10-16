@@ -8,11 +8,18 @@ same (precomputed) counts. Everything here reads small vocabulary tables only.
 from collections.abc import Iterable
 
 from ..filter_categories import (
+    ANNOTATION_DB,
+    ARCHIVE_DB,
+    CURATION_TEAM,
     EXPERIMENT_CATEGORY_ORDER,
+    INTERACTION_DB,
     INTERACTION_TYPE_CATEGORY_ORDER,
+    LITERATURE_DB,
+    OTHER,
     SOURCE_CATEGORY_ORDER,
     TISSUE_CATEGORY_ORDER,
     experiment_category,
+    source_category,
 )
 from ..models import ExperimentType, Source
 from ..source_links import source_info
@@ -31,6 +38,39 @@ def group_by_category(
     return [{"category": c, "options": groups[c]} for c in ordered]
 
 
+# (singular, plural) noun phrase per source category, for the one-line summary.
+_CATEGORY_NOUNS: dict[str, tuple[str, str]] = {
+    ANNOTATION_DB: ("curated annotation resource", "curated annotation resources"),
+    CURATION_TEAM: ("curation team", "curation teams"),
+    INTERACTION_DB: ("interaction database", "interaction databases"),
+    LITERATURE_DB: ("literature resource", "literature resources"),
+    ARCHIVE_DB: (
+        "structural & proteomics archive",
+        "structural & proteomics archives",
+    ),
+    OTHER: ("other source", "other sources"),
+}
+
+
+def source_category_summary(names: Iterable[str]) -> str:
+    """``"1 curated annotation resource, 4 curation teams, 10 interaction databases"``.
+
+    Counts the given source names per filter category, in the filter's category
+    order, skipping empty categories.
+    """
+    counts: dict[str, int] = {}
+    for name in names:
+        category = source_category(name)
+        counts[category] = counts.get(category, 0) + 1
+    parts = []
+    for category in SOURCE_CATEGORY_ORDER:
+        n = counts.get(category, 0)
+        if n:
+            singular, plural = _CATEGORY_NOUNS[category]
+            parts.append(f"{n} {singular if n == 1 else plural}")
+    return ", ".join(parts)
+
+
 def source_table() -> list[dict[str, object]]:
     """Sources that back at least one interaction, largest first.
 
@@ -46,6 +86,7 @@ def source_table() -> list[dict[str, object]]:
             "url": s.url,
             "count": s.n_connected_interactions,
             **source_info(s.name),
+            "full_name": s.description,
         }
         for s in rows
     ]
@@ -62,7 +103,15 @@ def filter_guide_context() -> dict[str, object]:
         extra_fields=("psi_mi_code",),
         include_fields=("psi_mi_code",),
     )
-    sources = [{**opt, **source_info(str(opt["name"]))} for opt in lists["sources"]]
+    descriptions = dict(Source.objects.values_list("name", "description"))
+    sources = [
+        {
+            **opt,
+            **source_info(str(opt["name"])),
+            "full_name": descriptions.get(str(opt["name"]), ""),
+        }
+        for opt in lists["sources"]
+    ]
     return {
         "source_groups": group_by_category(sources, SOURCE_CATEGORY_ORDER),
         "experiment_groups": group_by_category(experiments, EXPERIMENT_CATEGORY_ORDER),
