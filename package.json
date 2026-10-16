@@ -10,18 +10,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/PelzKo/HIPPIE_FACELIFT.git"
+    "url": "git+https://https://github.com/MSchaeferLab/HIPPIE.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/PelzKo/HIPPIE_FACELIFT/issues"
+    "url": "https://https://github.com/MSchaeferLab/HIPPIE/issues"
   },
-  "homepage": "https://github.com/PelzKo/HIPPIE_FACELIFT#readme",
+  "homepage": "https://https://github.com/MSchaeferLab/HIPPIE/#readme",
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",
-    "vite": "^8.3.4"
+    "vite": "^.4.21"
   },
   "dependencies": {
     "react": "^18.3.1",
