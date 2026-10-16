@@ -46,7 +46,7 @@
   },
   "bhf-ucl": {
     "url": "https://www.ebi.ac.uk/intact/search?query=source:bhf-ucl",
-    "description": "British Heart Foundation – University College London",
+    "description": "British Heart Foundation – University College London (Curation Team)",
     "what_it_is": "Cardiovascular gene-annotation team at UCL that curates interactions of cardiovascular-relevant proteins into IntAct."
   },
   "biogrid": {
@@ -60,7 +60,7 @@
     "what_it_is": "Known and predicted protein interactions collected by the Jurisica lab, University of Toronto."
   },
   "homomint": {
-    "url": "https://mint.bio.uniroma2.it/",
+    "url": "https://mint.bio.uniroma2.it/HomoMINT",
     "description": "HomoMINT",
     "what_it_is": "Human interactions inferred from orthologous interactions in model organisms, derived from MINT."
   },
@@ -81,7 +81,7 @@
   },
   "molecular connections": {
     "url": "https://www.ebi.ac.uk/intact/search?query=source:molecular%20connections",
-    "description": "Molecular Connections Pvt. Ltd. (Bangalore, India)",
+    "description": "Molecular Connections Pvt. Ltd. (Curation Team)",
     "what_it_is": "Commercial curation team (Bangalore, India) that curates interaction data into IntAct."
   },
   "emdb": {
@@ -141,7 +141,7 @@
   },
   "mbinfo": {
     "url": "https://www.ebi.ac.uk/intact/search?query=source:mbinfo",
-    "description": "MechanoBiology Institute (MBInfo)",
+    "description": "MechanoBiology Institute (Curation Team)",
     "what_it_is": "Curation team of the MechanoBiology Institute, National University of Singapore, contributing mechanobiology-related interactions to IntAct."
   },
   "tissue list": {
@@ -151,7 +151,7 @@
   },
   "ntnu": {
     "url": "https://www.ebi.ac.uk/intact/search?query=source:ntnu",
-    "description": "Norwegian University of Science and Technology",
+    "description": "Norwegian University of Science and Technology (Curation Team)",
     "what_it_is": "Curation team at NTNU (Trondheim) contributing interactions to IntAct."
   },
   "bmrb": {
