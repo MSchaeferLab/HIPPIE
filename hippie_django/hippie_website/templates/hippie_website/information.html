@@ -227,8 +227,9 @@
     {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/interaction_detail.png" alt="Interaction results for HTT and HAP1 and the evidence page for HAP1 isoform 2" caption="Results for HTT–HAP1 and the evidence page for HAP1 isoform 2 (P54257-2). The score is per gene pair; publications, experiment types and external links are isoform specific." %}
     <p>
       To expand this view into a broader interaction network around HD-associated proteins, we
-      gathered additional seed proteins relevant to HD from the literature: HAP40, HAP1 and HIP1,
-      TCERG1 and MED15, as well as SYT1, YKT6 and SNAP47. Searching for them in the
+      gathered additional seed proteins relevant to HD from the literature: F8A3 (HAP40) and HIP1,
+      TCERG1 and MED15, as well as SYT1, YKT6 and SNAP47. Together with HTT and HAP1 from above,
+      searching for all of them in the
       <a href="{% url 'hippie_website:network_query' %}">network query</a> reveals 2,300
       interactions, seven of which exceed the confidence score of the benchmark HTT–HAP1
       interaction.
