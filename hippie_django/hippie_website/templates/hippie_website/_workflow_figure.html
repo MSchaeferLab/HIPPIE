@@ -1,0 +1,7 @@
+{% load static %}
+<figure class="figure d-block my-4 mx-auto" style="width: 80%;">
+  <a href="{% static src %}" target="_blank" rel="noopener">
+    <img src="{% static src %}" alt="{{ alt }}" class="figure-img img-fluid rounded border" loading="lazy">
+  </a>
+  <figcaption class="figure-caption">{{ caption }}</figcaption>
+</figure>

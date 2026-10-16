@@ -290,7 +290,9 @@
   <p class="text-muted-sm mb-3">
     Ready-made train / validation / test partitions of the current release, for training
     protein–protein interaction predictors without configuring anything. Each archive is a
-    <code>.tar.gz</code> holding the three labelled sets (positives plus sampled negatives).
+    <code>.zip</code> holding <code>train.csv</code>, <code>val.csv</code> and two test sets —
+    <code>test_balanced.csv</code> (equal positives and negatives) and
+    <code>test_realistic.csv</code> (negatives at 10:1 rate).
     Read the <a href="{% url 'hippie_website:machine_learning' %}">Machine Learning guide</a>
     first — it covers the data-leakage pitfalls these splits are designed around. For a split
     filtered your own way (by tissue, experiment type, source database, node degree, …), build
@@ -300,26 +302,76 @@
     <table class="format-table">
       <thead>
         <tr>
-          <th>Dataset</th>
-          <th>Included interactions</th>
+          <th>HIPPIE version</th>
+          <th>Interaction data</th>
+          <th>Negative data</th>
+          <th>Date calculated</th>
           <th>Download</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>High confidence</td>
-          <td>score ≥ {{ current_release.int_q3|default:0.00|floatformat:2 }} (release Q3)</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.splits.high.tar.gz' %}">HIPPIE-current.splits.high.tar.gz</a></td>
+          <td>3.0</td>
+          <td>High confidence (score ≥ 0.72)</td>
+          <td>Non-observed</td>
+          <td>04/09/26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HC-Complement.zip' %}">HIPPIE-HC-Complement.zip</a></td>
         </tr>
         <tr>
-          <td>High + medium confidence</td>
-          <td>score ≥ {{ current_release.int_median|default:0.00|floatformat:2 }} (release median)</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.splits.medium-high.tar.gz' %}">HIPPIE-current.splits.medium-high.tar.gz</a></td>
+          <td>3.0</td>
+          <td>High confidence (score ≥ 0.72)</td>
+          <td>HRNI ≥ 3</td>
+          <td>09/09/26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HC-HCNI3.zip' %}">HIPPIE-HC-HCNI3.zip</a></td>
         </tr>
         <tr>
+          <td>3.0</td>
+          <td>High confidence (score ≥ 0.72)</td>
+          <td>HRNI ≥ 5</td>
+          <td>09/09/26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HC-HCNI5.zip' %}">HIPPIE-HC-HCNI5.zip</a></td>
+        </tr>
+        <tr>
+          <td>3.0</td>
+          <td>High + medium confidence (score ≥ 0.63)</td>
+          <td>Non-observed</td>
+          <td>09/09/26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-MC-Complement.zip' %}">HIPPIE-MC-Complement.zip</a></td>
+        </tr>
+        <tr>
+          <td>3.0</td>
+          <td>High + medium confidence (score ≥ 0.63)</td>
+          <td>HRNI ≥ 3</td>
+          <td>09/09/26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-MC-HCNI3.zip' %}">HIPPIE-MC-HCNI3.zip</a></td>
+        </tr>
+        <tr>
+          <td>3.0</td>
+          <td>High + medium confidence (score ≥ 0.63)</td>
+          <td>HRNI ≥ 5</td>
+          <td>09/09/26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-MC-HCNI5.zip' %}">HIPPIE-MC-HCNI5.zip</a></td>
+        </tr>
+        <tr>
+          <td>3.0</td>
           <td>Whole database</td>
-          <td>every interaction, no score threshold</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.splits.all.tar.gz' %}">HIPPIE-current.splits.all.tar.gz</a></td>
+          <td>Non-observed</td>
+          <td>09/09/26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-Complement.zip' %}">HIPPIE-Complement.zip</a></td>
+        </tr>
+        <tr>
+          <td>3.0</td>
+          <td>Whole database</td>
+          <td>HRNI ≥ 3</td>
+          <td>09/09/26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HCNI3.zip' %}">HIPPIE-HCNI3.zip</a></td>
+        </tr>
+        <tr>
+          <td>3.0</td>
+          <td>Whole database</td>
+          <td>HRNI ≥ 5</td>
+          <td>09/09/26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HCNI5.zip' %}">HIPPIE-HCNI5.zip</a></td>
         </tr>
       </tbody>
     </table>

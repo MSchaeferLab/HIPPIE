@@ -218,7 +218,7 @@ def _mitab_row(
         _cv_list(inter.interaction_types.all()),
         sources,
         xrefs,
-        _field("hippie", f"{inter.score:.2f}"),
+        _field("hippie", f"{inter.score:.4f}"),
         species,
         a.gene.entrez_name or NULL,
         b.gene.entrez_name or NULL,
@@ -243,7 +243,7 @@ def _txt_row(inter: Interaction) -> list[str]:
         b.uniprot_accession,
         b.uniprot_name,
         str(b.gene.entrez_id),
-        f"{inter.score:.2f}",
+        f"{inter.score:.4f}",
         info,
     ]
 
