@@ -645,7 +645,7 @@ export function filtersToBody(f, meta = {}) {
 // ── Filter help text (definition lists shown in section-header pop-ups) ──────
 const RESULT_TYPE_HELP = DL([
   ["Interactions", "Positive, experimentally supported protein pairs."],
-  ["Non-interactions", "Protein pairs experimentally reported not to interact; rows are shown with a grey background. Hidden as soon as a source, experiment or interaction-type filter is set, since non-interactions carry none of those."],
+  ["Non-interactions", "Protein pairs inferred from experimental evidence not to interact; rows are shown with a grey background. Hidden as soon as a source, experiment or interaction-type filter is set, since non-interactions carry none of those."],
   ["Both", "Show interactions and non-interactions together."],
 ]);
 const CONFIDENCE_HELP = DL([
