@@ -894,7 +894,7 @@ function App() {
         </button>
         {!statsFresh && !statsLoading && (
           <span className="text-muted-sm" style={{color:GREY}}>
-            Calculate statistics first — both buttons unlock once the statistics match your current filters.
+            Calculate Statistics first — both buttons unlock once the statistics match your current filters.
           </span>
         )}
       </div>
