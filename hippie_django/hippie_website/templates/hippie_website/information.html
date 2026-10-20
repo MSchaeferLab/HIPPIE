@@ -131,9 +131,10 @@
       <a href="{% url 'hippie_website:interaction_query' %}">interaction query</a>.
     </p>
     <p>
-      On the result page, UniProt accession, Entrez gene id and gene symbol of each interactor of the query
-      are indicated. The confidence score of the interaction is given in the last column.
-      Clicking on the arrow button or the row opens an evidence page which lists the source databases, the publications which
+      On the result page, each row lists the gene symbol, UniProt accession and Entrez gene id of
+      both interactors, followed by the confidence score of the interaction and the number of
+      source databases and experiment types supporting it.
+      Clicking on the arrow button at the end of the row, or on the row itself, opens an evidence page which lists the source databases, the publications which
       mention the interaction, the experiment type used to detect it, and the species in which it is conserved.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
@@ -208,8 +209,8 @@
       To investigate the molecular context of Huntington’s disease (HD), huntingtin (HTT) serves
       as the primary reference gene. To get an overview of all its interaction partners, open the
       <a href="{% url 'hippie_website:index' %}?q=HTT">protein query for HTT</a> and filter it
-      with your own parameters. We observe 1,116 interaction partners, 1,276 if we include
-      isoforms.
+      with your own parameters. We observe 1,116 interactions, 1,276 if we include
+      isoform-specific interactions.
     </p>
     {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/protein_query.png" alt="Protein query for HTT showing the number of results and the Filters button" caption="Protein query for HTT. The result count is shown above the table; the Filters button opens the filter panel." %}
     {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/filters.png" alt="Filter panel with the isoform filter set to Both" caption="Filter panel. The isoform filter selects general proteins, isoforms, or both." %}
@@ -227,8 +228,9 @@
     {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/interaction_detail.png" alt="Interaction results for HTT and HAP1 and the evidence page for HAP1 isoform 2" caption="Results for HTT–HAP1 and the evidence page for HAP1 isoform 2 (P54257-2). The score is per gene pair; publications, experiment types and external links are isoform specific." %}
     <p>
       To expand this view into a broader interaction network around HD-associated proteins, we
-      gathered additional seed proteins relevant to HD from the literature: HAP40, HAP1 and HIP1,
-      TCERG1 and MED15, as well as SYT1, YKT6 and SNAP47. Searching for them in the
+      gathered additional seed proteins relevant to HD from the literature: F8A3 (HAP40) and HIP1,
+      TCERG1 and MED15, as well as SYT1, YKT6 and SNAP47. Together with HTT and HAP1 from above,
+      searching for all of them in the
       <a href="{% url 'hippie_website:network_query' %}">network query</a> reveals 2,300
       interactions, seven of which exceed the confidence score of the benchmark HTT–HAP1
       interaction.
@@ -277,7 +279,7 @@
   <div class="hippie-card">
     <h4 id="sources" class="section-label">Sources</h4>
     <p>
-      HIPPIE integrates interaction data from {{ sources|length }} data sources. Their counts add
+      HIPPIE integrates interaction data from {{ sources|length }} data sources{% if source_summary %} ({{ source_summary }}){% endif %}. Their counts add
       up to more than the total number of interactions, as several sources often report the same
       interaction; every source reporting an interaction is listed on its detail page. What each
       source is — many are curation teams or acronyms — is explained in the
@@ -291,7 +293,7 @@
         <tbody>
           {% for src in sources %}
           <tr>
-            <td>{% if src.url %}<a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.name }}</a>{% else %}{{ src.name }}{% endif %}{% if src.full_name and src.full_name|lower != src.name|lower %} <span class="text-muted-sm">— {{ src.full_name }}</span>{% endif %}</td>
+            <td>{% if src.url %}<a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.name }}</a>{% else %}{{ src.name }}{% endif %}{% if src.full_name %} <span class="text-muted-sm">— {{ src.full_name }}</span>{% endif %}</td>
             <td>{{ src.count }}</td>
           </tr>
           {% empty %}
@@ -383,7 +385,7 @@
   <div class="hippie-card">
     <h4 id="contact" class="section-label">Contact</h4>
     <p>Please send questions or comments on HIPPIE to: <a href="mailto:martin.schaefer@ieo.it">martin.schaefer@ieo.it</a></p>
-    <p class="mb-0">HIPPIE <a href="https://cbdm.uni-mainz.de/" target="_blank" rel="noopener">is hosted by</a> the CBDM group at the JGU in Mainz.</p>
+    <p class="mb-0">HIPPIE is hosted by the <a href="https://cbdm.uni-mainz.de/" target="_blank" rel="noopener">CBDM group</a> at the JGU in Mainz.</p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>

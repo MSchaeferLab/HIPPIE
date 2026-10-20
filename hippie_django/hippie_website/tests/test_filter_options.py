@@ -224,16 +224,18 @@ class EmptyListMeansNoFilterTest(HippieTestCase):
 
 
 class PrecomputedSplitDownloadsTest(TestCase):
-    """The Download page advertises the three pre-computed splits.
+    """The Download page advertises the nine pre-computed splits.
 
-    The archives themselves are produced outside this repo and dropped into
-    ``data/user_downloads/`` on the server, so this only pins the links.
+    One archive per (interaction set x negative set): high, medium + high or all
+    interactions, against non-observed pairs or HRNIs at the >= 3 / >= 5
+    threshold. The archives themselves are produced outside this repo and dropped
+    onto the server, so this only pins the links.
     """
 
-    FILES = (
-        "HIPPIE-current.splits.high.tar.gz",
-        "HIPPIE-current.splits.medium-high.tar.gz",
-        "HIPPIE-current.splits.all.tar.gz",
+    FILES = tuple(
+        f"HIPPIE-{level}{negatives}.zip"
+        for level in ("HC-", "MC-", "")
+        for negatives in ("Complement", "HRNI3", "HRNI5")
     )
 
     def test_download_page_links_each_split(self):

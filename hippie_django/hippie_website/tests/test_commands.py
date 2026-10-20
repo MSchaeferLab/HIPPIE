@@ -11,7 +11,9 @@ from django.test.utils import CaptureQueriesContext
 from ..models import (
     Gene,
     GeneTissue,
+    InteractionType,
     OrthologInteraction,
+    Source,
     Species,
     Tissue,
 )
@@ -136,6 +138,14 @@ class MitabCvNameParsingTest(TestCase):
             itype, "proteinchip(r) on a surface-enhanced laser desorption/ionization"
         )
 
+    def test_extract_mi_code(self):
+        from ..management.commands.hippie_update import _extract_mi_code
+
+        self.assertEqual(
+            _extract_mi_code('psi-mi:"MI:0915"(physical association)'), "MI:0915"
+        )
+        self.assertEqual(_extract_mi_code("physical association"), "")
+
     def test_parse_source_handles_embedded_parens(self):
         from ..management.commands.hippie_update import _parse_source
 
@@ -169,7 +179,16 @@ class ExportDownloadsCommandTest(TestCase):
         cls.p2 = make_protein(
             "TP53", uniprot_name="P53_HUMAN", gene_id=7157, accession="P04637"
         )
-        make_interaction(cls.p1, cls.p2, score=0.9)
+        inter = make_interaction(cls.p1, cls.p2, score=0.9)
+        inter.sources.add(
+            Source.objects.create(name="biogrid"),
+            Source.objects.create(name="no-such-db"),
+        )
+        inter.interaction_types.add(
+            InteractionType.objects.create(
+                name="physical association", psi_mi_code="MI:0915"
+            )
+        )
 
         # Conserved species live on OrthologInteraction, keyed on the gene pair.
         g1, g2 = cls.p1.gene, cls.p2.gene
@@ -201,6 +220,17 @@ class ExportDownloadsCommandTest(TestCase):
         # "Presence In Other Species" is the 16th MITAB column (index 15).
         self.assertEqual(cols[15], "taxid:10090(Mus musculus)")
 
+    def test_mitab_cv_columns_are_psi_mi_terms(self):
+        out = self._run()
+        with gzip.open(out / "HIPPIE-current.mitab.txt.gz", "rt") as f:
+            cols = f.read().splitlines()[1].split("\t")
+        self.assertEqual(cols[11], 'psi-mi:"MI:0915"(physical association)')
+        # A source without a registry code falls back to psi-mi:<name>.
+        self.assertEqual(
+            sorted(cols[12].split("|")),
+            ['psi-mi:"MI:0463"(biogrid)', "psi-mi:no-such-db"],
+        )
+
     def test_species_lookup_does_not_scale_with_interaction_count(self):
         """The ortholog map is loaded once, not once per exported row."""
         with CaptureQueriesContext(connection) as ctx:
@@ -219,3 +249,55 @@ class ExportDownloadsCommandTest(TestCase):
 # ---------------------------------------------------------------------------
 # ML Splits — orphan-aware stats, filter-aware medians, accession-based CSVs
 # ---------------------------------------------------------------------------
+
+
+class BackfillTypeCodesCommandTest(TestCase):
+    def test_fills_only_empty_codes_from_column_12(self):
+        InteractionType.objects.create(name="physical association")
+        InteractionType.objects.create(name="direct interaction", psi_mi_code="MI:0407")
+        InteractionType.objects.create(name="unseen type")
+        cols = ["-"] * 15
+        cols[11] = 'psi-mi:"MI:0915"(physical association)'
+        other = list(cols)
+        other[11] = 'psi-mi:"MI:9999"(direct interaction)'
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "mitab.txt"
+            path.write_text("\t".join(cols) + "\n" + "\t".join(other) + "\n")
+            out = StringIO()
+            call_command("backfill_type_codes", str(path), stdout=out)
+
+        codes = dict(InteractionType.objects.values_list("name", "psi_mi_code"))
+        self.assertEqual(codes["physical association"], "MI:0915")
+        self.assertEqual(codes["direct interaction"], "MI:0407")  # not overwritten
+        self.assertEqual(codes["unseen type"], "")
+        self.assertIn("unseen type", out.getvalue())
+
+
+class AddSplitSequencesCommandTest(TestCase):
+    def test_appends_the_split_subset_once(self):
+        import zipfile
+
+        from ..services.nextflow_runner import OUTPUT_FILES
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            (base / "data" / "precomputed").mkdir(parents=True)
+            (base / "data" / "precomputed" / "sequences.fasta").write_text(
+                ">P1\nMKV\n>P2\nMAA\n>P9\nMZZ\n"
+            )
+            archive = base / "HIPPIE-HC-HRNI3.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                for name in OUTPUT_FILES:
+                    zf.writestr(name, "protein1,protein2,label\nP1,P2,1\n")
+
+            with self.settings(BASE_DIR=base):
+                call_command("add_split_sequences", str(base), stdout=StringIO())
+                out = StringIO()
+                call_command("add_split_sequences", str(base), stdout=out)
+
+            with zipfile.ZipFile(archive) as zf:
+                self.assertEqual(zf.namelist().count("sequences.fasta"), 1)
+                self.assertEqual(
+                    zf.read("sequences.fasta").decode(), ">P1\nMKV\n>P2\nMAA\n"
+                )
+        self.assertIn("already has sequences.fasta", out.getvalue())

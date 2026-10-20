@@ -28,6 +28,7 @@
     <ul class="toc-list mt-2 mb-0">
       <li><a href="#overview">Overview</a></li>
       <li><a href="#shared-filters">Shared filter parameters</a></li>
+      <li><a href="#filter-options">Filter options</a></li>
       <li><a href="#query">Protein query</a></li>
       <li><a href="#pairs">Batch pairwise lookup</a></li>
       <li><a href="#network">Network expansion</a></li>
@@ -65,7 +66,8 @@
     <ul class="mb-2">
       <li><code>show</code> = <code>interactions</code>, <code>noninteractions</code> or <code>both</code>.</li>
       <li><code>min_score</code> / <code>max_score</code> = confidence-score bounds (0–1).</li>
-      <li><code>source</code>, <code>experiment</code>, <code>interaction_type</code>, <code>tissue</code> = numeric ids <em>(repeatable)</em>.
+      <li><code>source</code>, <code>experiment</code>, <code>interaction_type</code>, <code>tissue</code> = numeric ids <em>(repeatable)</em>,
+        listed by the <a href="#filter-options">filter options</a> endpoint.
         Values within one parameter are OR-ed; different parameters are AND-ed.
         <strong>Omit a parameter to disable that filter</strong> — there is no way to
         request "none of them", because a result matching no source database does not exist.</li>
@@ -75,6 +77,29 @@
       <li><code>reviewed</code> = <code>reviewed</code>, <code>unreviewed</code>, or <code>both</code>.</li>
       <li><code>isoform_mode</code> = <code>general</code>, <code>isoforms</code>, or <code>both</code>.</li>
     </ul>
+    <a class="back-to-top" href="#top"><i>Back to top</i></a>
+  </div>
+</div>
+
+{# ── Filter options ── #}
+<div class="info-section">
+  <div class="hippie-card">
+    <h4 id="filter-options" class="section-label">Filter options</h4>
+    <div class="hippie-card--muted mb-2">
+      <code class="mono endpoint"><b>GET</b> /api/browse/filters/</code>
+    </div>
+    <p>
+      The vocabulary behind the filter lists, i.e. the numeric ids that the <code>source</code>,
+      <code>experiment</code>, <code>interaction_type</code> and <code>tissue</code> parameters
+      (and <code>source_ids</code>, <code>experiment_ids</code>, <code>type_ids</code>,
+      <code>tissue_ids</code> for ML splits) expect. Takes no parameters. Returns
+      <code>{ tissues[], sources[], experiments[], interaction_types[], category_order }</code>;
+      each option is <code>{ id, name, category, count }</code> (tissues also carry a
+      <code>subcategory</code>). For sources, experiment and interaction types <code>count</code>
+      is the number of interactions carrying that evidence; for tissues it is the number of genes
+      expressed there. Options that no interaction uses are omitted.
+      <code>category_order</code> gives the display order of the categories for each list.
+    </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
   </div>
 </div>
@@ -198,8 +223,9 @@
       <code>status</code> is
       <code>PENDING</code>, <code>RUNNING</code>, <code>DONE</code>, <code>FAILED</code> or
       <code>CANCELLED</code>, and <code>download_url</code> is filled in only once the job is
-      <code>DONE</code>. Splits are generated one at a time and a run takes tens of minutes to
-      two hours, so poll no more than once every few seconds and read elapsed time from
+      <code>DONE</code>. Splits are generated one at a time and a run takes from tens of minutes
+      up to {{ split_max_run }} (the run cap, <code>SPLIT_JOB_MAX_RUN_SECONDS</code>; a run past it
+      is stopped and fails), so poll no more than once every few seconds and read elapsed time from
       <code>started_at</code> rather than <code>created_at</code> — a job can wait in the queue
       far longer than it runs. The queue is first-come-first-served and neither capped nor
       deduplicated, so <code>estimated_wait_seconds</code> (seconds until the job is expected
@@ -225,6 +251,8 @@
         self-loop and GO-Jaccard bias.</li>
       <li><code>test_realistic.csv</code> — 1:10, with <em>uniform</em> negatives. It simulates
         an uncontrolled screen, so it is deliberately not bias-matched.</li>
+      <li><code>sequences.fasta</code> — the sequence of every protein in the four CSVs, headed
+        by the same UniProt accession.</li>
       <li><code>summary.json</code> and <code>README.txt</code>, naming the filters used, the
         per-split counts, and the exact pipeline commit the split was cut with.</li>
     </ul>

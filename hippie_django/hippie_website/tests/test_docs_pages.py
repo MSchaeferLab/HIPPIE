@@ -12,7 +12,10 @@ class DocsPagesTest(TestCase):
     @classmethod
     def setUpTestData(cls) -> None:
         Source.objects.create(
-            name="bhf-ucl", url="https://example.org/bhf", n_connected_interactions=1720
+            name="bhf-ucl",
+            url="https://example.org/bhf",
+            description="British Heart Foundation – University College London",
+            n_connected_interactions=1720,
         )
         Source.objects.create(name="IntAct", n_connected_interactions=524211)
         # Unused sources stay out of the counts table.
@@ -35,7 +38,7 @@ class DocsPagesTest(TestCase):
 
     def test_information_sources_come_from_the_db(self) -> None:
         html = self._get("information")
-        self.assertIn("2 data sources", html)
+        self.assertIn("2 data sources (1 curation team, 1 interaction database)", html)
         self.assertIn("1720", html)
         self.assertIn("524211", html)
         self.assertNotIn(">hprd<", html)

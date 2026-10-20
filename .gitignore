@@ -311,6 +311,7 @@ hippie_django/staticfiles/
 # Data loading — large reference/download files, never commit these
 hippie_django/data/*
 !hippie_django/data/download_update_data.sh
+!hippie_django/data/sources_db.json
 
 # Stupid .gitignore behavior: we want to ignore everything in the user_downloads folder except for techniques_scoring_*.tsv files
 !hippie_django/data/user_downloads/

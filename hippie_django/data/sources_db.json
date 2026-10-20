@@ -1,0 +1,182 @@
+{
+  "intact": {
+    "url": "https://www.ebi.ac.uk/intact/",
+    "description": "IntAct Molecular Interaction Database",
+    "what_it_is": "Open, literature-curated molecular interaction database hosted at EMBL-EBI; the shared curation platform of the IMEx consortium.",
+    "psi_mi": "MI:0469"
+  },
+  "mint": {
+    "url": "https://mint.bio.uniroma2.it/",
+    "description": "Molecular INTeraction database",
+    "what_it_is": "Literature-curated protein interactions from the University of Rome Tor Vergata; curated within IntAct (IMEx member).",
+    "psi_mi": "MI:0471"
+  },
+  "imex": {
+    "url": "https://www.imexconsortium.org/",
+    "description": "International Molecular Exchange Consortium",
+    "what_it_is": "Consortium of interaction databases (IntAct, MINT, DIP, …) sharing one curation standard; records curated to IMEx rules."
+  },
+  "mpidb": {
+    "url": "https://www.ebi.ac.uk/intact/search?query=source:mpidb",
+    "description": "Microbial Protein Interaction Database",
+    "what_it_is": "Curated microbial protein interactions; the original site is offline and its data lives on in IntAct.",
+    "psi_mi": "MI:0903"
+  },
+  "dip": {
+    "url": "https://dip.doe-mbi.ucla.edu/",
+    "description": "Database of Interacting Proteins",
+    "what_it_is": "Experimentally determined protein interactions curated at UCLA (IMEx member).",
+    "psi_mi": "MI:0465"
+  },
+  "matrixdb": {
+    "url": "https://matrixdb.expasy.org/",
+    "description": "Extracellular matrix interaction database",
+    "what_it_is": "Interactions involving extracellular-matrix proteins, proteoglycans and polysaccharides (University of Lyon).",
+    "psi_mi": "MI:0917"
+  },
+  "innatedb": {
+    "url": "https://www.innatedb.com/",
+    "description": "Innate immunity interaction database",
+    "what_it_is": "Curated interactions and pathways of the innate immune response.",
+    "psi_mi": "MI:0974"
+  },
+  "hpidb": {
+    "url": "https://www.ebi.ac.uk/intact/search?query=source:hpidb",
+    "description": "Host–Pathogen Interaction Database",
+    "what_it_is": "Curated interactions between host and pathogen proteins (Mississippi State University).",
+    "psi_mi": "MI:1335"
+  },
+  "uniprot": {
+    "url": "https://www.uniprot.org/",
+    "description": "UniProt Knowledgebase",
+    "what_it_is": "Interactions annotated by UniProtKB/Swiss-Prot curators and deposited via IntAct.",
+    "psi_mi": "MI:0486"
+  },
+  "bhf-ucl": {
+    "url": "https://www.ebi.ac.uk/intact/search?query=source:bhf-ucl",
+    "description": "British Heart Foundation – University College London (Curation Team)",
+    "what_it_is": "Cardiovascular gene-annotation team at UCL that curates interactions of cardiovascular-relevant proteins into IntAct.",
+    "psi_mi": "MI:1332"
+  },
+  "biogrid": {
+    "url": "https://thebiogrid.org/",
+    "description": "Biological General Repository for Interaction Datasets",
+    "what_it_is": "Literature-curated protein and genetic interactions across major model organisms and human.",
+    "psi_mi": "MI:0463"
+  },
+  "i2d": {
+    "url": "http://ophid.utoronto.ca/",
+    "description": "Interologous Interaction Database",
+    "what_it_is": "Known and predicted protein interactions collected by the Jurisica lab, University of Toronto.",
+    "psi_mi": "MI:1262"
+  },
+  "homomint": {
+    "url": "https://mint.bio.uniroma2.it/HomoMINT",
+    "description": "HomoMINT",
+    "what_it_is": "Human interactions inferred from orthologous interactions in model organisms, derived from MINT."
+  },
+  "hprd": {
+    "url": "http://www.hprd.org/",
+    "description": "Human Protein Reference Database",
+    "what_it_is": "Manually curated human protein interactions; no longer updated."
+  },
+  "interpro": {
+    "url": "https://www.ebi.ac.uk/interpro/",
+    "description": "InterPro",
+    "what_it_is": "Protein families, domains and functional sites (EMBL-EBI)."
+  },
+  "omim": {
+    "url": "https://www.omim.org/",
+    "description": "Online Mendelian Inheritance in Man",
+    "what_it_is": "Catalogue of human genes and genetic disorders."
+  },
+  "molecular connections": {
+    "url": "https://www.ebi.ac.uk/intact/search?query=source:molecular%20connections",
+    "description": "Molecular Connections Pvt. Ltd. (Curation Team)",
+    "what_it_is": "Commercial curation team (Bangalore, India) that curates interaction data into IntAct.",
+    "psi_mi": "MI:1263"
+  },
+  "emdb": {
+    "url": "https://www.ebi.ac.uk/emdb/",
+    "description": "Electron Microscopy Data Bank",
+    "what_it_is": "Archive of cryo-EM density maps."
+  },
+  "proteomexchange": {
+    "url": "https://www.proteomexchange.org/",
+    "description": "ProteomeXchange",
+    "what_it_is": "Consortium coordinating public mass-spectrometry proteomics repositories."
+  },
+  "pmc": {
+    "url": "https://www.ncbi.nlm.nih.gov/pmc/",
+    "description": "PubMed Central",
+    "what_it_is": "Free full-text archive of biomedical literature."
+  },
+  "brenda": {
+    "url": "https://www.brenda-enzymes.org/",
+    "description": "BRENDA",
+    "what_it_is": "Comprehensive enzyme information system."
+  },
+  "efo": {
+    "url": "https://www.ebi.ac.uk/efo/",
+    "description": "Experimental Factor Ontology",
+    "what_it_is": "EMBL-EBI ontology of experimental variables."
+  },
+  "flybase": {
+    "url": "https://flybase.org/",
+    "description": "Drosophila genetics and genomics database",
+    "what_it_is": "Drosophila genetics and genomics database; contributes curated interaction records via IntAct.",
+    "psi_mi": "MI:0478"
+  },
+  "empiar": {
+    "url": "https://www.ebi.ac.uk/empiar/",
+    "description": "Electron Microscopy Public Image Archive",
+    "what_it_is": "Archive of raw electron-microscopy image data."
+  },
+  "rcsb pdb": {
+    "url": "https://www.rcsb.org/",
+    "description": "RCSB Protein Data Bank",
+    "what_it_is": "US archive of macromolecular structures."
+  },
+  "go": {
+    "url": "https://geneontology.org/",
+    "description": "Gene Ontology",
+    "what_it_is": "Gene-function annotation resource; interaction records originating from GO curation."
+  },
+  "pride": {
+    "url": "https://www.ebi.ac.uk/pride/",
+    "description": "PRIDE",
+    "what_it_is": "Proteomics identifications database (mass-spectrometry data, EMBL-EBI)."
+  },
+  "wwpdb": {
+    "url": "https://www.wwpdb.org/",
+    "description": "Worldwide Protein Data Bank",
+    "what_it_is": "Consortium maintaining the single global PDB archive."
+  },
+  "mbinfo": {
+    "url": "https://www.ebi.ac.uk/intact/search?query=source:mbinfo",
+    "description": "MechanoBiology Institute (Curation Team)",
+    "what_it_is": "Curation team of the MechanoBiology Institute, National University of Singapore, contributing mechanobiology-related interactions to IntAct.",
+    "psi_mi": "MI:1222"
+  },
+  "tissue list": {
+    "url": "https://www.uniprot.org/help/tissue_list",
+    "description": "UniProt tissue list",
+    "what_it_is": "UniProt's controlled vocabulary of tissues."
+  },
+  "ntnu": {
+    "url": "https://www.ebi.ac.uk/intact/search?query=source:ntnu",
+    "description": "Norwegian University of Science and Technology (Curation Team)",
+    "what_it_is": "Curation team at NTNU (Trondheim) contributing interactions to IntAct.",
+    "psi_mi": "MI:1264"
+  },
+  "bmrb": {
+    "url": "https://bmrb.io/",
+    "description": "Biological Magnetic Resonance Data Bank",
+    "what_it_is": "Archive of NMR spectroscopy data on biomolecules."
+  },
+  "pdbe": {
+    "url": "https://www.ebi.ac.uk/pdbe/",
+    "description": "Protein Data Bank in Europe",
+    "what_it_is": "European archive of macromolecular structures."
+  }
+}

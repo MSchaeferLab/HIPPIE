@@ -48,7 +48,7 @@ from .models import (
     GeneSynonym,
 )
 
-from .tasks import run_split_job
+from .tasks import max_run_label, run_split_job
 from .query_filters import (
     apply_protein_level_filters,
     group_by_side,
@@ -95,7 +95,11 @@ from .services.vocab import (  # noqa: F401
     vocab_options as _vocab_options,
 )
 from .services import split_queue
-from .services.guide import filter_guide_context, source_table
+from .services.guide import (
+    filter_guide_context,
+    source_category_summary,
+    source_table,
+)
 from .services.detail import (  # noqa: F401
     digger_ctx as _digger_ctx,
     interaction_detail_context as _interaction_detail_context,
@@ -1219,8 +1223,14 @@ def download_dataset(request, filename: str):
 
 @require_GET
 def information_view(request):
+    sources = source_table()
     return render(
-        request, "hippie_website/information.html", {"sources": source_table()}
+        request,
+        "hippie_website/information.html",
+        {
+            "sources": sources,
+            "source_summary": source_category_summary(str(s["name"]) for s in sources),
+        },
     )
 
 
@@ -1231,12 +1241,14 @@ def filter_guide_view(request):
 
 @require_GET
 def api_docs_view(request):
-    return render(request, "hippie_website/api.html", {})
+    return render(
+        request, "hippie_website/api.html", {"split_max_run": max_run_label()}
+    )
 
 
 @require_GET
 def machine_learning_view(request):
-    return render(request, "hippie_website/ml.html", {})
+    return render(request, "hippie_website/ml.html", {"split_max_run": max_run_label()})
 
 
 # ---------------------------------------------------------------------------
@@ -1340,6 +1352,7 @@ def ml_splits_view(request):
         {
             "meta_json": json.dumps(_ml_filter_meta()),
             "initial_json": json.dumps(initial),
+            "split_max_run": max_run_label(),
         },
     )
 

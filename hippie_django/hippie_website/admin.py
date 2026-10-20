@@ -111,8 +111,8 @@ class GeneTissueAdmin(admin.ModelAdmin):
 
 @admin.register(Source)
 class SourceAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "url")
-    search_fields = ("name", "url")
+    list_display = ("id", "name", "description", "url")
+    search_fields = ("name", "description", "url")
     ordering = ("name",)
 
 

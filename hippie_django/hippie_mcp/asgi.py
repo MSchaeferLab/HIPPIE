@@ -22,6 +22,7 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hippie.settings")
 django.setup()
 
+from asgiref.sync import sync_to_async  # noqa: E402
 from django.conf import settings  # noqa: E402
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 from starlette.applications import Starlette  # noqa: E402
@@ -34,7 +35,7 @@ from hippie_mcp.ratelimit import (  # noqa: E402
     DEFAULT_WINDOW,
     RateLimitMiddleware,
 )
-from hippie_mcp.server import mcp  # noqa: E402
+from hippie_mcp.server import mcp, refresh_release_text  # noqa: E402
 
 # Path the MCP endpoint is served at, relative to wherever this app is mounted.
 MCP_PATH = os.environ.get("HIPPIE_MCP_PATH", "/mcp")
@@ -109,7 +110,11 @@ async def lifespan(app: Starlette) -> AsyncIterator[None]:
     wiring is dead code here and the top-level app must do it. Without this the
     service starts cleanly and then fails every single request with
     ``RuntimeError: Task group is not initialized``.
+
+    Startup is also where the release's confidence cutoffs are read into the
+    server instructions; the ORM is sync, hence the worker thread.
     """
+    await sync_to_async(refresh_release_text)()
     async with mcp.session_manager.run():
         yield
 

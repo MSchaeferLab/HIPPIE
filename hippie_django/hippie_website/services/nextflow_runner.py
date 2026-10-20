@@ -20,7 +20,13 @@ from pathlib import Path
 
 from django.conf import settings
 
-from .export_ppis import artifact_paths, write_ppis_csv, write_samplesheet
+from .export_ppis import (
+    ARTIFACT_FILES,
+    artifact_dir,
+    artifact_paths,
+    write_ppis_csv,
+    write_samplesheet,
+)
 from .generate_splits import SplitParams
 
 # The dataset id used for the single samplesheet row, and therefore the name of
@@ -365,6 +371,13 @@ class RunSummary:
     # from the same proteome.
     artifacts_fingerprint: str = "unknown"
     splits: list = field(default_factory=list)
+    # Every accession in the four CSVs, kept for the sequences.fasta subset.
+    # Not part of summary.json or the job row — see to_dict().
+    proteins: set[str] = field(default_factory=set, repr=False)
+
+    def to_dict(self) -> dict[str, object]:
+        """The JSON-able summary: everything except the protein set."""
+        return {k: v for k, v in self.__dict__.items() if k != "proteins"}
 
 
 def collect_summary(
@@ -398,6 +411,7 @@ def collect_summary(
         pipeline_commit=commit,
         artifacts_fingerprint=artifacts_fingerprint,
         splits=splits,
+        proteins=all_proteins,
     )
 
 
@@ -439,6 +453,9 @@ def write_readme(dest: Path, params: SplitParams, summary: RunSummary) -> Path:
         "                       uncontrolled screen, so it is deliberately not\n",
         "                       bias-matched and is identical for every negative set\n\n",
         "  Columns: protein1,protein2,label[,score]   label 1 = interacting, 0 = not.\n\n",
+        "  sequences.fasta      the sequence of every protein in the four CSVs,\n",
+        "                       headed by the same UniProt accession (isoforms\n",
+        "                       included)\n\n",
         "  Splits are leakage-aware by sequence homology, not only by graph cut:\n",
         "  CD-HIT-2D plus a redundancy filter remove train/test-similar pairs, so\n",
         "  the counts below are lower than the raw filtered interaction count.\n\n",
@@ -479,16 +496,50 @@ def write_readme(dest: Path, params: SplitParams, summary: RunSummary) -> Path:
     return dest
 
 
+def write_sequences(dest: Path, source: Path, proteins: set[str]) -> int:
+    """Copy the FASTA records of ``proteins`` from ``source`` into ``dest``.
+
+    ``source`` is the precomputed proteome FASTA the run was cut from, so every
+    accession in the split has a record there and the downloaded split needs no
+    second fetch from UniProt. Matches on the first header token; records are
+    copied verbatim. Returns the number of records written.
+    """
+    written = 0
+    keep = False
+    with source.open() as src, dest.open("w") as out:
+        for line in src:
+            if line.startswith(">"):
+                header = line[1:].split(maxsplit=1)
+                keep = bool(header) and header[0] in proteins
+                written += keep
+            if keep:
+                out.write(line)
+    return written
+
+
 def package_results(
-    layout: JobLayout, params: SplitParams, summary: RunSummary, job_id: str
+    layout: JobLayout,
+    params: SplitParams,
+    summary: RunSummary,
+    job_id: str,
+    sequences: Path | None = None,
 ) -> str:
-    """Write summary.json + README.txt beside the CSVs and zip the lot.
+    """Write summary.json, README.txt and sequences.fasta beside the CSVs and
+    zip the lot.
 
     Zips into ``MEDIA_ROOT/splits/<uuid>.zip`` — the one artifact that outlives
-    the job directory, and the only thing Apache serves.
+    the job directory, and the only thing Apache serves. ``sequences`` defaults
+    to the precomputed proteome FASTA.
     """
-    (layout.results / "summary.json").write_text(json.dumps(summary.__dict__, indent=2))
+    (layout.results / "summary.json").write_text(
+        json.dumps(summary.to_dict(), indent=2)
+    )
     write_readme(layout.results / "README.txt", params, summary)
+    write_sequences(
+        layout.results / "sequences.fasta",
+        sequences or artifact_dir() / ARTIFACT_FILES["sequences"],
+        summary.proteins,
+    )
 
     zip_base = Path(settings.MEDIA_ROOT) / "splits" / str(job_id)
     zip_base.parent.mkdir(parents=True, exist_ok=True)

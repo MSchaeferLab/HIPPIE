@@ -15,7 +15,7 @@ from .services import nextflow_runner as nf
 from .services.generate_splits import SplitParams
 
 # How often the task looks up from the subprocess to refresh `step` and check
-# for a cancel request. A split runs for tens of minutes to two hours, so this
+# for a cancel request. A split runs for about 35 minutes, so this
 # is about responsiveness of the Cancel button, not about progress resolution —
 # 10 s is well under the time it takes a user to notice they mis-clicked.
 POLL_SECONDS = 10
@@ -24,6 +24,32 @@ POLL_SECONDS = 10
 # by terminating its running tasks and shutting the executor down, which takes
 # longer than a plain process exit but leaves nothing orphaned.
 CANCEL_GRACE_SECONDS = 60
+
+# job.error for a run killed at SPLIT_JOB_MAX_RUN_SECONDS. Shown verbatim on the
+# run card, so it names the way out rather than the mechanism.
+TIMED_OUT_ERROR = (
+    "This split was stopped after {limit} because it exceeded the server's "
+    "maximum run time. The selected filters leave a problem too large or too "
+    "complex for the server. Narrow the filters, or download the raw data on "
+    "this page and run the ppi-splitting-pipeline locally, where the solvers "
+    "get a larger time and memory budget."
+)
+
+
+def _max_run_seconds() -> int:
+    return int(getattr(settings, "SPLIT_JOB_MAX_RUN_SECONDS", 3 * 3600))
+
+
+def _format_limit(seconds: int) -> str:
+    if seconds % 3600 == 0:
+        hours = seconds // 3600
+        return f"{hours} hour" + ("" if hours == 1 else "s")
+    return f"{round(seconds / 60)} minutes"
+
+
+def max_run_label() -> str:
+    """The cap as the pages quote it ("3 hours"), so copy follows the setting."""
+    return _format_limit(_max_run_seconds())
 
 
 def _finish(job: SplitJob, **fields) -> None:
@@ -111,6 +137,11 @@ def run_split_job(self, job_id: str):
     )
 
     proc = None
+    # Monotonic, not started_at: the cap must not move if the wall clock does.
+    # Started at the claim, so the export and JVM start-up count against it —
+    # the user-facing "maximum of 3 hours" is from when the run card says
+    # running, not from when Nextflow happened to start.
+    deadline = time.monotonic() + _max_run_seconds()
     try:
         # Before anything expensive: the JVM, the pipeline checkout and the
         # licence either exist or this run is going to die twenty minutes deep
@@ -159,6 +190,20 @@ def run_split_job(self, job_id: str):
                 shutil.rmtree(layout.root, ignore_errors=True)
                 return
 
+            if time.monotonic() >= deadline:
+                _kill_group(proc)
+                _finish(
+                    job,
+                    status="FAILED",
+                    step="timed_out",
+                    error=TIMED_OUT_ERROR.format(limit=max_run_label()),
+                    finished_at=timezone.now(),
+                )
+                # Unlike a failed run, nothing in the work dir explains this
+                # one — the cause is the cap — and it is several GB.
+                shutil.rmtree(layout.root, ignore_errors=True)
+                return
+
             # One UPDATE per poll whether or not the step changed — the beat is
             # the liveness signal, and a run that spends 30 minutes inside
             # SOLVE_ILP changes step exactly once in that time.
@@ -195,7 +240,7 @@ def run_split_job(self, job_id: str):
             step="done",
             progress=1.0,
             zip_path=zip_path,
-            summary=summary.__dict__,
+            summary=summary.to_dict(),
             finished_at=timezone.now(),
         )
         # Only on success: nothing in here is needed once the zip exists, and a

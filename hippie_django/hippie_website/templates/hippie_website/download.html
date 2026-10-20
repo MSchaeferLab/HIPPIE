@@ -134,8 +134,8 @@
             <tr>
               <td><span class="col-badge">7</span></td>
               <td><code>score</code></td>
-              <td><code>0.85</code></td>
-              <td>HIPPIE confidence score (0–1), 2 decimals. ≥{{ current_release.int_median|default:0.00|floatformat:2 }} medium, ≥{{ current_release.int_q3|default:0.0|floatformat:2 }} high confidence</td>
+              <td><code>0.8824</code></td>
+              <td>HIPPIE confidence score (0–1), 4 decimals. ≥{{ current_release.int_median|default:0.00|floatformat:2 }} medium, ≥{{ current_release.int_q3|default:0.0|floatformat:2 }} high confidence</td>
             </tr>
             <tr>
               <td><span class="col-badge">8</span></td>
@@ -243,19 +243,19 @@
             <tr>
               <td><span class="col-badge">13</span></td>
               <td><code>Source Databases</code></td>
-              <td><code>BioGRID|IntAct</code></td>
-              <td>Databases reporting this interaction</td>
+              <td><code>psi-mi:"MI:0463"(biogrid)|psi-mi:"MI:0471"(MINT)</code></td>
+              <td>Databases reporting this interaction (PSI-MI CV list)</td>
             </tr>
             <tr>
               <td><span class="col-badge">14</span></td>
               <td><code>Interaction Identifiers</code></td>
-              <td><code>-</code></td>
-              <td>Cross-reference links per source database</td>
+              <td><code>biogrid:2596399|biogrid:2596398</code></td>
+              <td>Identifiers of this interaction in the source databases</td>
             </tr>
             <tr>
               <td><span class="col-badge">15</span></td>
               <td><code>Confidence Value</code></td>
-              <td><code>hippie:0.85</code></td>
+              <td><code>hippie:0.8824</code></td>
               <td>HIPPIE confidence score (0–1)</td>
             </tr>
             <tr>
@@ -291,8 +291,12 @@
     Ready-made train / validation / test partitions of the current release, for training
     protein–protein interaction predictors without configuring anything. Each archive is a
     <code>.zip</code> holding <code>train.csv</code>, <code>val.csv</code> and two test sets —
-    <code>test_balanced.csv</code> (equal positives and negatives) and
-    <code>test_realistic.csv</code> (negatives at 10:1 rate).
+    <code>test_balanced.csv</code> (1:1 positives to negatives) and
+    <code>test_realistic.csv</code> (1:10) — plus <code>sequences.fasta</code> (the sequence of
+    every protein in the splits, headed by its UniProt accession). Negatives are either non-observed pairs
+    (Complement) or highly replicated non-interactions (HRNIs): pairs that were tested in at
+    least 3 (HRNI ≥ 3) or 5 (HRNI ≥ 5) independent experiments and never observed to
+    interact.
     Read the <a href="{% url 'hippie_website:machine_learning' %}">Machine Learning guide</a>
     first — it covers the data-leakage pitfalls these splits are designed around. For a split
     filtered your own way (by tissue, experiment type, source database, node degree, …), build
@@ -314,64 +318,64 @@
           <td>3.0</td>
           <td>High confidence (score ≥ 0.72)</td>
           <td>Non-observed</td>
-          <td>04/09/26</td>
+          <td>09.09.26</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HC-Complement.zip' %}">HIPPIE-HC-Complement.zip</a></td>
         </tr>
         <tr>
           <td>3.0</td>
           <td>High confidence (score ≥ 0.72)</td>
           <td>HRNI ≥ 3</td>
-          <td>09/09/26</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HC-HCNI3.zip' %}">HIPPIE-HC-HCNI3.zip</a></td>
+          <td>09.09.26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HC-HRNI3.zip' %}">HIPPIE-HC-HRNI3.zip</a></td>
         </tr>
         <tr>
           <td>3.0</td>
           <td>High confidence (score ≥ 0.72)</td>
           <td>HRNI ≥ 5</td>
-          <td>09/09/26</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HC-HCNI5.zip' %}">HIPPIE-HC-HCNI5.zip</a></td>
+          <td>09.09.26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HC-HRNI5.zip' %}">HIPPIE-HC-HRNI5.zip</a></td>
         </tr>
         <tr>
           <td>3.0</td>
           <td>High + medium confidence (score ≥ 0.63)</td>
           <td>Non-observed</td>
-          <td>09/09/26</td>
+          <td>09.09.26</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-MC-Complement.zip' %}">HIPPIE-MC-Complement.zip</a></td>
         </tr>
         <tr>
           <td>3.0</td>
           <td>High + medium confidence (score ≥ 0.63)</td>
           <td>HRNI ≥ 3</td>
-          <td>09/09/26</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-MC-HCNI3.zip' %}">HIPPIE-MC-HCNI3.zip</a></td>
+          <td>09.09.26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-MC-HRNI3.zip' %}">HIPPIE-MC-HRNI3.zip</a></td>
         </tr>
         <tr>
           <td>3.0</td>
           <td>High + medium confidence (score ≥ 0.63)</td>
           <td>HRNI ≥ 5</td>
-          <td>09/09/26</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-MC-HCNI5.zip' %}">HIPPIE-MC-HCNI5.zip</a></td>
+          <td>09.09.26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-MC-HRNI5.zip' %}">HIPPIE-MC-HRNI5.zip</a></td>
         </tr>
         <tr>
           <td>3.0</td>
           <td>Whole database</td>
           <td>Non-observed</td>
-          <td>09/09/26</td>
+          <td>09.09.26</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-Complement.zip' %}">HIPPIE-Complement.zip</a></td>
         </tr>
         <tr>
           <td>3.0</td>
           <td>Whole database</td>
           <td>HRNI ≥ 3</td>
-          <td>09/09/26</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HCNI3.zip' %}">HIPPIE-HCNI3.zip</a></td>
+          <td>09.09.26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HRNI3.zip' %}">HIPPIE-HRNI3.zip</a></td>
         </tr>
         <tr>
           <td>3.0</td>
           <td>Whole database</td>
           <td>HRNI ≥ 5</td>
-          <td>09/09/26</td>
-          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HCNI5.zip' %}">HIPPIE-HCNI5.zip</a></td>
+          <td>09.09.26</td>
+          <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-HRNI5.zip' %}">HIPPIE-HRNI5.zip</a></td>
         </tr>
       </tbody>
     </table>
@@ -398,85 +402,85 @@
       <tbody>
         <tr>
           <td>current release (v3.0)</td>
-          <td>last updated: 06/17/26</td>
+          <td>last updated: 19.10.26</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.txt.gz' %}">HIPPIE current TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-current.mitab.txt.gz' %}">HIPPIE current MITAB</a></td>
           <td>~1.1 million interactions total; 71,000 isoform-specific interactions added</td>
         </tr>
         <tr>
-          <td>2.4</td><td>04/09/26</td>
+          <td>2.4</td><td>09.04.26</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v2_4.txt.gz' %}">HIPPIE v2.4 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-2.4.mitab.txt.gz' %}">HIPPIE v2.4 MITAB</a></td>
           <td>275,000 new interactions</td>
         </tr>
         <tr>
-          <td>2.3</td><td>04/29/22</td>
+          <td>2.3</td><td>29.04.22</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v2_3.txt.gz' %}">HIPPIE v2.3 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-2.3.mitab.txt.gz' %}">HIPPIE v2.3 MITAB</a></td>
           <td>390,000 new interactions; tissue expression data from GTEx v8</td>
         </tr>
         <tr>
-          <td>2.2</td><td>02/14/19</td>
+          <td>2.2</td><td>14.02.19</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v2_2.txt.gz' %}">HIPPIE v2.2 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-2.2.mitab.txt.gz' %}">HIPPIE v2.2 MITAB</a></td>
           <td>66,000 new interactions</td>
         </tr>
         <tr>
-          <td>2.1</td><td>07/18/17</td>
+          <td>2.1</td><td>18.07.17</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v2_1.txt.gz' %}">HIPPIE v2.1 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-2.1.mitab.txt.gz' %}">HIPPIE v2.1 MITAB</a></td>
           <td>52,000 new interactions</td>
         </tr>
         <tr>
-          <td>2.0</td><td>06/24/16</td>
+          <td>2.0</td><td>24.06.16</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v2_0.txt.gz' %}">HIPPIE v2.0 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-2.0.mitab.txt.gz' %}">HIPPIE v2.0 MITAB</a></td>
           <td>44,000 new interactions; external database identifiers updated</td>
         </tr>
         <tr>
-          <td>1.8</td><td>09/01/15</td>
+          <td>1.8</td><td>01.09.15</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v1_8.txt.gz' %}">HIPPIE v1.8 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-1.8.mitab.txt.gz' %}">HIPPIE v1.8 MITAB</a></td>
           <td>45,000 new interactions</td>
         </tr>
         <tr>
-          <td>1.7</td><td>09/05/14</td>
+          <td>1.7</td><td>05.09.14</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v1_7.txt.gz' %}">HIPPIE v1.7 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-1.7.mitab.txt.gz' %}">HIPPIE v1.7 MITAB</a></td>
           <td>40,000 interactions added</td>
         </tr>
         <tr>
-          <td>1.6</td><td>10/11/13</td>
+          <td>1.6</td><td>11.10.13</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v1_6.txt.gz' %}">HIPPIE v1.6 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-1.6.mitab.txt.gz' %}">HIPPIE v1.6 MITAB</a></td>
           <td>40,000 interactions added</td>
         </tr>
         <tr>
-          <td>1.5</td><td>12/21/12</td>
+          <td>1.5</td><td>21.12.12</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v1_5.txt.gz' %}">HIPPIE v1.5 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-1.5.mitab.txt.gz' %}">HIPPIE v1.5 MITAB</a></td>
           <td>21,000 interactions added, identifiers updated</td>
         </tr>
         <tr>
-          <td>1.4</td><td>09/03/12</td>
+          <td>1.4</td><td>03.09.12</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v1_4.txt.gz' %}">HIPPIE v1.4 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-1.4.mitab.txt.gz' %}">HIPPIE v1.4 MITAB</a></td>
           <td>17,000 interactions added</td>
         </tr>
         <tr>
-          <td>1.3</td><td>11/25/11</td>
+          <td>1.3</td><td>25.11.11</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v1_3.txt.gz' %}">HIPPIE v1.3 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-1.3.mitab.txt.gz' %}">HIPPIE v1.3 MITAB</a></td>
           <td>20,000 interactions added</td>
         </tr>
         <tr>
-          <td>1.2</td><td>08/02/11</td>
+          <td>1.2</td><td>02.08.11</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v1_2.txt.gz' %}">HIPPIE v1.2 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-1.2.mitab.txt.gz' %}">HIPPIE v1.2 MITAB</a></td>
           <td>Optimized scoring scheme introduced</td>
         </tr>
         <tr>
-          <td>1.1</td><td>01/24/11</td>
+          <td>1.1</td><td>24.01.11</td>
           <td><a href="{% url 'hippie_website:download_dataset' 'hippie_v1_1.txt.gz' %}">HIPPIE v1.1 TAB</a></td>
           <td><a href="{% url 'hippie_website:download_dataset' 'HIPPIE-1.1.mitab.txt.gz' %}">HIPPIE v1.1 MITAB</a></td>
           <td>First HIPPIE release</td>
@@ -536,7 +540,8 @@
     <li><a href="{% url 'hippie_website:download_dataset' 'techniques_scoring_2.3.tsv' %}">Technique scores v2.3</a> (TSV)</li>
   </ul>
   <p class="text-muted-sm mt-2 mb-0">
-    Current download file of HIPPIE with AlphaFold DB identifiers and scores in accordance with this
+    The current HIPPIE release annotated with AlphaFold DB model identifiers and the structure-based
+    confidence scores ipSAE and pDockQ2, as described in this
     <a href="https://www.biorxiv.org/content/10.64898/2026.03.27.714458v1" target="_blank" rel="noopener">BioRxiv preprint</a> from
     <a href="https://research.nvidia.com/labs/dbr/assets/data/manuscripts/afdb.html" target="_blank" rel="noopener">NVIDIA</a>.
   </p>
@@ -544,17 +549,6 @@
     <li><a href="{% url 'hippie_website:download_dataset' 'hippie_with_ipSAE_max.tsv.gz' %}">Only AFDB ID, ipSAE_max, and pDockQ2_max</a> (TSV)</li>
     <li><a href="{% url 'hippie_website:download_dataset' 'hippie_alphafold_full.tsv.gz' %}">All scores</a> (TSV)</li>
   </ul>
-</div>
-
-{# ── Versioning ── #}
-<div class="hippie-card--muted">
-  <span class="section-label section-label--inline">Release Notes</span>
-  <div class="mt-2" style="font-size:.875rem; color:var(--hippie-ink-muted); line-height:1.8;">
-    <div><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v3.0</strong> — Current release. Expanded to ~1.1 million interactions total; added 71,000 isoform-specific interactions.</div>
-    <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.4</strong> — Updated source integration with BioGRID 4.4, IntAct, MINT. Added 275,000 new interactions.</div>
-    <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.3</strong> — Added 390,000 new interactions and tissue expression data from GTEx v8.</div>
-    <div class="mt-1"><strong style="color:var(--hippie-ink); font-family:var(--font-mono); font-size:.8rem;">v2.2</strong> — Revised confidence scoring formula. See <a href="{% url 'hippie_website:information' %}#scoring">documentation</a>.</div>
-  </div>
 </div>
 
 {% endblock %}

@@ -296,18 +296,49 @@ class SourceLinkTest(HippieTestCase):
         # BioGRID has no key-free pairwise web URL → homepage-only.
         self.assertIsNone(by_name["BioGRID"].pair_url)
 
-    def test_assign_source_urls_backfills_blank_only(self):
-        from ..management.commands.hippie_update import _assign_source_urls
+    def test_update_sources_overwrites_url_and_description(self):
+        import json
+        import tempfile
+        from io import StringIO
+        from pathlib import Path
 
-        blank = Source.objects.create(name="dip", url="")
-        manual = Source.objects.create(name="mint", url="https://manual.example/")
-        unknown = Source.objects.create(name="no-such-db", url="")
+        from django.core.management import call_command
 
-        _assign_source_urls()
+        stale = Source.objects.create(
+            name="MatrixDB", url="https://old.example/", description="edited by hand"
+        )
+        unknown = Source.objects.create(name="no-such-db", url="https://keep.example/")
+        registry = {
+            "matrixdb": {"url": "https://new.example/", "description": "Fresh text"},
+            "flybase": {"url": "https://flybase.org/", "description": "never created"},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sources_db.json"
+            path.write_text(json.dumps(registry), encoding="utf-8")
+            err = StringIO()
+            call_command("update_sources", file=path, stdout=StringIO(), stderr=err)
 
-        blank.refresh_from_db()
-        manual.refresh_from_db()
+        stale.refresh_from_db()
         unknown.refresh_from_db()
-        self.assertEqual(blank.url, "https://dip.doe-mbi.ucla.edu/")
-        self.assertEqual(manual.url, "https://manual.example/")  # preserved
-        self.assertEqual(unknown.url, "")  # unknown name stays blank
+        self.assertEqual(stale.url, "https://new.example/")
+        self.assertEqual(stale.description, "Fresh text")  # overwritten
+        self.assertEqual(unknown.url, "https://keep.example/")  # untouched
+        self.assertIn("no-such-db", err.getvalue())
+        self.assertFalse(Source.objects.filter(name="flybase").exists())  # not created
+
+    def test_shipped_registry_has_text_for_every_source(self):
+        from ..source_links import load_registry
+
+        for key, entry in load_registry().items():
+            self.assertTrue(entry["description"], key)
+
+    def test_shipped_registry_has_psi_mi_code_for_every_interaction_source(self):
+        """Every source the IntAct/BioGRID import yields needs a code for MITAB col 13."""
+        from ..source_links import psi_mi_code
+
+        for name in (
+            "IntAct", "UniProt", "MINT", "DIP", "matrixdb", "HPIDb", "bhf-ucl",
+            "mpidb", "I2D", "InnateDB", "mbinfo", "Molecular Connections", "NTNU",
+            "FlyBase", "biogrid",
+        ):  # fmt: skip
+            self.assertRegex(psi_mi_code(name), r"^MI:\d{4}$", name)

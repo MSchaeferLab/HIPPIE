@@ -27,9 +27,9 @@ from ..models import SplitJob
 DURATION_SAMPLE = 20
 
 # Quoted before any run has ever finished — and after a prune has removed the
-# history. 90 minutes is the middle of the documented "tens of minutes to two
-# hours", not a measurement.
-DEFAULT_RUN_SECONDS = 90 * 60
+# history. 35 minutes is the documented typical run (SOLVE_ILP's fixed 1800 s
+# plus the rest), not a measurement on this deployment.
+DEFAULT_RUN_SECONDS = 35 * 60
 
 
 def typical_run_seconds() -> int:
