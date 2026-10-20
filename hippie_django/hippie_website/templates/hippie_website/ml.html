@@ -54,6 +54,18 @@
     </div>
 
     <div class="hippie-card--muted mb-2 paper-card">
+      <strong>Are You Learning Biological Signal or Shortcuts? Auditing and Mitigating Bias in Protein-Protein Interaction Datasets</strong>
+      <span class="text-muted-sm">Bernett J, Spannagl, A, Ås, J, List M, Blumenthal DB. <em>arXiv</em>,
+          2026, arXiv:2609.10193.</span>
+      <span class="text-muted-sm">
+          Presents the PPI splitting pipeline. Systematically investigates biases stemming from self-interactions,
+          taxonomy, topology, sequence similarity, and functional relatedness in different databases and shows how they
+          can be mitigated.
+      </span>
+      <a href="https://doi.org/10.48550/arXiv.2609.10193" target="_blank" rel="noopener">doi:10.1093/bib/bbae076</a>
+    </div>
+
+    <div class="hippie-card--muted mb-2 paper-card">
       <strong>Guiding questions to avoid data leakage in biological machine learning applications</strong>
       <span class="text-muted-sm">Bernett J, Blumenthal DB, Grimm DG, Haselbeck F, Joeres R, Kalinina OV, List M. <em>Nature Methods</em>, 2024; 21(8): 1444–1453.</span>
       <span class="text-muted-sm">
@@ -68,7 +80,7 @@
       <span class="text-muted-sm">Joeres R, Blumenthal DB, Kalinina OV. <em>Nature Communications</em>, 2025.</span>
       <span class="text-muted-sm">
         Practical tool for generating similarity-aware train/test splits — useful for the negative
-        and positive sets you export from HIPPIE.
+        and positive sets you export from HIPPIE. Implemented in the PPI splitting pipeline.
       </span>
       <a href="https://doi.org/10.1038/s41467-025-58606-8" target="_blank" rel="noopener">doi:10.1038/s41467-025-58606-8</a>
     </div>
@@ -105,15 +117,29 @@
         (≥ {{ current_release.int_q3|default:0.00|floatformat:2 }}, high confidence) trade quantity for
         reliability.</li>
       <li><strong>Negatives</strong> — there is no gold-standard "these never interact" set. HIPPIE
-        provides curated non-interactions, but far fewer of them than positives, so most negatives
-        have to be sampled from pairs with no known interaction. Naively sampled negatives are biased
-        by node degree, which a model can exploit instead of learning biology.</li>
+        provides curated non-interactions, but these do not cover all HIPPIE proteins and probably still have to be
+          subsampled to match some distributional properties of the positives. Alternatively, negatives
+        can be sampled from pairs with no known interaction. The PPI splitting pipeline can do both. </li>
     </ul>
     <div class="hippie-note hippie-note--warn">
-      <strong>Leakage trap:</strong> If the same protein appears in both train and test —
-      or two near-identical sequences are split across train/test — the model can memorise per-protein
-      or per-family signal and report inflated accuracy. Decide your split strategy <em>before</em>
-      sampling negatives.
+      <strong>Watch out for shortcuts and data leakage:</strong> If the same or a very similar protein appears in both
+        train and test, the model can memorize per-protein or per-family signal and report inflated accuracy. If the
+        negatives do not mirror certain properties of the positives, these distributional differences can also act as a
+        shortcut. <br><br>
+        <ul>
+            <li><strong>Example 1:</strong> Test proteins also occur in the training dataset. Negatives were
+                sampled by randomly pairing proteins. The positive degree distribution follows a power law, while the
+                negative distribution follows a normal distribution. The model can therefore memorize that hub proteins
+                are more likely to interact than not to interact. A test interaction involving a hub protein will
+                therefore always be predicted as positive. </li>
+            <li><strong>Example 2:</strong> Test proteins are not in the training dataset but negatives were again
+                sampled randomly. The chance of randomly pairing a protein with itself is very small. The model can
+                therefore memorize that a self-interacting candidate is always positive. If the positive test set
+                contains many self-interactions, this will result in inflated performance reports. </li>
+        </ul>
+
+        Investigate your data and think about the application scenario of your model. Then design the test set(s) and
+        the negative sampling strategy accordingly. The PPI splitting pipeline can help you with this.
     </div>
   </div>
 </div>
@@ -124,10 +150,10 @@
     <div class="ml-step-head"><span class="ml-step-num">2</span><h3>How do I get the data out of HIPPIE?</h3></div>
     <p>There are three routes, from least to most effort:</p>
     <ul style="font-size:.9rem; line-height:1.8;">
-      <li><strong>Pre-computed splits</strong> — the
+        <li><strong>Pre-computed splits</strong> — the
         <a href="{% url 'hippie_website:download' %}#ml-splits">Download page</a> offers finished splits
         of the high-confidence interactions, the high-and-medium-confidence ones, and the whole
-        database. If one of these fits, you can skip to <a href="#step-4">step 4</a>.</li>
+        database. If one of these fits, you can skip to <a href="#step-5">step 5</a>.</li>
       <li><strong>Raw data + your own pipeline run</strong> (this tutorial) — filter HIPPIE the way you
         need on the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page, download the
         filtered data, and build the split yourself on your own machine or cluster.</li>
@@ -138,8 +164,55 @@
         Because of our computational constraints the server also gives the
         optimisation steps a much smaller time and memory budget than a local run (30 minutes
         instead of 2 hours per ILP, on 2 CPUs). The resulting splits are valid but usually less
-        well optimised than what you get locally.</li>
+        well optimised than what you get locally. For more information, go to <a href="#step-3">step 3</a>.</li>
+        <li><strong>Raw data + your own pipeline run</strong> — filter HIPPIE the way you
+        need on the <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page, download the
+        filtered data, and build the split yourself on your own machine or cluster. Then go to <a href="#step-5">step
+                5</a>.</li>
     </ul>
+  </div>
+</div>
+
+{# ── Step 3 ── #}
+<div class="info-section">
+  <div class="hippie-card" id="step-3">
+    <div class="ml-step-head"><span class="ml-step-num">3</span><h3>Splitting with HIPPIE</h3></div>
+        <p>
+            Let's assume we are only interested in the HIPPIE high-confidence interactions that were obtained with
+            proximity labelling. We select high-confidence interactions (click on the button) and filter the experiment type
+            to only contain proximity labelling technology. Afterward, we click on <code class="mono">Calculate Statistics</code>.
+            The interface shows us some protein and interaction statistics. In this case, the resulting network contains
+            5,750 proteins and 25,793 interactions.
+        </p>
+        {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/filter_proximity.png" alt="Interaction filter filtering only high-confidence interactions quantified with proximity labelling technology." caption="Interaction filter filtering only proximity labelling technology. After clicking on Calculate Statistics, we obtain 25,793 interactions." %}
+        <p>
+            Next, we click on <code class="mono">Generate Splits</code>. This will most likely take at least 30 minutes
+            once it is running because the DataSAIL-inspired ILP used to split the data is set to run for a maximum of
+            30 minutes. The larger the dataset, the more unlikely it is to find the optimal solution in less than 30
+            minutes, so <b>most likely, the ILP will run the full 30 minutes</b> and then return the suboptimal solution.
+            The splitting ILP splits the dataset into 80% training, 10% validation, and 10% test. It minimizes the number of
+            discarded edges and ensures low sequence similarity between the splits. If you want to try to save more
+            edges from being discarded, you can run your own local version of the PPI splitting pipeline and set
+            the limit higher. The sampling ILP mirrors the degree distribution of the positive set and ensures that there
+            are as many negative examples of self-interactions as there are positive examples. The negative datasets are
+            balanced 1:1 positive:negative ratio. <b>For larger datasets this second ILP is the decisive factor regarding
+            runtime</b>. Finally, a 1:10 test set is also generated to simulate a realistic
+            scenario where negatives are randomly distributed and strongly outnumber the positives.
+        </p>
+        {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/pipeline_run.png" alt="Running pipeline. It tells the user what it is currently doing, in this case, partitioning the input graph with the ILP." caption="Running pipeline. It tells the user what it is currently doing, in this case, partitioning the input graph with the ILP." %}
+      <p>
+          When the pipeline is done, it will report the final stats of your ML splits. You can download your data with
+          <code class="mono">Download ZIP</code>. The resulting ZIP contains the <code class="mono">train.csv, val.csv, test_balanced.csv, and test_realistic.csv</code>.
+      </p>
+      {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/ML_final_output.png" alt="Final output of the ML splits including how many PPIs made it into the final splits." caption="Final output of the ML splits including how many PPIs made it into the final splits." %}
+  </div>
+</div>
+
+
+{# ── Step 4 ── #}
+<div class="info-section">
+  <div class="hippie-card" id="step-4">
+    <div class="ml-step-head"><span class="ml-step-num">4</span><h3>How do I build the split with the pipeline?</h3></div>
     <p>
       For this tutorial we use the whole database. On the
       <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page, leave every filter at its
@@ -159,23 +232,17 @@
       <li><code class="mono">README.txt</code> — the filters you applied, the counts, and the exact
         command to run.</li>
     </ul>
-  </div>
-</div>
 
-{# ── Step 3 ── #}
-<div class="info-section">
-  <div class="hippie-card">
-    <div class="ml-step-head"><span class="ml-step-num">3</span><h3>How do I build the split?</h3></div>
     <p>
       The <a href="https://github.com/bionetslab/ppi-splitting-pipeline" target="_blank" rel="noopener">ppi-splitting-pipeline</a>
       is a Nextflow pipeline. You need:
     </p>
     <ul style="font-size:.9rem; line-height:1.8;">
-      <li><a href="https://www.nextflow.io/" target="_blank" rel="noopener">Nextflow</a> and one of
-        Docker, Singularity, Apptainer or Conda (the pipeline ships a profile for each).</li>
+      <li><a href="https://www.nextflow.io/" target="_blank" rel="noopener">Nextflow >= 26.04 </a> and a conda installation like mamba.</li>
       <li>Internet access — protein sequences and annotations are fetched from UniProt.</li>
-      <li>Enough compute. The all-vs-all sequence comparison (BLAST) is the heaviest step; for the
-        whole database a cluster is advisable (add the <code class="mono">slurm</code> profile).</li>
+      <li>Resources. Check out the nextflow.config and potentially adapt the number of cpus or memory requested. It is
+      best to run the pipeline on a cluster with a fitting HPC config supplied via <code class="mono">-c</code>.
+      Check out <a href="https://nf-co.re/configs/" target="_blank" rel="noopener"> the nf-core configs </a> for examples. </li>
       <li>Optionally a <a href="https://www.gurobi.com/" target="_blank" rel="noopener">Gurobi</a>
         license (free for academics). Without one, the pipeline falls back to open-source solvers.</li>
     </ul>
@@ -189,7 +256,7 @@ nextflow run ../ppi-splitting-pipeline/main.nf \
     --samplesheet samplesheet.csv --outdir results -profile docker
 
 <span class="c"># no Gurobi license? append:</span>
-<span class="c">#   --ilp_solver '' --gurobi_license ''</span></pre>
+<span class="c">#   --ilp_solver 'ILP solver of your choice' </span></pre>
     <p>What the pipeline does with your data:</p>
     <ol style="font-size:.9rem; line-height:1.8;">
       <li>Fetches the sequences and compares every protein against every other (BLAST) to build a
@@ -222,10 +289,10 @@ nextflow run ../ppi-splitting-pipeline/main.nf \
   </div>
 </div>
 
-{# ── Step 4 ── #}
+{# ── Step 5 ── #}
 <div class="info-section">
-  <div class="hippie-card" id="step-4" style="scroll-margin-top:80px;">
-    <div class="ml-step-head"><span class="ml-step-num">4</span><h3>How do I create a model with the data?</h3></div>
+  <div class="hippie-card" id="step-5" style="scroll-margin-top:80px;">
+    <div class="ml-step-head"><span class="ml-step-num">5</span><h3>How do I create a model with the data?</h3></div>
     <p>
       We build two models side by side: a <strong>classic feature-based baseline</strong> and a
       <strong>sequence-based</strong> model. Both share the same split so the comparison is fair.
@@ -314,10 +381,10 @@ seq_clf = LogisticRegression(max_iter=1000).fit(X_seq(train), train["label"])</p
   </div>
 </div>
 
-{# ── Step 5 ── #}
+{# ── Step 6 ── #}
 <div class="info-section">
   <div class="hippie-card">
-    <div class="ml-step-head"><span class="ml-step-num">5</span><h3>How do I evaluate this?</h3></div>
+    <div class="ml-step-head"><span class="ml-step-num">6</span><h3>How do I evaluate this?</h3></div>
     <p>
       Score both models on both held-out test sets and always compare against the baseline.
       <code class="mono">test_balanced</code> (1:1) is comparable to most published numbers;

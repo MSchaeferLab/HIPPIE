@@ -1,217 +1,217 @@
-PSI-MI	Method Name	Score
-MI:0410	 3D electron microscopy	10
-MI:0889	 acetylase assay	7.5
-MI:2215	 barcode fusion genetics two hybrid	5
-MI:2170	bimolecular luminiscence complementation	6
-MI:0969	 bio-layer interferometry	10
-MI:0013	 biophysical	10
-MI:0949	 gdp/gtp exchange assay	7.5
-MI:1007	 glycosylase assay	7.5
-MI:0729	 luminescence based mammalian interactome mapping	5
-MI:2413	 mammalian membrane two hybrid	6
-MI:1247	 microscale thermophoresis	10
-MI:0813	 proximity ligation assay	6
-MI:1314	 proximity-dependent biotin identification	3
-MI:1203	 split luciferase complementation	6
-MI:1235	 thermal shift binding	10
-MI:0437	protein three hybrid	5
-MI:0397	 two hybrid array	5
-MI:0398	 two hybrid pooling approach	5
-MI:0997	 ubiquitinase assay	7.5
-MI:0966	 ultraviolet-visible spectroscopy	9
-MI:0686	 unspecified method	0
-MI:1356	 validated two hybrid	5
-MI:2289	 virotrap	5
-MI:0369	lex-a dimerization assay                         	5
-MI:0054	fluorescence-activated cell sorting              	1
-MI:0045	experimental interaction detection               	1
-MI:0428	imaging technique                                	1
-MI:0091	chromatography technology                        	1
-MI:0051	fluorescence technology                          	1
-MI:0008	array technology                                 	3
-MI:0892	solid phase assay                                	1
-MI:0426	light microscopy                                 	1
-MI:0090	protein complementation assay                    	5
-MI:0114	x-ray crystallography	10
-MI:0065	isothermal titration calorimetry                 	10
-MI:0067	light scattering                                 	10
-MI:0077	nuclear magnetic resonance                       	10
-MI:0107	surface plasmon resonance                        	10
-MI:0826	x ray scattering                                 	9
-MI:0011	beta lactamase complementation                   	5
-MI:0010	beta galactosidase complementation               	5
-MI:0440	saturation binding                               	7.5
-MI:0809	bimolecular fluorescence complementation         	6
-MI:0012	bioluminescence resonance energy transfer        	6
-MI:0016	circular dichroism                               	9
-MI:0111	dihydrofolate reductase reconstruction           	6
-MI:0370	tox-r dimerization assay                         	5
-MI:0728	gal4 vp16 complementation                        	5
-MI:0399	two hybrid fragment pooling approach             	5
-MI:0510	homogeneous time resolved fluorescence           	7
-MI:0420	kinase homogeneous time resolved fluorescence    	7.5
-MI:0017	classical fluorescence spectroscopy              	7.5
-MI:0053	fluorescence polarization spectroscopy           	10
-MI:0055	fluorescent resonance energy transfer            	6
-MI:0231	mammalian protein protein interaction trap       	6
-MI:0099	scintillation proximity assay                    	7.5
-MI:0232	transcriptional complementation assay            	5
-MI:0112	ubiquitin reconstruction                         	5
-MI:0052	fluorescence correlation spectroscopy            	10
-MI:0030	cross-linking study                              	5
-MI:0031	protein cross-linking with a bifunctional reagent	5
-MI:0084	phage display                                    	6
-MI:0048	filamentous phage display                        	6
-MI:0108	t7 phage display                                 	6
-MI:0066	lambda phage display                             	6
-MI:0115	yeast display                                    	5
-MI:0404	comigration in non denaturing gel electrophoresis	3
-MI:0808	comigration in sds page                          	3
-MI:0807	comigration in gel electrophoresis               	3
-MI:0417	footprinting                                     	3
-MI:0089	protein array                                    	5
-MI:0424	protein kinase assay                             	7.5
-MI:0434	phosphatase assay                                	7.5
-MI:0415	enzymatic study                                  	1
-MI:0411	enzyme linked immunosorbent assay                	5
-MI:0515	methyltransferase assay                          	7.5
-MI:0516	methyltransferase radiometric assay              	7.5
-MI:0406	deacetylase assay                                	7.5
-MI:0419	gtpase assay                                     	7.5
-MI:0870	demethylase assay                                	7.5
-       	phosphotransfer assay                            	7.5
-       	acetylation assay                                	7.5
-MI:0020	transmission electron microscopy                 	5
-MI:0953	polymerization                                   	5
-MI:0588	hybrid method	5
-MI:0405	competition binding                              	5
-MI:0038	dynamic light scattering                         	9
-MI:0040	electron microscopy                              	5
-MI:0423	in-gel kinase assay                              	7.5
-MI:0726	reverse two hybrid                               	5
-MI:0081	peptide array                                    	5
-MI:0006	anti bait coimmunoprecipitation                  	5
-MI:0007	anti tag coimmunoprecipitation                   	5
-MI:0096	pull down                                        	2.5
-MI:0676	tandem affinity purification                     	5
-MI:0019	coimmunoprecipitation                            	5
-MI:0059	gst pull down                                    	5
-MI:0004	affinity chromatography technology               	5
-MI:0071	molecular sieving                                	2
-MI:0049	filter binding                                   	5
-MI:0029	cosedimentation through density gradient         	2
-MI:0226	ion exchange chromatography                      	3
-MI:0028	cosedimentation in solution                      	2
-MI:0027	cosedimentation                                  	2
-MI:0435	protease assay                                   	7.5
-MI:0061	his pull down                                    	5
-MI:0025	copurification                                   	2
-MI:0276	blue native page                                 	3
-MI:0069	mass spectrometry studies of complexes           	5
-MI:0400	affinity technology                              	5
-MI:0227	reverse phase chromatography                     	1
-MI:0678	antibody array                                   	5
-MI:0416	fluorescence microscopy                          	1
-MI:0663	confocal microscopy                              	1
-MI:0022	colocalization by immunostaining                 	1
-MI:0021	colocalization by fluorescent probes cloning     	1
-MI:0413	electrophoretic mobility shift assay             	2
-MI:0412	electrophoretic mobility supershift assay        	2
-MI:0402	chromatin immunoprecipitation assay              	2
-MI:0254	genetic interference                             	0
-MI:0920	ribonuclease assay                               	7.5
-MI:0047	far western blotting                             	5
-MI:0364	inferred by curator                              	1
-MI:0493	in vivo                                          	1
-MI:0492	in vitro                                         	1
-MI:0018	two hybrid	5
-       	Affinity Capture-Western                         	5
-       	Reconstituted Complex                            	10
-       	FRET                                             	6
-       	Protein-peptide                                  	5
-       	Co-localization                                  	1
-       	Affinity Capture-MS                              	5
-       	Biochemical Activity                             	5
-       	Affinity Capture-RNA                             	2
-       	Co-crystal Structure                             	10
-       	Co-fractionation                                 	1
-       	Protein-RNA                                      	0
-       	Affinity Capture-Luminescence                    	5
-       	pull-down/mass spectrometry                      	5
-MI:0825	x-ray fiber diffraction                          	9
-MI:0042	electron paramagnetic resonance                  	9
-MI:0872	atomic force microscopy                          	9
-MI:0023	colocalization/visualisation technologies        	1
-MI:1313	proximity labelling technology	5
-MI:0401	biochemical                                      	5
-MI:0947	 bead aggregation assay	3
-MI:0976	 total internal reflection fluorescence spectroscopy	9
-MI:2339	 electron microscopy 3D single particle reconstruction	10
-MI:2437	holdup assay	6
-MI:0034	display technology	5
-MI:1113	two hybrid bait and prey pooling approach	5
-MI:0097	reverse ras recruitment system	5
-MI:0900	p8 filamentous phage display	6
-MI:0104	static light scattering	9
-MI:1320	membrane yeast two hybrid	5
-MI:0982	electrophoretic mobility-based method	2
-MI:0727	lexa b52 complementation	5
-MI:0905	amplified luminescent proximity homogeneous assay	7
-MI:0990	cleavage assay	7.5
-MI:1000	hydroxylase assay	7.5
-MI:0655	lambda repressor two hybrid	5
-MI:0605	enzymatic footprinting	3
-MI:1232	aggregation assay	3
-MI:0944	mass spectrometry study of hydrogen/deuterium exchange	6
-MI:1008	sumoylase assay	7.5
-MI:0841	phosphotransferase assay	7.5
-MI:0858	immunodepleted coimmunoprecipitation	5
-MI:2169	luminiscence technology	1
-MI:0512	zymography	7.5
-MI:1016	fluorescence recovery after photobleaching	2
-MI:1246	ion mobility mass spectrometry of complexes	6
-MI:1104	solid state nmr	10
-MI:1204	split firefly luciferase complementation	6
-MI:0880	atpase assay	7.5
-MI:0964	infrared spectroscopy	9
-MI:1019	protein phosphatase assay	7.5
-MI:1311	differential scanning calorimetry	10
-MI:2340	electron microscopy 3D helical reconstruction	10
-MI:2189	avexis	5
-MI:1147	ampylation assay	7.5
-MI:1024	scanning electron microscopy	5
-MI:0894	electron diffraction	9
-MI:1010	neddylase assay	7.5
-MI:1034	nuclease assay	7.5
-MI:0943	detection by mass spectrometry	5
-MI:0979	oxidoreductase assay	7.5
-MI:0073	mrna display	6
-MI:0963	interactome parallel affinity capture	5
-MI:1022	field flow fractionation	2
-MI:0998	deubiquitinase assay	7.5
-MI:1103	solution state nmr	10
-MI:0916	lexa vp16 complementation	5
-MI:1037	Split renilla luciferase complementation	6
-MI:2171	complemented donor-acceptor resonance energy transfer	6
-MI:0814	protease accessibility laddering	3
-MI:0968	biosensor	7
-MI:1138	decarboxylation assay	7.5
-MI:0928	filter trap assay	3
-MI:0859	force spectroscopy	9
-MI:1036	nucleotide exchange assay	7.5
-MI:0991	lipoprotein cleavage assay	7.5
-MI:1002	myristoylase assay	7.5
-MI:2404	oxidase assay	7.5
-MI:1017	rna immunoprecipitation	0
-MI:0888	small angle neutron scattering	9
-MI:2338	electron tomography	9
-MI:1086	equilibrium dialysis	7.5
-MI:0695	sandwich immunoassay	5
-MI:1038	silicon nanowire field-effect transistor	9
-MI:0256	rna interference	0
-MI:0225	chromatin immunoprecipitation array	2
-MI:1005	adp ribosylase assay	7.5
-MI:1004	palmitoylase assay	7.5
-MI:1309	de-ADP-ribosylation assay	7.5
-MI:0095	proteinchip(r) on a surface-enhanced laser desorption/ionization	5
-MI:0425	kinase scintillation proximity assay	7.5
+PSI-MI	Method Name	Score	New in Version
+MI:0013	 biophysical	10	True
+MI:0034	display technology	5	True
+MI:0073	mrna display	6	True
+MI:0095	proteinchip(r) on a surface-enhanced laser desorption/ionization	5	True
+MI:0097	reverse ras recruitment system	5	True
+MI:0104	static light scattering	9	True
+MI:0225	chromatin immunoprecipitation array	2	True
+MI:0256	rna interference	0	True
+MI:0397	 two hybrid array	5	True
+MI:0398	 two hybrid pooling approach	5	True
+MI:0410	 3D electron microscopy	10	True
+MI:0425	kinase scintillation proximity assay	7.5	True
+MI:0437	protein three hybrid	5	True
+MI:0512	zymography	7.5	True
+MI:0605	enzymatic footprinting	3	True
+MI:0655	lambda repressor two hybrid	5	True
+MI:0686	 unspecified method	0	True
+MI:0695	sandwich immunoassay	5	True
+MI:0727	lexa b52 complementation	5	True
+MI:0729	 luminescence based mammalian interactome mapping	5	True
+MI:0813	 proximity ligation assay	6	True
+MI:0814	protease accessibility laddering	3	True
+MI:0841	phosphotransferase assay	7.5	True
+MI:0858	immunodepleted coimmunoprecipitation	5	True
+MI:0859	force spectroscopy	9	True
+MI:0880	atpase assay	7.5	True
+MI:0888	small angle neutron scattering	9	True
+MI:0889	 acetylase assay	7.5	True
+MI:0894	electron diffraction	9	True
+MI:0900	p8 filamentous phage display	6	True
+MI:0905	amplified luminescent proximity homogeneous assay	7	True
+MI:0916	lexa vp16 complementation	5	True
+MI:0928	filter trap assay	3	True
+MI:0943	detection by mass spectrometry	5	True
+MI:0944	mass spectrometry study of hydrogen/deuterium exchange	6	True
+MI:0947	 bead aggregation assay	3	True
+MI:0949	 gdp/gtp exchange assay	7.5	True
+MI:0963	interactome parallel affinity capture	5	True
+MI:0964	infrared spectroscopy	9	True
+MI:0966	 ultraviolet-visible spectroscopy	9	True
+MI:0968	biosensor	7	True
+MI:0969	 bio-layer interferometry	10	True
+MI:0976	 total internal reflection fluorescence spectroscopy	9	True
+MI:0979	oxidoreductase assay	7.5	True
+MI:0982	electrophoretic mobility-based method	2	True
+MI:0990	cleavage assay	7.5	True
+MI:0991	lipoprotein cleavage assay	7.5	True
+MI:0997	 ubiquitinase assay	7.5	True
+MI:0998	deubiquitinase assay	7.5	True
+MI:1000	hydroxylase assay	7.5	True
+MI:1002	myristoylase assay	7.5	True
+MI:1004	palmitoylase assay	7.5	True
+MI:1005	adp ribosylase assay	7.5	True
+MI:1007	 glycosylase assay	7.5	True
+MI:1008	sumoylase assay	7.5	True
+MI:1010	neddylase assay	7.5	True
+MI:1016	fluorescence recovery after photobleaching	2	True
+MI:1017	rna immunoprecipitation	0	True
+MI:1019	protein phosphatase assay	7.5	True
+MI:1022	field flow fractionation	2	True
+MI:1024	scanning electron microscopy	5	True
+MI:1034	nuclease assay	7.5	True
+MI:1036	nucleotide exchange assay	7.5	True
+MI:1037	Split renilla luciferase complementation	6	True
+MI:1038	silicon nanowire field-effect transistor	9	True
+MI:1086	equilibrium dialysis	7.5	True
+MI:1103	solution state nmr	10	True
+MI:1104	solid state nmr	10	True
+MI:1113	two hybrid bait and prey pooling approach	5	True
+MI:1138	decarboxylation assay	7.5	True
+MI:1147	ampylation assay	7.5	True
+MI:1203	 split luciferase complementation	6	True
+MI:1204	split firefly luciferase complementation	6	True
+MI:1232	aggregation assay	3	True
+MI:1235	 thermal shift binding	10	True
+MI:1246	ion mobility mass spectrometry of complexes	6	True
+MI:1247	 microscale thermophoresis	10	True
+MI:1309	de-ADP-ribosylation assay	7.5	True
+MI:1311	differential scanning calorimetry	10	True
+MI:1314	 proximity-dependent biotin identification	3	True
+MI:1320	membrane yeast two hybrid	5	True
+MI:1356	 validated two hybrid	5	True
+MI:2169	luminiscence technology	1	True
+MI:2170	bimolecular luminiscence complementation	6	True
+MI:2171	complemented donor-acceptor resonance energy transfer	6	True
+MI:2189	avexis	5	True
+MI:2215	 barcode fusion genetics two hybrid	5	True
+MI:2289	 virotrap	5	True
+MI:2338	electron tomography	9	True
+MI:2339	 electron microscopy 3D single particle reconstruction	10	True
+MI:2340	electron microscopy 3D helical reconstruction	10	True
+MI:2404	oxidase assay	7.5	True
+MI:2413	 mammalian membrane two hybrid	6	True
+MI:2437	holdup assay	6	True
+       	phosphotransfer assay                            	7.5	False
+       	acetylation assay                                	7.5	False
+       	Affinity Capture-Western                         	5	False
+       	Reconstituted Complex                            	10	False
+       	FRET                                             	6	False
+       	Protein-peptide                                  	5	False
+       	Co-localization                                  	1	False
+       	Affinity Capture-MS                              	5	False
+       	Biochemical Activity                             	5	False
+       	Affinity Capture-RNA                             	2	False
+       	Co-crystal Structure                             	10	False
+       	Co-fractionation                                 	1	False
+       	Protein-RNA                                      	0	False
+       	Affinity Capture-Luminescence                    	5	False
+       	pull-down/mass spectrometry                      	5	False
+MI:0004	affinity chromatography technology               	5	False
+MI:0006	anti bait coimmunoprecipitation                  	5	False
+MI:0007	anti tag coimmunoprecipitation                   	5	False
+MI:0008	array technology                                 	3	False
+MI:0010	beta galactosidase complementation               	5	False
+MI:0011	beta lactamase complementation                   	5	False
+MI:0012	bioluminescence resonance energy transfer        	6	False
+MI:0016	circular dichroism                               	9	False
+MI:0017	classical fluorescence spectroscopy              	7.5	False
+MI:0018	two hybrid	5	False
+MI:0019	coimmunoprecipitation                            	5	False
+MI:0020	transmission electron microscopy                 	5	False
+MI:0021	colocalization by fluorescent probes cloning     	1	False
+MI:0022	colocalization by immunostaining                 	1	False
+MI:0023	colocalization/visualisation technologies        	1	False
+MI:0025	copurification                                   	2	False
+MI:0027	cosedimentation                                  	2	False
+MI:0028	cosedimentation in solution                      	2	False
+MI:0029	cosedimentation through density gradient         	2	False
+MI:0030	cross-linking study                              	5	False
+MI:0031	protein cross-linking with a bifunctional reagent	5	False
+MI:0038	dynamic light scattering                         	9	False
+MI:0040	electron microscopy                              	5	False
+MI:0042	electron paramagnetic resonance                  	9	False
+MI:0045	experimental interaction detection               	1	False
+MI:0047	far western blotting                             	5	False
+MI:0048	filamentous phage display                        	6	False
+MI:0049	filter binding                                   	5	False
+MI:0051	fluorescence technology                          	1	False
+MI:0052	fluorescence correlation spectroscopy            	10	False
+MI:0053	fluorescence polarization spectroscopy           	10	False
+MI:0054	fluorescence-activated cell sorting              	1	False
+MI:0055	fluorescent resonance energy transfer            	6	False
+MI:0059	gst pull down                                    	5	False
+MI:0061	his pull down                                    	5	False
+MI:0065	isothermal titration calorimetry                 	10	False
+MI:0066	lambda phage display                             	6	False
+MI:0067	light scattering                                 	10	False
+MI:0069	mass spectrometry studies of complexes           	5	False
+MI:0071	molecular sieving                                	2	False
+MI:0077	nuclear magnetic resonance                       	10	False
+MI:0081	peptide array                                    	5	False
+MI:0084	phage display                                    	6	False
+MI:0089	protein array                                    	5	False
+MI:0090	protein complementation assay                    	5	False
+MI:0091	chromatography technology                        	1	False
+MI:0096	pull down                                        	2.5	False
+MI:0099	scintillation proximity assay                    	7.5	False
+MI:0107	surface plasmon resonance                        	10	False
+MI:0108	t7 phage display                                 	6	False
+MI:0111	dihydrofolate reductase reconstruction           	6	False
+MI:0112	ubiquitin reconstruction                         	5	False
+MI:0114	x-ray crystallography	10	False
+MI:0115	yeast display                                    	5	False
+MI:0226	ion exchange chromatography                      	3	False
+MI:0227	reverse phase chromatography                     	1	False
+MI:0231	mammalian protein protein interaction trap       	6	False
+MI:0232	transcriptional complementation assay            	5	False
+MI:0254	genetic interference                             	0	False
+MI:0276	blue native page                                 	3	False
+MI:0364	inferred by curator                              	1	False
+MI:0369	lex-a dimerization assay                         	5	False
+MI:0370	tox-r dimerization assay                         	5	False
+MI:0399	two hybrid fragment pooling approach             	5	False
+MI:0400	affinity technology                              	5	False
+MI:0401	biochemical                                      	5	False
+MI:0402	chromatin immunoprecipitation assay              	2	False
+MI:0404	comigration in non denaturing gel electrophoresis	3	False
+MI:0405	competition binding                              	5	False
+MI:0406	deacetylase assay                                	7.5	False
+MI:0411	enzyme linked immunosorbent assay                	5	False
+MI:0412	electrophoretic mobility supershift assay        	2	False
+MI:0413	electrophoretic mobility shift assay             	2	False
+MI:0415	enzymatic study                                  	1	False
+MI:0416	fluorescence microscopy                          	1	False
+MI:0417	footprinting                                     	3	False
+MI:0419	gtpase assay                                     	7.5	False
+MI:0420	kinase homogeneous time resolved fluorescence    	7.5	False
+MI:0423	in-gel kinase assay                              	7.5	False
+MI:0424	protein kinase assay                             	7.5	False
+MI:0426	light microscopy                                 	1	False
+MI:0428	imaging technique                                	1	False
+MI:0434	phosphatase assay                                	7.5	False
+MI:0435	protease assay                                   	7.5	False
+MI:0440	saturation binding                               	7.5	False
+MI:0492	in vitro                                         	1	False
+MI:0493	in vivo                                          	1	False
+MI:0510	homogeneous time resolved fluorescence           	7	False
+MI:0515	methyltransferase assay                          	7.5	False
+MI:0516	methyltransferase radiometric assay              	7.5	False
+MI:0588	hybrid method	5	False
+MI:0663	confocal microscopy                              	1	False
+MI:0676	tandem affinity purification                     	5	False
+MI:0678	antibody array                                   	5	False
+MI:0726	reverse two hybrid                               	5	False
+MI:0728	gal4 vp16 complementation                        	5	False
+MI:0807	comigration in gel electrophoresis               	3	False
+MI:0808	comigration in sds page                          	3	False
+MI:0809	bimolecular fluorescence complementation         	6	False
+MI:0825	x-ray fiber diffraction                          	9	False
+MI:0826	x ray scattering                                 	9	False
+MI:0870	demethylase assay                                	7.5	False
+MI:0872	atomic force microscopy                          	9	False
+MI:0892	solid phase assay                                	1	False
+MI:0920	ribonuclease assay                               	7.5	False
+MI:0953	polymerization                                   	5	False
+MI:1313	proximity labelling technology	5	False
