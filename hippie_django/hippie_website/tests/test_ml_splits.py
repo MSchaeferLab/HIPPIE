@@ -1407,6 +1407,52 @@ class ArtifactFingerprintTest(SimpleTestCase):
             summary = nf.collect_summary(layout, export, "abc", "fp0123456789abcd")
         self.assertEqual(summary.artifacts_fingerprint, "fp0123456789abcd")
 
+    def test_write_sequences_copies_only_the_split_proteins(self):
+        """Records are matched on the first header token and copied whole,
+        including wrapped sequence lines."""
+        from ..services import nextflow_runner as nf
+
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td) / "proteome.fasta"
+            source.write_text(">A\nMKV\nLLA\n>B desc\nMAA\n>A-2\nMKW\n>C\nMCC\n")
+            dest = Path(td) / "sequences.fasta"
+            written = nf.write_sequences(dest, source, {"A", "A-2", "C"})
+            self.assertEqual(written, 3)
+            self.assertEqual(dest.read_text(), ">A\nMKV\nLLA\n>A-2\nMKW\n>C\nMCC\n")
+
+    def test_package_results_ships_the_sequences_and_keeps_them_out_of_summary(self):
+        import zipfile
+
+        from ..services import nextflow_runner as nf
+        from ..services.export_ppis import ExportResult
+        from ..services.generate_splits import SplitParams
+
+        with tempfile.TemporaryDirectory() as td:
+            layout = nf.job_layout("job-seq", root=Path(td))
+            layout.results.mkdir(parents=True)
+            for name in nf.OUTPUT_FILES:
+                (layout.results / name).write_text("protein1,protein2,label\nA,B,1\n")
+            export = ExportResult(
+                path=layout.ppis,
+                n_written=1,
+                n_dropped_unknown=0,
+                n_dropped_blank=0,
+                n_proteins=2,
+            )
+            summary = nf.collect_summary(layout, export, "abc")
+            source = Path(td) / "proteome.fasta"
+            source.write_text(">A\nMKV\n>B\nMAA\n>Z\nMZZ\n")
+            with self.settings(MEDIA_ROOT=td):
+                zip_path = nf.package_results(
+                    layout, SplitParams(), summary, "job-seq", sequences=source
+                )
+            with zipfile.ZipFile(zip_path) as zf:
+                self.assertEqual(
+                    zf.read("sequences.fasta").decode(), ">A\nMKV\n>B\nMAA\n"
+                )
+                self.assertNotIn("proteins", json.loads(zf.read("summary.json")))
+                self.assertIn("sequences.fasta", zf.read("README.txt").decode())
+
 
 # ---------------------------------------------------------------------------
 # Queue transparency: position and the wait that position implies

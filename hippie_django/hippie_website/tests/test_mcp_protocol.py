@@ -12,10 +12,13 @@ thread, which gets its own database connection, and an uncommitted
 ``TestCase`` transaction is invisible from there.
 """
 
-from django.test import SimpleTestCase, TransactionTestCase
+import datetime
+
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from mcp import Client
 
-from hippie_mcp.server import mcp
+from hippie_mcp.server import confidence_note, mcp, refresh_release_text
+from hippie_website.models import ReleaseMeta
 
 from .factories import make_interaction, make_protein, recompute_stats
 
@@ -106,6 +109,35 @@ class McpSchemaTests(SimpleTestCase):
     async def test_server_advertises_usage_instructions(self):
         async with Client(mcp, raise_exceptions=True) as client:
             self.assertIn("HIPPIE", client.instructions or "")
+
+
+class ReleaseCutoffTextTests(TestCase):
+    """The confidence cutoffs an agent reads come from the release row."""
+
+    def tearDown(self):
+        # No release row is left, so this restores the number-free wording.
+        ReleaseMeta.objects.all().delete()
+        refresh_release_text()
+
+    def test_cutoffs_come_from_the_current_release(self):
+        ReleaseMeta.objects.create(
+            version_label="9.9",
+            release_date=datetime.date(2030, 1, 1),
+            int_median=0.6293,
+            int_q3=0.7191,
+        )
+        refresh_release_text()
+        tool = mcp._tool_manager.get_tool("get_interactions")
+        for text in (mcp.instructions, tool.description):
+            self.assertIn("0.63 is the medium- and 0.72 the high-confidence", text)
+            self.assertIn("in release 9.9", text)
+
+    def test_without_quartiles_the_text_names_the_rule_without_numbers(self):
+        release = ReleaseMeta(version_label="v9.9")
+        for rel in (None, release):
+            note = confidence_note(rel)
+            self.assertIn("median and upper quartile", note)
+            self.assertNotRegex(note, r"\d\.\d")
 
 
 class McpRoundTripTests(TransactionTestCase):

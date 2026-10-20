@@ -131,9 +131,10 @@
       <a href="{% url 'hippie_website:interaction_query' %}">interaction query</a>.
     </p>
     <p>
-      On the result page, UniProt accession, Entrez gene id and gene symbol of each interactor of the query
-      are indicated. The confidence score of the interaction is given in the last column.
-      Clicking on the arrow button or the row opens an evidence page which lists the source databases, the publications which
+      On the result page, each row lists the gene symbol, UniProt accession and Entrez gene id of
+      both interactors, followed by the confidence score of the interaction and the number of
+      source databases and experiment types supporting it.
+      Clicking on the arrow button at the end of the row, or on the row itself, opens an evidence page which lists the source databases, the publications which
       mention the interaction, the experiment type used to detect it, and the species in which it is conserved.
     </p>
     <a class="back-to-top" href="#top"><i>Back to top</i></a>
@@ -208,8 +209,8 @@
       To investigate the molecular context of Huntington’s disease (HD), huntingtin (HTT) serves
       as the primary reference gene. To get an overview of all its interaction partners, open the
       <a href="{% url 'hippie_website:index' %}?q=HTT">protein query for HTT</a> and filter it
-      with your own parameters. We observe 1,116 interaction partners, 1,276 if we include
-      isoforms.
+      with your own parameters. We observe 1,116 interactions, 1,276 if we include
+      isoform-specific interactions.
     </p>
     {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/protein_query.png" alt="Protein query for HTT showing the number of results and the Filters button" caption="Protein query for HTT. The result count is shown above the table; the Filters button opens the filter panel." %}
     {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/filters.png" alt="Filter panel with the isoform filter set to Both" caption="Filter panel. The isoform filter selects general proteins, isoforms, or both." %}

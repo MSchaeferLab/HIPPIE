@@ -108,6 +108,7 @@ class _ParsedRow:
     pmids: set[int] = field(default_factory=set)
     techs: set[tuple[str, str]] = field(default_factory=set)
     types: set[str] = field(default_factory=set)
+    type_codes: dict[str, str] = field(default_factory=dict)  # name -> PSI-MI code
     link: set[tuple[str, str]] = field(default_factory=set)
     source: set[str] = field(default_factory=set)
 
@@ -142,6 +143,13 @@ def _extract_cv_name(field_val: str) -> str:
     return name.strip('"')
 
 
+def _extract_mi_code(field_val: str) -> str:
+    """The PSI-MI code of a CV field (``psi-mi:"MI:0915"(...)`` → "MI:0915"), or ""."""
+    if 'psi-mi:"' in field_val:
+        return field_val.split('psi-mi:"')[1].split('"')[0]
+    return ""
+
+
 def _parse_interaction_type(field_val: str) -> str | None:
     return _extract_cv_name(field_val)
 
@@ -151,10 +159,7 @@ def _parse_tech(field_val: str) -> tuple[tuple[str, str] | None, bool]:
     name = _TECH_NORM.get(name, name)
     if name in _SKIP_TECHS:
         return None, True
-    mi_code = ""
-    if 'psi-mi:"' in field_val:
-        mi_code = field_val.split('psi-mi:"')[1].split('"')[0]
-    return (mi_code, name), False
+    return (_extract_mi_code(field_val), name), False
 
 
 def _parse_uniprot_acc(field_val: str) -> str | None:
@@ -414,6 +419,7 @@ def _parse_intact_or_biogrid(
                 continue
 
             itype = _parse_interaction_type(line[11])
+            itype_codes = {itype: _extract_mi_code(line[11])} if itype else {}
             link = _parse_links(line[13])
             source = _parse_source(line[12])
 
@@ -453,6 +459,7 @@ def _parse_intact_or_biogrid(
                         cr.techs.add(tech)
                     if itype:
                         cr.types.add(itype)
+                        cr.type_codes.update(itype_codes)
                     if link:
                         cr.link |= link
                 else:
@@ -470,6 +477,7 @@ def _parse_intact_or_biogrid(
                         source={source},
                         techs={tech} if tech else set(),
                         types={itype} if itype else set(),
+                        type_codes=dict(itype_codes),
                         link=link,
                     )
 
@@ -481,6 +489,7 @@ def _parse_intact_or_biogrid(
                     row.techs.add(tech)
                 if itype:
                     row.types.add(itype)
+                    row.type_codes.update(itype_codes)
                 if link:
                     row.link |= link
             except KeyError:
@@ -495,6 +504,7 @@ def _parse_intact_or_biogrid(
                     source={source},
                     techs={tech} if tech else set(),
                     types={itype} if itype else set(),
+                    type_codes=dict(itype_codes),
                     link=link,
                 )
     total_skipped = (
@@ -630,7 +640,7 @@ def _upsert(
         exp_types: dict[str, str] = {}  # name -> mi_code
         sources: set[str] = set()
         pmids: set[int] = set()
-        itypes: set[str] = set()
+        itypes: dict[str, str] = {}  # name -> mi_code
 
         for row in rows:
             for p_acc, p_name, iso_bool, entrez, gene_name in zip(
@@ -656,7 +666,8 @@ def _upsert(
             for mi, tech in row.techs:
                 exp_types[tech] = mi
             for t in row.types:
-                itypes.add(t)
+                if not itypes.get(t):
+                    itypes[t] = row.type_codes.get(t, "")
             for db, _ in row.link:
                 sources.add(db)
 
@@ -810,12 +821,22 @@ def _upsert(
         print("  Inserting interaction types...", flush=True)
         new_itypes = InteractionType.objects.bulk_create(
             [
-                InteractionType(name=n, psi_mi_code="")
-                for n in itypes
+                InteractionType(name=n, psi_mi_code=mi)
+                for n, mi in itypes.items()
                 if n not in existing_itypes
             ],
             batch_size=BATCH,
         )
+        # Earlier imports discarded the code, so existing rows may carry an
+        # empty one; the MITAB export needs it for the Interaction Types column.
+        backfill = [
+            it
+            for n, it in existing_itypes.items()
+            if not it.psi_mi_code and itypes.get(n)
+        ]
+        for it in backfill:
+            it.psi_mi_code = itypes[it.name]
+        InteractionType.objects.bulk_update(backfill, ["psi_mi_code"], batch_size=BATCH)
         itype_cache: dict[str, InteractionType] = {
             **existing_itypes,
             **{it.name: it for it in new_itypes},

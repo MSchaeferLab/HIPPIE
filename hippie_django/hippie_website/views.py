@@ -1241,7 +1241,9 @@ def filter_guide_view(request):
 
 @require_GET
 def api_docs_view(request):
-    return render(request, "hippie_website/api.html", {})
+    return render(
+        request, "hippie_website/api.html", {"split_max_run": max_run_label()}
+    )
 
 
 @require_GET

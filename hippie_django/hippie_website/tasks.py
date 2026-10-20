@@ -240,7 +240,7 @@ def run_split_job(self, job_id: str):
             step="done",
             progress=1.0,
             zip_path=zip_path,
-            summary=summary.__dict__,
+            summary=summary.to_dict(),
             finished_at=timezone.now(),
         )
         # Only on success: nothing in here is needed once the zip exists, and a

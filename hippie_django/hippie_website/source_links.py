@@ -9,6 +9,7 @@ Used by:
   - management/commands/update_sources.py → ``Source.url`` / ``Source.description``
   - services/detail.py                    (``pair_search_url``) → per-pair link
   - services/guide.py                     (``source_info``)     → filter guide
+  - management/commands/export_downloads.py (``psi_mi_code``)   → MITAB column 13
 
 Keys are lowercased source names; matching is case-insensitive because MITAB
 emits lowercase tokens ("intact", "biogrid") while seed data uses display
@@ -98,7 +99,7 @@ def _read_registry(path: Path, mtime_ns: int) -> dict[str, dict[str, str]]:
 
 
 def load_registry(path: Path | None = None) -> dict[str, dict[str, str]]:
-    """Registry ``{key: {"url", "description", "what_it_is"}}`` read from JSON.
+    """Registry ``{key: {"url", "description", "what_it_is", "psi_mi"}}`` read from JSON.
 
     Cached per (path, mtime), so edits to the file are picked up without a restart.
     """
@@ -123,6 +124,15 @@ def source_info(name: str) -> dict[str, str]:
 def homepage_url(name: str) -> str:
     """Return the known homepage URL for a source name, or "" if unknown."""
     return (registry_entry(name) or {}).get("url", "")
+
+
+def psi_mi_code(name: str) -> str:
+    """PSI-MI source-database term (e.g. "MI:0463"), or "" if the registry has none.
+
+    The MITAB export writes it into the Source Databases column, which PSI-MI
+    TAB 2.5 requires to be a controlled-vocabulary term.
+    """
+    return (registry_entry(name) or {}).get("psi_mi", "")
 
 
 def pair_search_url(name: str, acc_a: str | None, acc_b: str | None) -> str | None:

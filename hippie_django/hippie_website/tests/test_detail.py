@@ -331,3 +331,14 @@ class SourceLinkTest(HippieTestCase):
 
         for key, entry in load_registry().items():
             self.assertTrue(entry["description"], key)
+
+    def test_shipped_registry_has_psi_mi_code_for_every_interaction_source(self):
+        """Every source the IntAct/BioGRID import yields needs a code for MITAB col 13."""
+        from ..source_links import psi_mi_code
+
+        for name in (
+            "IntAct", "UniProt", "MINT", "DIP", "matrixdb", "HPIDb", "bhf-ucl",
+            "mpidb", "I2D", "InnateDB", "mbinfo", "Molecular Connections", "NTNU",
+            "FlyBase", "biogrid",
+        ):  # fmt: skip
+            self.assertRegex(psi_mi_code(name), r"^MI:\d{4}$", name)

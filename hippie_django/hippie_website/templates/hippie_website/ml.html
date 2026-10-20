@@ -181,7 +181,7 @@
             The interface shows us some protein and interaction statistics. In this case, the resulting network contains
             5,750 proteins and 25,793 interactions.
         </p>
-        {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/filter_proximity.png" alt="Interaction filter filtering only high-confidence interactions quantified with proximity labelling technology." caption="Interaction filter filtering only proximity labelling technology. After clicking on Calculate Statistics, we obtain 25,793 interactions." %}
+        {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/filter_proximity.png" alt="Interaction filter filtering only high-confidence interactions quantified with proximity labelling technology." caption="Interaction filter keeping only high-confidence interactions detected with proximity labelling technology. After clicking on Calculate Statistics, we obtain 25,793 interactions." %}
         <p>
             Next, we click on <code class="mono">Generate Splits</code>. A run takes about 35 minutes on
             average, but the two ILPs in the pipeline are each allowed to run for up to 30 minutes on the server. The larger
@@ -191,14 +191,18 @@
             discarded edges and ensures low sequence similarity between the splits. If you want to try to save more
             edges from being discarded, you can run your own local version of the PPI splitting pipeline and set
             the limit higher. The sampling ILP mirrors the degree distribution of the positive set and ensures that there
-            are as many negative examples of self-interactions as there are positive examples. The negative datasets are
-            balanced 1:1 positive:negative ratio. Finally, a 1:10 test set is also generated to simulate a realistic
+            are as many negative examples of self-interactions as there are positive examples. The training, validation
+            and balanced test sets contain positives and negatives at a 1:1 ratio. Finally, a 1:10 test set is also generated to simulate a realistic
             scenario where negatives are randomly distributed and strongly outnumber the positives.
         </p>
         {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/pipeline_run.png" alt="Running pipeline. It tells the user what it is currently doing, in this case, partitioning the input graph with the ILP." caption="Running pipeline. It tells the user what it is currently doing, in this case, partitioning the input graph with the ILP." %}
       <p>
           When the pipeline is done, it will report the final stats of your ML splits. You can download your data with
-          <code class="mono">Download ZIP</code>. The resulting ZIP contains the <code class="mono">train.csv, val.csv, test_balanced.csv, and test_realistic.csv</code>.
+          <code class="mono">Download ZIP</code>. The resulting ZIP contains <code class="mono">train.csv</code>, <code class="mono">val.csv</code>,
+          <code class="mono">test_balanced.csv</code> and <code class="mono">test_realistic.csv</code>, plus
+          <code class="mono">sequences.fasta</code> (the sequence of every protein in the splits),
+          <code class="mono">summary.json</code> (the per-split counts) and <code class="mono">README.txt</code>
+          (the filters you applied, the counts and the pipeline commit the split was cut with).
       </p>
       {% include "hippie_website/_workflow_figure.html" with src="hippie_website/images/workflow/ML_final_output.png" alt="Final output of the ML splits including how many PPIs made it into the final splits." caption="Final output of the ML splits including how many PPIs made it into the final splits." %}
   </div>
@@ -210,7 +214,7 @@
   <div class="hippie-card" id="step-4">
     <div class="ml-step-head"><span class="ml-step-num">4</span><h3>How do I build the split with the pipeline?</h3></div>
     <p>
-      For the raw-data route we use the whole database. On the
+      For the raw-data route, you can use the whole database. On the
       <a href="{% url 'hippie_website:ml_splits' %}">ML Splits</a> page, leave every filter at its
       default (or narrow it — e.g. to proteins with a minimum expression in a specific tissue, from
       median gene-level RNA-seq of
@@ -299,7 +303,8 @@ nextflow run ../ppi-splitting-pipeline/main.nf \
     <span class="section-label section-label--inline">Load the data</span>
 <pre class="code-block">import pandas as pd
 
-splits = {name: pd.read_csv(f"results/hippie/{name}.csv")
+DATA = "hippie_split"   <span class="c"># the unzipped ZIP from step 3; for your own run: "results/hippie"</span>
+splits = {name: pd.read_csv(f"{DATA}/{name}.csv")
           for name in ["train", "val", "test_balanced", "test_realistic"]}
 train = splits["train"]
 <span class="c"># columns: protein1, protein2, label (1 = interacts, 0 = negative), score</span>
@@ -342,10 +347,11 @@ import numpy as np, torch, esm
 from Bio import SeqIO
 from sklearn.linear_model import LogisticRegression
 
-<span class="c"># the pipeline already fetched the sequences (FASTA headers are UniProt accessions)</span>
+<span class="c"># FASTA headers are UniProt accessions; the ZIP has sequences.fasta at its root</span>
 <span class="c"># (if your headers look like sp|P12345|NAME, the split below keeps just the accession)</span>
+fasta = f"{DATA}/sequences.fasta"   <span class="c"># for your own run: f"{DATA}/data/sequences.fasta"</span>
 seqs = {r.id.split("|")[1] if "|" in r.id else r.id: str(r.seq)
-        for r in SeqIO.parse("results/hippie/data/sequences.fasta", "fasta")}
+        for r in SeqIO.parse(fasta, "fasta")}
 
 model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
 batch_converter = alphabet.get_batch_converter()

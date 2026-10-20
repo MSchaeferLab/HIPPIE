@@ -34,8 +34,10 @@ from hippie_website.models import (
     NonInteraction,
     Protein,
     OrthologInteraction,
+    Source,
     Species,
 )
+from hippie_website.source_links import psi_mi_code
 from hippie_website.stats_utils import compute_quartiles
 
 MITAB_FILENAME = "HIPPIE-current.mitab.txt.gz"
@@ -119,6 +121,19 @@ def _cv_list(items: Iterable[ExperimentType | InteractionType]) -> str:
     return "|".join(parts) if parts else NULL
 
 
+def _source_db(source: Source) -> str:
+    """Source database as a PSI-MI term: ``psi-mi:"MI:0463"(biogrid)``.
+
+    The code comes from the source registry (data/sources_db.json); a source
+    the registry has no code for falls back to ``psi-mi:<name>``, like
+    ``_cv_list``.
+    """
+    code = psi_mi_code(source.name)
+    if code:
+        return _field("psi-mi", code, source.name)
+    return _field("psi-mi", source.name)
+
+
 def _protein_aliases(p: Protein) -> str:
     parts: list[str] = []
     if p.uniprot_name:
@@ -193,7 +208,7 @@ def _mitab_row(
         "|".join(_field("pubmed", str(pub.pmid)) for pub in inter.publications.all())
         or NULL
     )
-    sources = "|".join(_quote(s.name) for s in inter.sources.all()) or NULL
+    sources = "|".join(_source_db(s) for s in inter.sources.all()) or NULL
     xrefs = (
         "|".join(_field(x.source.name, x.link) for x in inter.cross_references.all())
         or NULL

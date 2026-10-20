@@ -20,7 +20,7 @@ from mcp.server import MCPServer
 from pydantic import Field
 
 from hippie_website import filter_lookup
-from hippie_website.models import Protein
+from hippie_website.models import Protein, ReleaseMeta
 from hippie_website.services import detail as detail_service
 from hippie_website.services import pairs as pairs_service
 from hippie_website.services import queries as query_service
@@ -47,15 +47,61 @@ then `get_interaction_detail` for the PMIDs and methods behind one interaction.
 Filters (sources, experiments, interaction_types, tissues) accept plain names,
 PSI-MI codes, or a category label such as "Two-hybrid & complementation" that
 stands in for every method underneath it. Call `list_filter_options` to see the
-vocabulary. Scores are comparable across the whole database; 0.63 and above is
-the commonly used high-confidence cutoff.
+vocabulary. Scores are comparable across the whole database. {confidence}
 """
+
+GET_INTERACTIONS_DOC = """\
+Find the interaction partners of one or more proteins.
+
+The total number of matches is always reported, so a capped result is
+visibly capped rather than looking complete. Scores run 0-1. {confidence}
+"""
+
+
+def confidence_note(release: ReleaseMeta | None) -> str:
+    """The confidence cutoffs of ``release``, as one sentence for the agent.
+
+    The cutoffs are the release's interaction-score median (medium) and upper
+    quartile (high), which ``hippie_update`` computes. Without a release, or
+    before its quartiles exist, the sentence names the rule without numbers.
+    """
+    if release is None or release.int_median is None or release.int_q3 is None:
+        return (
+            "The medium- and high-confidence cutoffs are the median and upper "
+            "quartile of the current release's scores."
+        )
+    label = f" in release {release.version_label}" if release.version_label else ""
+    return (
+        f"{release.int_median:.2f} is the medium- and {release.int_q3:.2f} the "
+        f"high-confidence cutoff{label} (median and upper quartile of the "
+        "release's scores)."
+    )
+
+
+def refresh_release_text() -> None:
+    """Write the current release's cutoffs into the instructions and tool docs.
+
+    Called once at startup (``asgi.lifespan``), since both texts are fixed when
+    a client connects; a new release takes effect on the next restart. A
+    database that cannot be read leaves the number-free wording in place
+    rather than keeping the service from starting.
+    """
+    try:
+        note = confidence_note(ReleaseMeta.current())
+    except Exception:
+        return
+    # The SDK exposes both texts read-only; these are the attributes it serves.
+    mcp._lowlevel_server.instructions = INSTRUCTIONS.format(confidence=note)
+    tool = mcp._tool_manager.get_tool("get_interactions")
+    if tool is not None:
+        tool.description = GET_INTERACTIONS_DOC.format(confidence=note)
+
 
 mcp = MCPServer(
     "HIPPIE",
     title="HIPPIE protein-protein interactions",
     description="Human protein-protein interaction data with confidence scores.",
-    instructions=INSTRUCTIONS,
+    instructions=INSTRUCTIONS.format(confidence=confidence_note(None)),
 )
 
 
@@ -230,7 +276,7 @@ def resolve_protein(
     }
 
 
-@mcp.tool()
+@mcp.tool(description=GET_INTERACTIONS_DOC.format(confidence=confidence_note(None)))
 @with_db
 def get_interactions(
     proteins: Annotated[
@@ -310,12 +356,8 @@ def get_interactions(
         ),
     ] = "summary",
 ) -> dict[str, object]:
-    """Find the interaction partners of one or more proteins.
-
-    The total number of matches is always reported, so a capped result is
-    visibly capped rather than looking complete. Scores run 0-1; 0.63 is the
-    commonly used high-confidence cutoff.
-    """
+    # Described by GET_INTERACTIONS_DOC, which refresh_release_text() fills
+    # with the current release's cutoffs.
     tokens = [t for t in (p.strip() for p in proteins) if t]
     if not tokens:
         return {
