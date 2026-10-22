@@ -1,4 +1,5 @@
 {% extends "hippie_website/base.html" %}
+{% load static %}
 {% block title %}Machine Learning{% endblock %}
 {% block react_cdn %}{% endblock %}
 
@@ -245,13 +246,17 @@
       best to run the pipeline on a cluster with a fitting HPC config supplied via <code class="mono">-c</code>.
       Check out <a href="https://nf-co.re/configs/" target="_blank" rel="noopener"> the nf-core configs </a> for examples. </li>
       <li>A <a href="https://www.gurobi.com/" target="_blank" rel="noopener">Gurobi</a>
-        license (free for academics) is the pipeline default. Without one, pass the flags shown below to use
-        open-source solvers instead.</li>
+        license (free for academics) is the pipeline default. The pipeline looks for
+        <code class="mono">gurobi.lic</code> in the folder you launch it from, so copy your license file
+        into <code class="mono">hippie_raw_data/</code> (or point to it with
+        <code class="mono">--gurobi_license /path/to/gurobi.lic</code>). Without a license, pass the flags
+        shown below to use open-source solvers instead.</li>
     </ul>
 <pre class="code-block"><span class="c"># 1. get the pipeline next to the unzipped raw data (sibling folders)</span>
 git clone https://github.com/bionetslab/ppi-splitting-pipeline
 unzip hippie_splits_&lt;job-id&gt;.zip -d hippie_raw_data   <span class="c"># the file you downloaded</span>
 cd hippie_raw_data
+cp /path/to/gurobi.lic .   <span class="c"># skip if you use the open-source solvers below</span>
 
 <span class="c"># 2. run it (pick the profile matching what you have installed)</span>
 nextflow run ../ppi-splitting-pipeline/main.nf \
@@ -296,88 +301,165 @@ nextflow run ../ppi-splitting-pipeline/main.nf \
   <div class="hippie-card" id="step-5" style="scroll-margin-top:80px;">
     <div class="ml-step-head"><span class="ml-step-num">5</span><h3>How do I create a model with the data?</h3></div>
     <p>
-      We build two models side by side: a <strong>classic feature-based baseline</strong> and a
-      <strong>sequence-based</strong> model. Both share the same split so the comparison is fair.
+      We build two models side by side: a <strong>cheap feature-based baseline</strong> and a
+      <strong>protein-language-model</strong> model. Both share the same split so the comparison is fair.
+      The code below is also available as a
+      <a href="{% static 'hippie_website/notebooks/hippie_ml_tutorial.ipynb' %}" download>Jupyter notebook</a>.
     </p>
 
-    <span class="section-label section-label--inline">Load the data</span>
+    <span class="section-label section-label--inline">Setup</span>
+<pre class="code-block">pip install pandas numpy scikit-learn biopython torch transformers tqdm ipywidgets matplotlib
+<span class="c"># with a GPU: install torch first as shown on pytorch.org, so you get a CUDA build.</span>
+<span class="c"># Everything also runs on a CPU, only the embedding step is slower.</span></pre>
+
+    <span class="section-label section-label--inline mt-3">Load the data and check the split</span>
 <pre class="code-block">import pandas as pd
 
 DATA = "hippie_split"   <span class="c"># the unzipped ZIP from step 3; for your own run: "results/hippie"</span>
 splits = {name: pd.read_csv(f"{DATA}/{name}.csv")
           for name in ["train", "val", "test_balanced", "test_realistic"]}
-train = splits["train"]
 <span class="c"># columns: protein1, protein2, label (1 = interacts, 0 = negative), score</span>
-print(train["label"].value_counts())</pre>
 
-    <span class="section-label section-label--inline mt-3">A — Classic baseline (scikit-learn)</span>
+<span class="c"># sanity check 1: class balance -- about 50 % positives, except test_realistic (about 9 %)</span>
+for name, df in splits.items():
+    print(f"{name:15s} {len(df):7d} pairs   positives: {df.label.mean():.1%}")
+
+<span class="c"># sanity check 2: held-out proteins that also occur in training -- should be close to 0 %</span>
+def proteins(df):
+    return set(df.protein1) | set(df.protein2)
+
+train_prots = proteins(splits["train"])
+for name in ["val", "test_balanced", "test_realistic"]:
+    prots = proteins(splits[name])
+    print(f"{name:15s} {len(prots &amp; train_prots) / len(prots):.1%} of proteins also in train")</pre>
     <p class="text-muted-sm mt-2">
-      Cheap topological features straight from the interaction network. Per the first paper under
-      <a href="#key-reading">Key Reading</a>, this kind of baseline is surprisingly hard to beat —
-      always report against it.
+      The second check shows what the pipeline's split buys you: no protein in the validation or test
+      sets was seen in training. In a random pair split this number is close to 100 %.
     </p>
-<pre class="code-block"><span class="c"># pip install scikit-learn networkx</span>
-import networkx as nx
-from sklearn.ensemble import RandomForestClassifier
 
-<span class="c"># build the graph from POSITIVE training edges only (no test leakage!)</span>
-G = nx.Graph()
-G.add_edges_from(train[train.label == 1][["protein1", "protein2"]].itertuples(index=False))
-
-def features(a, b):
-    own = int(G.has_edge(a, b))   <span class="c"># don't let a training pair count its own edge</span>
-    deg_a = G.degree(a) - own if a in G else 0
-    deg_b = G.degree(b) - own if b in G else 0
-    common = len(list(nx.common_neighbors(G, a, b))) if a in G and b in G else 0
-    return [deg_a, deg_b, deg_a * deg_b, common]
-
-def X_base(df):
-    return [features(a, b) for a, b in df[["protein1", "protein2"]].itertuples(index=False)]
-
-clf = RandomForestClassifier(n_estimators=300, n_jobs=-1, random_state=0)
-clf.fit(X_base(train), train["label"])</pre>
-
-    <span class="section-label section-label--inline mt-3">B — Sequence-based model</span>
+    <span class="section-label section-label--inline mt-3">A — Cheap baseline (scikit-learn)</span>
     <p class="text-muted-sm mt-2">
-      Embed each protein sequence with a protein language model (e.g. ESM-2), combine the pair
-      symmetrically, and train a small classifier. More expressive — and far more prone to leakage.
+      Each protein is described by its amino-acid composition and length, and a pair by the sum and
+      the absolute difference of its two proteins' vectors, so (A, B) and (B, A) look the same. These
+      features need nothing from the training network, so they also work for unseen proteins. A
+      sequence model that cannot clearly beat this has learned little beyond composition.
     </p>
-<pre class="code-block"><span class="c"># pip install torch fair-esm scikit-learn biopython</span>
-import numpy as np, torch, esm
+<pre class="code-block">import os
+
+import numpy as np
 from Bio import SeqIO
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 <span class="c"># FASTA headers are UniProt accessions; the ZIP has sequences.fasta at its root</span>
 <span class="c"># (if your headers look like sp|P12345|NAME, the split below keeps just the accession)</span>
-fasta = f"{DATA}/sequences.fasta"   <span class="c"># for your own run: f"{DATA}/data/sequences.fasta"</span>
+fasta = f"{DATA}/sequences.fasta"
+if not os.path.exists(fasta):   <span class="c"># for your own run</span>
+    fasta = f"{DATA}/data/sequences.fasta"
 seqs = {r.id.split("|")[1] if "|" in r.id else r.id: str(r.seq)
         for r in SeqIO.parse(fasta, "fasta")}
 
-model, alphabet = esm.pretrained.esm2_t12_35M_UR50D()
-batch_converter = alphabet.get_batch_converter()
-model.eval()
+def usable(df):   <span class="c"># drop pairs whose sequence is missing from the FASTA</span>
+    keep = df.protein1.isin(seqs.keys()) &amp; df.protein2.isin(seqs.keys())
+    if (~keep).any():
+        print(f"dropping {(~keep).sum()} pairs without a sequence")
+    return df[keep]
 
-def embed(seq):
-    _, _, toks = batch_converter([("p", seq[:1022])])   <span class="c"># ESM-2 context limit</span>
-    with torch.no_grad():
-        out = model(toks, repr_layers=[12])["representations"][12]
-    return out[0, 1:toks.shape[1] - 1].mean(0).numpy()   <span class="c"># mean-pooled residue embeddings</span>
+splits = {name: usable(df) for name, df in splits.items()}
+train, val = splits["train"], splits["val"]
 
-proteins = set().union(*(set(df.protein1) | set(df.protein2) for df in splits.values()))
-emb = {p: embed(seqs[p]) for p in proteins}
+AA = "ACDEFGHIKLMNPQRSTVWY"
+def composition(seq):
+    counts = np.array([seq.count(a) for a in AA], dtype=float)
+    return np.append(counts / len(seq), np.log(len(seq)))
+
+comp = {p: composition(s) for p, s in seqs.items()}
 
 <span class="c"># symmetric pair features: (A, B) and (B, A) give the same vector</span>
-def X_seq(df):
-    return np.array([np.concatenate([emb[a] + emb[b], np.abs(emb[a] - emb[b])])
+def pair_features(vec, df):
+    return np.array([np.concatenate([vec[a] + vec[b], np.abs(vec[a] - vec[b])])
                      for a, b in df[["protein1", "protein2"]].itertuples(index=False)])
 
-seq_clf = LogisticRegression(max_iter=1000).fit(X_seq(train), train["label"])
+base_clf = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000))
+base_clf.fit(pair_features(comp, train), train["label"])
+print("val AUROC baseline:",
+      roc_auc_score(val["label"], base_clf.predict_proba(pair_features(comp, val))[:, 1]))</pre>
+    <div class="hippie-note">
+      <strong>Why not network features such as node degree?</strong> Under a random split, a
+      degree-based baseline is surprisingly hard to beat (first paper under
+      <a href="#key-reading">Key Reading</a>). On this split no test protein occurs in the training
+      network, so the same baseline scores exactly 0.5. Its strength under random splits is a symptom
+      of leakage, not of biology.
+    </div>
+
+    <span class="section-label section-label--inline mt-3">B — Sequence-based model</span>
+    <p class="text-muted-sm mt-2">
+      Embed each protein sequence with a protein language model (ESM-2), combine the pair the same
+      symmetric way, and train a random forest. More expressive, and far more prone to leakage.
+      Embedding is the slow part, so it runs on a GPU when one is available, shows a progress bar, and
+      caches the result. A rerun skips it. For a whole-database split on a 12-core CPU without a GPU,
+      expect about 30 minutes for the embeddings (once) and about 8 minutes for the two random forests below.
+    </p>
+<pre class="code-block">import os
+import torch
+from sklearn.ensemble import RandomForestClassifier
+from tqdm.auto import tqdm
+from transformers import AutoModel, AutoTokenizer
+
+<span class="c"># smallest ESM-2 (8M parameters, 320-d). Bigger and usually better:</span>
+<span class="c"># facebook/esm2_t12_35M_UR50D, facebook/esm2_t33_650M_UR50D (GPU recommended)</span>
+MODEL = "facebook/esm2_t6_8M_UR50D"
+cache = f"embeddings_{MODEL.split('/')[-1]}_{DATA.strip('/').replace('/', '-')}.npz"
+
+if os.path.exists(cache):
+    emb = dict(np.load(cache))
+else:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("embedding on", device)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL)
+    model = AutoModel.from_pretrained(MODEL, add_pooling_layer=False).eval().to(device)
+
+    <span class="c"># sort by length so each batch pads as little as possible</span>
+    needed = sorted(set().union(*(proteins(df) for df in splits.values())),
+                    key=lambda p: len(seqs[p]))
+    emb, BATCH = {}, 32   <span class="c"># lower BATCH if you run out of (GPU) memory</span>
+    for i in tqdm(range(0, len(needed), BATCH), desc="ESM-2", unit="batch"):
+        batch = needed[i:i + BATCH]
+        chunk = [seqs[p][:1022] for p in batch]   <span class="c"># ESM-2 context limit</span>
+        tokens = tokenizer(chunk, return_tensors="pt", padding=True).to(device)
+        with torch.no_grad():
+            hidden = model(**tokens).last_hidden_state
+        for j, (p, s) in enumerate(zip(batch, chunk)):
+            <span class="c"># mean over the residues only: skip the start token and the padding</span>
+            emb[p] = hidden[j, 1:len(s) + 1].mean(0).cpu().numpy()
+    np.savez(cache, **emb)
+
+<span class="c"># a random forest prints no progress, so grow it in chunks of trees behind a progress bar</span>
+<span class="c"># (same forest as one fit; raise step if you have many more cores than 25)</span>
+def fit_forest(X, y, desc, n_trees=300, step=25):
+    rf = RandomForestClassifier(n_estimators=0, warm_start=True, n_jobs=-1, random_state=0)
+    for _ in tqdm(range(0, n_trees, step), desc=f"{desc} ({n_trees} trees)", unit="step"):
+        rf.n_estimators += step
+        rf.fit(X, y)
+    return rf
+
+X_train, X_val = pair_features(emb, train), pair_features(emb, val)
+seq_clf = fit_forest(X_train, train["label"], "sequence model")
 
 <span class="c"># tune hyperparameters on the validation split (never on the test sets)</span>
-val = splits["val"]
-from sklearn.metrics import roc_auc_score
-print("val AUROC  baseline:", roc_auc_score(val["label"], clf.predict_proba(X_base(val))[:, 1]),
-      " sequence:", roc_auc_score(val["label"], seq_clf.predict_proba(X_seq(val))[:, 1]))</pre>
+print("val AUROC sequence:", roc_auc_score(val["label"], seq_clf.predict_proba(X_val)[:, 1]))</pre>
+
+    <span class="section-label section-label--inline mt-3">Control: shuffled labels</span>
+    <p class="text-muted-sm mt-2">
+      Train the same model on randomly permuted labels. It cannot learn anything real, so its
+      validation AUROC must be about 0.5. If it is clearly higher, information leaks between train and
+      validation, or the evaluation has a bug.
+    </p>
+<pre class="code-block">shuffled = train["label"].sample(frac=1, random_state=0).to_numpy()
+ctrl = fit_forest(X_train, shuffled, "shuffled control")
+print("val AUROC shuffled labels:", roc_auc_score(val["label"], ctrl.predict_proba(X_val)[:, 1]))</pre>
 
     <div class="hippie-note hippie-note--warn">
       <strong>Where leakage creeps in (third paper under Key Reading, question on data
@@ -403,19 +485,51 @@ print("val AUROC  baseline:", roc_auc_score(val["label"], clf.predict_proba(X_ba
       Score both models on both held-out test sets and always compare against the baseline.
       <code class="mono">test_balanced</code> (1:1) is comparable to most published numbers;
       <code class="mono">test_realistic</code> (1:10) is closer to how a predictor is actually used,
-      and there <strong>AUPRC</strong> matters far more than AUROC.
+      and there <strong>AUPRC</strong> matters far more than AUROC. The shuffled-label control marks
+      the floor: a model that does not clearly beat it has learned nothing. In the plot, the dashed
+      lines show what a random guess scores (AUROC 0.5; AUPRC equals the share of positives).
     </p>
-<pre class="code-block">from sklearn.metrics import roc_auc_score, average_precision_score
+<pre class="code-block">import matplotlib.pyplot as plt
+from sklearn.metrics import average_precision_score
 
-for test_name in ["test_balanced", "test_realistic"]:
+models = {   <span class="c"># name -> function that scores a table of pairs</span>
+    "baseline": lambda df: base_clf.predict_proba(pair_features(comp, df))[:, 1],
+    "sequence": lambda df: seq_clf.predict_proba(pair_features(emb, df))[:, 1],
+    "shuffled": lambda df: ctrl.predict_proba(pair_features(emb, df))[:, 1],
+}
+test_sets = ["test_balanced", "test_realistic"]
+
+rows = []
+for test_name in test_sets:
     test = splits[test_name]
     y = test["label"].to_numpy()
-    for name, proba in [
-        ("baseline", clf.predict_proba(X_base(test))[:, 1]),
-        ("sequence", seq_clf.predict_proba(X_seq(test))[:, 1]),
-    ]:
-        print(f"{test_name:15s} {name:9s}  AUROC={roc_auc_score(y, proba):.3f}  "
-              f"AUPRC={average_precision_score(y, proba):.3f}")</pre>
+    for name, score in models.items():
+        proba = score(test)
+        rows.append({"test set": test_name, "model": name,
+                     "AUROC": roc_auc_score(y, proba),
+                     "AUPRC": average_precision_score(y, proba)})
+results = pd.DataFrame(rows)
+print(results.round(3).to_string(index=False))
+
+<span class="c"># overview plot: one panel per metric, one bar per model</span>
+colors = ["#2a78d6", "#eb6834", "#1baf7a"]   <span class="c"># baseline, sequence, shuffled</span>
+fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+for ax, metric in zip(axes, ["AUROC", "AUPRC"]):
+    table = results.pivot(index="test set", columns="model", values=metric).loc[test_sets, list(models)]
+    table.plot.bar(ax=ax, rot=0, width=0.75, color=colors, edgecolor="white", linewidth=2, legend=False)
+    for x, test_name in enumerate(test_sets):   <span class="c"># random-guess level per test set</span>
+        chance = 0.5 if metric == "AUROC" else splits[test_name]["label"].mean()
+        ax.hlines(chance, x - 0.4, x + 0.4, colors="#555555", linestyles="--", linewidth=1.5,
+                  label="random guess" if x == 0 else None)
+    ax.set(title=metric, xlabel="", ylim=(0, 1))
+    ax.grid(axis="y", alpha=0.3)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
+axes[0].set_ylabel("score")
+fig.legend(*axes[1].get_legend_handles_labels(), loc="upper center", ncol=4, frameon=False)
+fig.tight_layout(rect=(0, 0, 1, 0.9))
+fig.savefig("evaluation.png", dpi=150)
+plt.show()</pre>
     <ul style="font-size:.9rem; line-height:1.8;">
       <li><strong>Beat the baseline, or report why not.</strong> If the sequence model only wins under
         a random split but ties the baseline under a similarity-aware split, the "win" was leakage.</li>
