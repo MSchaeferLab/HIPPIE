@@ -1,4 +1,4 @@
-# HIPPIE_FACELIFT
+# HIPPIE 3.0
 
 ## Setup software
 
@@ -510,3 +510,10 @@ stale schema. The `apache`
 container enables `proxy`, `proxy_http`, `headers`, `rewrite`, and
 `expires` modules and forwards everything except `/static/` and `/media/`
 to `web:8000`.
+
+
+## Reproducibility
+
+- The code version associated with the Publication LINK is archived here: https://doi.org/10.6084/m9.figshare.34748235
+
+- For replication for most supplemental graphs and analysis code and data is archived here: https://doi.org/10.6084/m9.figshare.34791249
